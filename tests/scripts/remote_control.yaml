@@ -1,0 +1,64 @@
+# 遥控操作测试
+# 验证: 连接 → STARTDT → 单命令选择 → 单命令执行 → 断开
+
+name: remote_control
+description: "遥控操作（选择-执行）测试"
+version: "1.0"
+tags: [control, master, command]
+
+config:
+  role: master
+  timeout: 30
+  connection:
+    host: "127.0.0.1"
+    port: 2404
+    common_addr: 1
+
+steps:
+  - action: connect
+    description: "建立连接"
+
+  - action: wait_state
+    description: "等待运行态"
+    params: { state: running, timeout: 10 }
+
+  # 单命令选择
+  - action: single_command
+    description: "单命令选择 IOA=1 ON"
+    params:
+      ioa: 1
+      state: true
+      select: true
+    assert:
+      - type: frame_count
+        params: { direction: tx, frame_type: I, min: 1 }
+
+  - action: wait
+    description: "等待选择确认"
+    params: { seconds: 1 }
+
+  # 单命令执行
+  - action: single_command
+    description: "单命令执行 IOA=1 ON"
+    params:
+      ioa: 1
+      state: true
+      select: false
+
+  - action: wait
+    description: "等待执行确认"
+    params: { seconds: 1 }
+
+  # 双命令
+  - action: double_command
+    description: "双命令执行 IOA=2 合"
+    params:
+      ioa: 2
+      state: 2
+
+  - action: wait
+    description: "等待确认"
+    params: { seconds: 1 }
+
+  - action: disconnect
+    description: "断开连接"

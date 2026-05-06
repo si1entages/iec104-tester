@@ -1,0 +1,57 @@
+# 定时器与流控测试
+# 验证: t3 空闲测试帧机制、S帧确认机制
+
+name: timer_flow_control
+description: "定时器和流控机制测试"
+version: "1.0"
+tags: [protocol, master, timer, flow-control]
+
+config:
+  role: master
+  timeout: 60
+  connection:
+    host: "127.0.0.1"
+    port: 2404
+  timers:
+    t0: 10
+    t1: 10
+    t2: 3      # 短 t2 以便快速触发 S 帧
+    t3: 5      # 短 t3 以便快速触发 TESTFR
+
+steps:
+  - action: connect
+    description: "建立连接"
+
+  - action: wait_state
+    description: "等待运行态"
+    params: { state: running, timeout: 10 }
+
+  # 清空缓冲，开始观察
+  - action: clear_buffers
+    description: "清空帧缓冲"
+
+  # 等待 t3 超时触发 TESTFR
+  - action: wait
+    description: "等待 t3 超时 (5s)，应触发 TESTFR ACT"
+    params: { seconds: 8 }
+
+  # 验证发送了 TESTFR
+  - action: log
+    description: "检查 TESTFR 帧"
+    params:
+      message: "应已收到 TESTFR ACT 并回复 CON"
+
+  # 验证 U 帧（TESTFR）
+  - action: wait_frames
+    description: "验证有 U 帧交互"
+    params:
+      direction: tx
+      count: 1
+      frame_type: U
+      timeout: 3
+    assert:
+      - type: frame_count
+        params: { direction: tx, frame_type: U, min: 1 }
+
+  - action: disconnect
+    description: "断开连接"

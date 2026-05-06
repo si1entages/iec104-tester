@@ -1,0 +1,63 @@
+# 断线重连测试
+# 验证: 连接断开后自动重连，状态恢复
+
+name: reconnect
+description: "断线自动重连测试"
+version: "1.0"
+tags: [reliability, master, reconnect]
+
+config:
+  role: master
+  timeout: 45
+  connection:
+    host: "127.0.0.1"
+    port: 2404
+    reconnect: true
+    reconnect_interval: 3
+
+steps:
+  - action: connect
+    description: "首次连接"
+
+  - action: wait_state
+    description: "等待运行态"
+    params: { state: running, timeout: 10 }
+
+  - action: general_interrogation
+    description: "首次总召验证连通性"
+
+  - action: wait
+    description: "等待总召响应"
+    params: { seconds: 2 }
+
+  # 断开连接
+  - action: disconnect
+    description: "断开连接"
+
+  - action: wait
+    description: "等待重连间隔"
+    params: { seconds: 5 }
+
+  # 重新连接
+  - action: connect
+    description: "重新建立连接"
+
+  - action: wait_state
+    description: "等待重连后进入运行态"
+    params: { state: running, timeout: 15 }
+
+  # 重连后再次总召
+  - action: general_interrogation
+    description: "重连后总召"
+
+  - action: wait
+    description: "等待响应"
+    params: { seconds: 2 }
+
+  - action: log
+    description: "重连测试完成"
+    params:
+      message: "重连后通信正常"
+
+  - action: disconnect
+    description: "断开连接"

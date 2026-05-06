@@ -1,0 +1,44 @@
+/* IEC 60870-5-104 Tester — 自定义样式补充 */
+
+/* 命令栏按钮样式 */
+QPushButton#primaryButton {
+    min-width: 100px;
+    font-size: 13px;
+}
+QPushButton#dangerButton {
+    min-width: 80px;
+}
+
+/* 状态指示灯 */
+StatusIndicator {
+    border-radius: 8px;
+    min-width: 16px;
+    max-width: 16px;
+    min-height: 16px;
+    max-height: 16px;
+}
+StatusIndicator[status="connected"] {
+    background-color: #a6e3a1;
+}
+StatusIndicator[status="disconnected"] {
+    background-color: #f38ba8;
+}
+StatusIndicator[status="warning"] {
+    background-color: #f9e2af;
+}
+
+/* 表格行高优化 */
+QTableView {
+    gridline-color: rgba(49, 50, 68, 0.5);
+}
+QTableView::item {
+    padding: 2px 4px;
+}
+QTableView::item:selected {
+    background-color: rgba(137, 180, 250, 0.3);
+}
+
+/* HEX 查看器行间距 */
+HexViewer QTextEdit {
+    line-height: 1.4;
+}

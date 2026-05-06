@@ -1,0 +1,51 @@
+# IEC 60870-5-104 Tester — 配置模板
+# 复制此文件并重命名为 config.yaml 后修改
+
+mode: master  # master / slave
+
+connection:
+  host: "127.0.0.1"
+  port: 2404
+  common_addr: 1
+  reconnect: true
+  reconnect_interval: 5.0
+  max_connections: 16
+
+timers:
+  t0: 30.0    # 连接建立超时
+  t1: 15.0    # 发送确认超时
+  t2: 10.0    # 无数据确认超时
+  t3: 20.0    # 空闲测试超时
+
+flow_control:
+  k: 12       # 未确认I帧上限
+  w: 8        # 确认触发阈值
+
+master:
+  auto_start: true       # 连接后自动 STARTDT
+  auto_gi: true          # STARTDT 后自动总召唤
+  auto_clock_sync: false # 连接后自动时钟同步
+
+slave:
+  spontaneous_enabled: true   # 变化数据自动上送
+  simulation_enabled: false   # 启动时自动开始模拟
+  yx_interval: 5.0            # 遥信模拟间隔(秒)
+  yc_interval: 2.0            # 遥测模拟间隔(秒)
+  yx_change_rate: 0.1         # 遥信变化概率
+  yc_change_range: 0.05       # 遥测波动范围(比例)
+
+display:
+  theme: dark             # dark / light
+  language: zh
+  max_log_lines: 10000
+  hex_view_bytes_per_line: 16
+  table_page_size: 1000
+  refresh_interval_ms: 500
+
+point_table:
+  file: ""                # 点表文件路径，留空则自动生成
+  auto_generate: true
+  yx_count: 100
+  yc_count: 50
+  yk_count: 20
+  ym_count: 10

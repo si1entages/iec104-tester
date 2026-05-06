@@ -106,6 +106,9 @@ class MasterEngine:
         # 定时任务调度器
         self._scheduler = TaskScheduler()
 
+        # 报文录制器
+        self._recorder = None
+
         # TCP 客户端
         self._client = TCPClient(
             host=host,
@@ -166,6 +169,10 @@ class MasterEngine:
     def set_raw_frame_callback(self, callback: Callable[[bytes, str], None]) -> None:
         """设置原始帧回调 (data, direction: 'rx'/'tx')."""
         self._raw_frame_callback = callback
+
+    def set_packet_recorder(self, recorder) -> None:
+        """设置报文录制器."""
+        self._recorder = recorder
 
     # ── 生命周期 ──────────────────────────────────────────────────
 
@@ -396,6 +403,10 @@ class MasterEngine:
                 self._raw_frame_callback(frame, "rx")
             except Exception:
                 pass
+
+        # 报文录制
+        if self._recorder:
+            self._recorder.record_frame(frame, direction="rx")
 
         self._rx_buffer.append((time.monotonic(), frame))
 
@@ -635,6 +646,10 @@ class MasterEngine:
                 self._raw_frame_callback(frame, "tx")
             except Exception:
                 pass
+
+        # 报文录制
+        if self._recorder:
+            self._recorder.record_frame(frame, direction="tx")
 
         self._tx_buffer.append((time.monotonic(), frame))
         self._state_machine.on_any_frame_sent()

@@ -122,6 +122,9 @@ class SlaveEngine:
         self._event_callback: Optional[EventCallback] = None
         self._raw_frame_callback: Optional[Callable[[bytes, str, str], None]] = None
 
+        # 报文录制器
+        self._recorder = None
+
         # 模拟任务
         self._simulation_task: Optional[asyncio.Task] = None
         self._simulation_running = False
@@ -156,6 +159,10 @@ class SlaveEngine:
     def set_raw_frame_callback(self, callback: Callable[[bytes, str, str], None]) -> None:
         """设置原始帧回调 (data, direction, client_id)."""
         self._raw_frame_callback = callback
+
+    def set_packet_recorder(self, recorder) -> None:
+        """设置报文录制器."""
+        self._recorder = recorder
 
     # ── 生命周期 ──────────────────────────────────────────────────
 
@@ -211,6 +218,10 @@ class SlaveEngine:
                 self._raw_frame_callback(frame, "rx", conn_id)
             except Exception:
                 pass
+
+        # 报文录制
+        if self._recorder:
+            self._recorder.record_frame(frame, direction="rx", metadata={"client_id": conn_id})
 
         self._rx_buffer.append((time.monotonic(), frame, conn_id))
 
@@ -684,6 +695,10 @@ class SlaveEngine:
                     self._raw_frame_callback(frame, "tx", state.conn.name)
                 except Exception:
                     pass
+
+            # 报文录制
+            if self._recorder:
+                self._recorder.record_frame(frame, direction="tx", metadata={"client_id": state.conn.name})
 
             self._tx_buffer.append((time.monotonic(), frame, state.conn.name))
             state.state_machine.on_any_frame_sent()

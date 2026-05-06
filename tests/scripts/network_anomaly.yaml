@@ -1,0 +1,114 @@
+# 网络异常模拟测试
+# 验证: 在丢包/延迟/损坏条件下协议的鲁棒性
+
+name: network_anomaly
+description: "网络异常模拟 — 丢包、延迟、损坏条件下协议鲁棒性测试"
+version: "1.0"
+tags: [simulation, master, network, robustness]
+
+config:
+  role: master
+  timeout: 60
+  connection:
+    host: "127.0.0.1"
+    port: 2404
+  timers:
+    t1: 20    # 增大超时以适应延迟
+    t3: 30
+
+steps:
+  # 正常连接
+  - action: connect
+    description: "建立连接"
+
+  - action: wait_state
+    description: "等待运行态"
+    params: { state: running, timeout: 15 }
+
+  # 正常总召验证基线
+  - action: general_interrogation
+    description: "正常条件下的总召 (基线)"
+
+  - action: wait
+    description: "等待总召完成"
+    params: { seconds: 3 }
+
+  # 应用网络异常
+  - action: apply_network_condition
+    description: "应用丢包+延迟+损坏"
+    params:
+      loss_rate: 0.1
+      delay_ms: 50
+      delay_variance_ms: 30
+      corrupt_rate: 0.05
+
+  - action: log
+    description: "记录异常条件"
+    params:
+      message: "已应用: 丢包10%, 延迟50ms±30ms, 损坏5%"
+
+  # 异常条件下的总召
+  - action: clear_buffers
+    description: "清空缓冲"
+
+  - action: general_interrogation
+    description: "异常条件下的总召"
+
+  - action: wait
+    description: "等待响应 (可能因丢包需要更长时间)"
+    params: { seconds: 5 }
+
+  - action: log
+    description: "记录结果"
+    params:
+      message: "异常条件下总召完成，检查帧统计"
+
+  # 增大丢包率
+  - action: apply_network_condition
+    description: "增大丢包率至 30%"
+    params:
+      loss_rate: 0.3
+      delay_ms: 100
+
+  - action: clear_buffers
+    description: "清空缓冲"
+
+  - action: general_interrogation
+    description: "高丢包条件下的总召"
+
+  - action: wait
+    description: "等待"
+    params: { seconds: 8 }
+
+  # 移除异常
+  - action: remove_network_condition
+    description: "恢复正常网络"
+
+  # 恢复后验证
+  - action: clear_buffers
+    description: "清空缓冲"
+
+  - action: general_interrogation
+    description: "恢复后的总召验证"
+
+  - action: wait
+    description: "等待"
+    params: { seconds: 3 }
+
+  # 断线测试
+  - action: apply_network_condition
+    description: "应用间歇断线"
+    params:
+      disconnect_rate: 0.1
+      disconnect_duration_s: 3
+
+  - action: wait
+    description: "观察断线重连行为"
+    params: { seconds: 15 }
+
+  - action: remove_network_condition
+    description: "移除异常"
+
+  # 清理
+  - action: disconnect
+    description: "断开连接"

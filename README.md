@@ -1,237 +1,293 @@
-# IEC 60870-5-104 协议测试工具
+<p align="center">
+  <img src="resources/icon.svg" width="128" height="128" alt="IEC 104 Tester Logo">
+</p>
 
-工业级 IEC 60870-5-104 通信协议测试软件，支持主站（Master）和子站（Slave）双模式。
+<h1 align="center">IEC 60870-5-104 Tester</h1>
 
-## 功能特性
+<p align="center">
+  <a href="README.md">English</a> | <a href="README_zh.md">中文</a>
+</p>
 
-### 协议实现（完整覆盖 IEC 60870-5-104）
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/Qt-6-41CD52?logo=qt&logoColor=white" alt="Qt 6">
+  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
+  <img src="https://img.shields.io/badge/IEC--104-Complete-brightgreen.svg" alt="IEC 104">
+</p>
 
-- **APCI 层**: I帧/S帧/U帧 完整编解码
-- **ASDU 层**: 40+ 类型标识完整支持
-- **状态机**: STARTDT/STOPDT/TESTFR 全生命周期
-- **流控**: k-w 滑动窗口机制
-- **定时器**: t0/t1/t2/t3 四级超时管理
-- **时标**: CP24Time2a / CP56Time2a 编解码
-- **品质描述词**: OV/BL/NT/IV 完整解析
+---
 
-### 支持的 ASDU 类型
+A full-featured IEC 60870-5-104 protocol testing tool with **Master** and **Slave** dual-mode support, real-time data monitoring, packet capture/replay, network anomaly simulation, automated test scripting, and a modern Qt-based GUI.
 
-| 方向 | 类型 | 说明 |
-|------|------|------|
-| 监控 | M_SP_NA_1/TB_1 | 单点遥信（带/不带时标） |
-| 监控 | M_DP_NA_1/TB_1 | 双点遥信 |
-| 监控 | M_ME_NA_1/TD_1 | 归一化遥测 |
-| 监控 | M_ME_NB_1/TE_1 | 标度化遥测 |
-| 监控 | M_ME_NC_1/TF_1 | 短浮点遥测 |
-| 监控 | M_IT_NA_1/TB_1 | 累计量/电度 |
-| 监控 | M_ST_NA_1/TB_1 | 步位置信息 |
-| 监控 | M_BO_NA_1/TB_1 | 32比特串 |
-| 控制 | C_SC_NA_1 | 单命令（遥控） |
-| 控制 | C_DC_NA_1 | 双命令（遥控） |
-| 控制 | C_RC_NA_1 | 升降命令 |
-| 控制 | C_SE_NA_1/NB_1/NC_1 | 设点命令（遥调） |
-| 系统 | C_IC_NA_1 | 总召唤/组召唤 |
-| 系统 | C_CI_NA_1 | 累计量召唤 |
-| 系统 | C_CS_NA_1 | 时钟同步 |
-| 系统 | C_RP_NA_1 | 复位进程 |
-| 系统 | C_TS_NA_1/TA_1 | 测试命令 |
-| 参数 | P_ME_NA_1/NB_1/NC_1 | 参数命令 |
-| 文件 | F_FR/SR/SC/LS/AF/SG/DR | 文件传输 |
+## ✨ Features
 
-### GUI 功能
+### Protocol
 
-- **高性能表格**: 虚拟滚动，支持 10 万+ 数据点
-- **实时刷新**: 可配置刷新频率（默认 500ms）
-- **报文查看器**: HEX + 协议解析，颜色区分收发方向
-- **日志系统**: 分级过滤，自动滚动
-- **状态面板**: 连接状态/序列号/定时器/通信统计
-- **深色/浅色主题**: Catppuccin 风格配色
+- **Full IEC 60870-5-104 coverage** — 59 ASDU type identifiers
+- **APCI layer** — I/S/U frame encode/decode
+- **Flow control** — k-w sliding window
+- **Timers** — t0/t1/t2/t3 four-level timeout management
+- **State machine** — STARTDT/STOPDT/TESTFR full lifecycle
+- **Timestamps** — CP24Time2a / CP56Time2a
+- **Quality descriptors** — OV/BL/NT/IV
 
-### 主站功能
+### Master Station
 
-- 连接管理（STARTDT/STOPDT）
-- 总召唤 / 组召唤（1-16组）
-- 累计量召唤
-- 时钟同步
-- 复位进程
-- 单命令/双命令（选择-执行）
-- 设点命令（归一化/标度化/短浮点）
-- 断线自动重连
-- 自动总召唤
+- Connection management (STARTDT/STOPDT)
+- General / group interrogation (1–23 groups)
+- Counter interrogation, clock sync, process reset
+- Single / double command (select-before-operate)
+- Setpoint commands (normalized / scaled / short float)
+- Auto-reconnect
 
-### 子站功能
+### Slave Station
 
-- TCP 服务端（多客户端）
-- 响应总召唤/组召唤
-- 响应时钟同步
-- 响应遥控/遥调命令
-- 自发上送变化数据（突发）
-- SOE 事件上送
-- 数据模拟器（手动/自动）
-- 点表管理（YAML 导入导出）
+- TCP server (multi-client)
+- Responds to all system commands
+- Spontaneous data upload, SOE event reporting
+- Data simulator (manual / random / scripted)
+- Point table management (YAML import/export)
 
-## 安装
+### GUI
+
+- **High-performance tables** — virtual scrolling, 100k+ data points
+- **Packet viewer** — HEX + protocol decode, color-coded RX/TX
+- **Dark / Light theme** — Catppuccin-inspired
+
+### Advanced
+
+- **📡 Packet Capture/Replay** — Record sessions to `.i104`/`.json`, replay with speed control
+- **🔧 Network Anomaly Simulation** — Delay, loss, corruption, duplication, reorder, disconnect
+- **🧪 Automated Test Scripts** — YAML-driven test sequences with assertions
+- **📊 Analysis** — Frame statistics, anomaly detection, protocol decode
+
+## 🚀 Quick Start
 
 ```bash
-# 基础依赖
 pip install PySide6 PyYAML
 
-# 开发依赖
-pip install pytest pytest-asyncio
-```
-
-## 运行
-
-```bash
-# 主站模式
-python app.py --mode master --host 127.0.0.1 --port 2404
-
-# 子站模式
+# Terminal 1 — Start slave (server)
 python app.py --mode slave --port 2404
 
-# 使用配置文件
-python app.py --config configs/master_config.yaml
-
-# 使用自定义点表
-python app.py --mode slave --point-table configs/demo_points.yaml
-
-# 调试模式
-python app.py --mode master --log-level DEBUG
+# Terminal 2 — Start master (client)
+python app.py --mode master --host 127.0.0.1 --port 2404
 ```
 
-## 命令行参数
+## 📦 Installation
 
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `--mode` | 运行模式 (master/slave) | master |
-| `--config` | 配置文件路径 (YAML) | - |
-| `--host` | 连接地址 | 127.0.0.1 |
-| `--port` | 端口号 | 2404 |
-| `--log-level` | 日志级别 | INFO |
-| `--log-file` | 日志文件路径 | - |
-| `--point-table` | 点表文件路径 | - |
+```bash
+git clone https://github.com/yourname/iec104-tester.git
+cd iec104-tester
+pip install PySide6 PyYAML
+```
 
-## 项目结构
+## 💻 Usage
+
+```bash
+# Master mode
+python app.py --mode master --host 192.168.1.100 --port 2404
+
+# Slave mode with custom point table
+python app.py --mode slave --point-table configs/demo_points.yaml
+
+# CLI mode (no GUI)
+python app.py --mode slave --no-gui --log-level DEBUG
+
+# Run automated test scripts
+python run_tests.py tests/scripts/
+
+# Packet capture
+python capture_tool.py record --mode master --host 127.0.0.1 -o session.i104
+python capture_tool.py play session.i104 --speed 2.0
+python capture_tool.py analyze session.i104
+
+# Network anomaly simulation
+python sim_tool.py --preset poor_wifi --mode master --host 127.0.0.1
+python sim_tool.py --loss 0.1 --delay 50 --mode master
+```
+
+### Arguments
+
+| Argument | Description | Default |
+|----------|-------------|---------|
+| `--mode` | `master` or `slave` | `master` |
+| `--host` | Remote host address | `127.0.0.1` |
+| `--port` | TCP port | `2404` |
+| `--config` | YAML config file | — |
+| `--point-table` | Point table YAML file | — |
+| `--no-gui` | Run without GUI | `false` |
+| `--test` | Run test script (YAML file or dir) | — |
+| `--log-level` | `DEBUG` / `INFO` / `WARNING` / `ERROR` | `INFO` |
+
+## ⚙️ Configuration
+
+```bash
+cp resources/config_template.yaml config.yaml
+```
+
+```yaml
+mode: master
+connection:
+  host: "192.168.1.100"
+  port: 2404
+  common_addr: 1
+  reconnect: true
+timers:
+  t0: 30.0    # Connection timeout
+  t1: 15.0    # Send confirmation timeout
+  t2: 10.0    # Idle acknowledgment timeout
+  t3: 20.0    # Idle test timeout
+flow_control:
+  k: 12       # Max unacknowledged I-frames
+  w: 8        # Acknowledgment trigger threshold
+```
+
+## 🧪 Automated Test Scripts
+
+```bash
+# Run single script
+python run_tests.py tests/scripts/basic_connection_gi.yaml
+
+# Run all scripts
+python run_tests.py tests/scripts/ -v
+
+# Script format (YAML)
+```
+
+```yaml
+name: basic_test
+description: "Basic connection and GI test"
+config:
+  role: master
+  timeout: 30
+  connection: { host: "127.0.0.1", port: 2404 }
+
+steps:
+  - action: connect
+    assert:
+      - type: state
+        params: { expected: "connected" }
+
+  - action: wait_state
+    params: { state: running, timeout: 10 }
+
+  - action: general_interrogation
+    assert:
+      - type: frame_count
+        params: { direction: tx, frame_type: I, min: 1 }
+
+  - action: disconnect
+```
+
+## 📡 Packet Capture & Replay
+
+```bash
+# Record
+python capture_tool.py record --mode master --host 127.0.0.1 -o session.i104
+
+# Replay (original speed)
+python capture_tool.py play session.i104
+
+# Replay (2x speed)
+python capture_tool.py play session.i104 --speed 2.0
+
+# Step mode
+python capture_tool.py play session.i104 --step
+
+# Analyze
+python capture_tool.py analyze session.i104
+
+# Show frames
+python capture_tool.py show session.i104 --limit 100 --filter "frame_type=I"
+
+# Convert format
+python capture_tool.py convert session.i104 -o session.json
+```
+
+## 🔧 Network Anomaly Simulation
+
+```bash
+# Presets
+python sim_tool.py --preset poor_wifi      # WiFi with packet loss
+python sim_tool.py --preset congested      # Network congestion
+python sim_tool.py --preset satellite      # High-latency satellite link
+python sim_tool.py --preset unreliable     # High packet loss
+python sim_tool.py --preset stress         # Combined stress test
+
+# Custom conditions
+python sim_tool.py --loss 0.1 --delay 50 --corrupt 0.05 --mode master
+```
+
+| Preset | Description |
+|--------|-------------|
+| `clean` | Normal network |
+| `poor_wifi` | Delay 30ms±20ms, 5% loss |
+| `congested` | Delay 100ms±50ms, 10% loss |
+| `satellite` | Delay 500ms±100ms, 2% loss |
+| `unreliable` | 30% loss, 5% corruption |
+| `intermittent` | 5% disconnect chance (5s) |
+| `slow_link` | 1KB/s bandwidth limit |
+| `stress` | All anomalies combined |
+
+## 🏗 Architecture
 
 ```
 iec104-tester/
-├── app.py                      # 应用入口
-├── pyproject.toml              # 项目配置
-├── core/                       # 协议核心层（无GUI依赖）
-│   ├── protocol/               # IEC 60870-5-104 协议
-│   │   ├── constants.py        # 协议常量
-│   │   ├── types.py            # 类型定义/枚举
-│   │   ├── apci.py             # APCI 帧编解码
-│   │   ├── asdu.py             # ASDU 报文编解码
-│   │   ├── sequence.py         # 序列号/流控管理
-│   │   └── state_machine.py    # 连接状态机
-│   ├── transport/              # TCP 异步传输层
-│   │   └── connection.py       # Server/Client/连接管理
-│   ├── engine/                 # 协议引擎
-│   │   ├── master.py           # 主站引擎
-│   │   └── slave.py            # 子站引擎
-│   ├── data/                   # 数据模型
-│   │   ├── point_table.py      # 点表管理
-│   │   └── data_store.py       # 实时数据库
-│   └── config.py               # 配置管理
-├── gui/                        # PySide6 界面层
-│   ├── main_window.py          # 主窗口
-│   ├── themes.py               # 深色/浅色主题
-│   ├── widgets/                # 通用控件
-│   │   ├── point_table.py      # 虚拟滚动表格
-│   │   ├── hex_viewer.py       # 报文查看器
-│   │   └── status_panel.py     # 状态/日志面板
-│   ├── master/                 # 主站界面
-│   │   └── control_panel.py    # 命令栏/控制面板
-│   └── slave/                  # 子站界面
-│       └── sim_panel.py        # 数据模拟面板
-├── tests/                      # 测试
-│   └── test_protocol.py        # 协议一致性测试
-├── configs/                    # 配置文件
-│   ├── master_config.yaml      # 主站配置
-│   ├── slave_config.yaml       # 子站配置
-│   └── demo_points.yaml        # 演示点表
-└── build/                      # 打包脚本
-    └── build.py                # PyInstaller 打包
+├── app.py                          # Entry point
+├── run_tests.py                    # Test script runner CLI
+├── capture_tool.py                 # Packet capture/replay CLI
+├── sim_tool.py                     # Network simulation CLI
+├── core/                           # Protocol core (no GUI dependency)
+│   ├── protocol/                   # IEC 60870-5-104 implementation
+│   ├── transport/                  # TCP async transport
+│   ├── engine/                     # Master / Slave engines
+│   ├── data/                       # Data models (point table, realtime DB)
+│   ├── testing/                    # Automated test script engine
+│   ├── capture/                    # Packet capture/replay engine
+│   ├── simulation/                 # Network anomaly simulation
+│   └── config.py                   # Configuration management
+├── gui/                            # PySide6 GUI layer
+│   ├── main_window.py              # Main window
+│   ├── themes.py                   # Dark / Light themes
+│   ├── widgets/                    # Reusable widgets
+│   ├── master/                     # Master UI
+│   └── slave/                      # Slave UI
+├── configs/                        # Preset configurations
+├── resources/                      # Icons, styles, templates
+├── tests/                          # Protocol tests + test scripts
+└── build/                          # Build scripts (Windows/Linux)
 ```
 
-## 打包
+## 📊 Performance
 
-### Windows (exe)
+| Metric | Value |
+|--------|-------|
+| Table rendering | 100k rows, virtual scroll |
+| Refresh cycle | 500ms (configurable) |
+| Packet processing | asyncio non-blocking I/O |
+| Memory | Ring buffer, auto-cleanup |
+| Connections | Up to 16 concurrent |
 
-```bash
-pip install pyinstaller
-python build/build.py
-# 输出: dist/IEC104Tester/
-```
+## 🤝 Contributing
 
-### Linux (可执行文件)
+1. Fork this repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-```bash
-pip install pyinstaller
-python build/build.py
-# 输出: dist/iec104-tester
-```
+## 📄 License
 
-## 协议测试
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
 
-```bash
-python tests/test_protocol.py
-```
+## 🙏 Acknowledgments
 
-测试覆盖:
-- APCI 帧编解码 (U/S/I)
-- 所有信息对象类型
-- CP56Time2a 时标
-- ASDU 报文构造/解析
-- 序列号管理
-- 连接状态机
-- 完整 APDU 往返
+- [IEC 60870-5-104](https://webstore.iec.ch/en/publication/6270) — International standard for telecontrol protocols
+- [PySide6](https://wiki.qt.io/Qt_for_Python) — Qt for Python
+- [Catppuccin](https://github.com/catppuccin/catppuccin) — Color palette inspiration
 
-## 点表配置
+---
 
-YAML 格式:
-
-```yaml
-station_name: "My Substation"
-common_addr: 1
-
-yx:
-  - ioa: 1
-    name: "开关位置"
-    group: 1
-    type: single
-
-yc:
-  - ioa: 1001
-    name: "电压"
-    group: 1
-    type: short_float
-    unit: "kV"
-
-yk:
-  - ioa: 2001
-    name: "开关控制"
-    type: single
-    sbo: true
-
-ym:
-  - ioa: 3001
-    name: "电度"
-    group: 1
-```
-
-## 性能指标
-
-- 表格渲染: 10万行虚拟滚动，500ms 刷新周期
-- 报文处理: asyncio 异步 I/O，无阻塞
-- 内存占用: 环形缓冲区，自动清理旧数据
-- 连接支持: 单实例最多 16 个并发连接
-
-## 技术栈
-
-- Python 3.10+
-- PySide6 (Qt 6)
-- asyncio (TCP 异步通信)
-- PyYAML (配置管理)
-- PyInstaller (打包)
+<p align="center">
+  Made with ⚡ for the power systems community
+</p>

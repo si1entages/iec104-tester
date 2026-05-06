@@ -64,6 +64,10 @@ def main():
         "--history-db", type=str, default=None,
         help="历史数据库路径 (SQLite)"
     )
+    parser.add_argument(
+        "--test", type=str, default=None,
+        help="运行自动化测试脚本 (YAML 文件或目录)"
+    )
 
     args = parser.parse_args()
 
@@ -126,6 +130,12 @@ def main():
         history_db.open()
         logger.info(f"History DB: {args.history_db}")
 
+    # 自动化测试脚本模式
+    if args.test:
+        logger.info(f"Running test script: {args.test}")
+        _run_tests(args.test, logger)
+        return
+
     # 无GUI模式
     if args.no_gui:
         logger.info("Running in CLI mode (no GUI)")
@@ -171,6 +181,55 @@ def main():
     if history_db:
         history_db.close()
 
+    sys.exit(exit_code)
+
+
+def _run_tests(script_path: str, logger):
+    """运行自动化测试脚本."""
+    import asyncio
+    from core.testing import TestRunner, ReportGenerator
+
+    async def run():
+        runner = TestRunner(report_dir="test_reports")
+
+        target = Path(script_path)
+        if target.is_dir():
+            scripts = runner.load_directory(target)
+            logger.info(f"Loaded {len(scripts)} scripts from {target}")
+        elif target.is_file():
+            scripts = [runner.load_script(target)]
+        else:
+            logger.error(f"Not found: {script_path}")
+            return 2
+
+        def on_step(step_result):
+            icon = {"passed": "✅", "failed": "❌", "error": "💥", "skipped": "⏭"}.get(step_result.status.value, "?")
+            logger.info(f"  {icon} Step {step_result.step_index}: [{step_result.action}] {step_result.description}")
+            for a in step_result.assertions:
+                a_icon = "✓" if a.get("passed") else "✗"
+                logger.info(f"           {a_icon} {a.get('message', '')}")
+
+        def on_test(test_result):
+            icon = "✅" if test_result.status.value == "passed" else "❌"
+            logger.info(f"{icon} {test_result.script_name}: {test_result.status.value.upper()} ({test_result.duration_s:.2f}s)")
+
+        runner._on_step_complete = on_step
+        runner._on_test_complete = on_test
+
+        results = []
+        for script in scripts:
+            result = await runner.run(script)
+            results.append(result)
+            ReportGenerator.save(result, f"test_reports/{script.name}.txt", format="text")
+            ReportGenerator.save(result, f"test_reports/{script.name}.json", format="json")
+            ReportGenerator.save(result, f"test_reports/{script.name}.html", format="html")
+
+        passed = sum(1 for r in results if r.status.value == "passed")
+        failed = len(results) - passed
+        logger.info(f"\nSummary: {len(results)} scripts, {passed} passed, {failed} failed")
+        return 0 if failed == 0 else 1
+
+    exit_code = asyncio.run(run())
     sys.exit(exit_code)
 
 

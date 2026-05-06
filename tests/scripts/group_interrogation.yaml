@@ -1,0 +1,65 @@
+# 组召唤测试
+# 验证: 连接 → 分组召唤(1-16组) → 数据接收
+
+name: group_interrogation
+description: "分组召唤测试"
+version: "1.0"
+tags: [protocol, master, interrogation]
+
+config:
+  role: master
+  timeout: 45
+  connection:
+    host: "127.0.0.1"
+    port: 2404
+
+steps:
+  - action: connect
+    description: "建立连接"
+
+  - action: wait_state
+    description: "等待运行态"
+    params: { state: running, timeout: 10 }
+
+  # 第1组召唤
+  - action: general_interrogation
+    description: "第1组召唤"
+    params: { qoi: 1 }
+
+  - action: wait
+    description: "等待第1组数据"
+    params: { seconds: 2 }
+
+  - action: clear_buffers
+    description: "清空缓冲"
+
+  # 第2组召唤
+  - action: general_interrogation
+    description: "第2组召唤"
+    params: { qoi: 2 }
+
+  - action: wait
+    description: "等待第2组数据"
+    params: { seconds: 2 }
+
+  # 站召唤（全部）
+  - action: clear_buffers
+    description: "清空缓冲"
+
+  - action: general_interrogation
+    description: "站召唤 (全部)"
+    params: { qoi: 20 }
+
+  - action: wait_frames
+    description: "等待站召唤数据"
+    params:
+      direction: rx
+      count: 1
+      frame_type: I
+      timeout: 10
+    assert:
+      - type: frame_count
+        params: { direction: rx, frame_type: I, min: 1 }
+
+  - action: disconnect
+    description: "断开连接"

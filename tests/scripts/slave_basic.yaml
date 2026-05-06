@@ -1,0 +1,66 @@
+# 子站模式测试
+# 验证: 子站启动 → 等待主站连接 → 响应总召 → 数据模拟 → 断开
+
+name: slave_basic
+description: "子站基础功能测试"
+version: "1.0"
+tags: [basic, slave, smoke]
+
+config:
+  role: slave
+  timeout: 30
+  connection:
+    port: 2404
+    common_addr: 1
+  point_table:
+    auto_generate: true
+    yx_count: 50
+    yc_count: 20
+
+steps:
+  - action: connect
+    description: "启动子站监听"
+
+  - action: wait
+    description: "等待主站连接"
+    params: { seconds: 2 }
+
+  # 手动设置遥信值
+  - action: slave_set_yx
+    description: "手动设置遥信 IOA=1 ON"
+    params:
+      ioa: 1
+      value: true
+
+  - action: slave_set_yc
+    description: "手动设置遥测 IOA=1001"
+    params:
+      ioa: 1001
+      value: 220.5
+
+  - action: wait
+    description: "等待数据上送"
+    params: { seconds: 2 }
+
+  # 启动自动模拟
+  - action: slave_start_sim
+    description: "启动数据模拟器"
+    params:
+      yx_interval: 2
+      yc_interval: 1
+      yx_change_rate: 0.2
+
+  - action: wait
+    description: "运行模拟 5 秒"
+    params: { seconds: 5 }
+
+  - action: slave_stop_sim
+    description: "停止数据模拟"
+
+  - action: log
+    description: "子站测试完成"
+    params:
+      message: "子站功能验证通过"
+
+  - action: disconnect
+    description: "停止子站"
