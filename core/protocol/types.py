@@ -57,6 +57,7 @@ class TypeID(enum.IntEnum):
     C_SE_NB_1 = 49      # 设点命令，标度化值
     C_SE_NC_1 = 50      # 设点命令，短浮点数
     C_BO_NA_1 = 51      # 32比特串
+    M_EI_NA_1 = 70  # 初始化结束
 
     # ── 系统命令 ──
     C_IC_NA_1 = 100     # 总召唤命令

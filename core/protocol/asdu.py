@@ -142,16 +142,17 @@ class ASDU:
         # Information Objects
         ioa_size = 3  # 标准IOA长度3字节
         remaining = data[pos:]
+        base_ioa = 0
 
         for i in range(num):
-            if len(remaining) < ioa_size:
-                break
+            # SQ=1: 仅第一个对象有IOA字段，后续对象地址 = base + i
+            if not sq or i == 0:
+                if len(remaining) < ioa_size:
+                    break
+                base_ioa = remaining[0] | (remaining[1] << 8) | (remaining[2] << 16)
+                remaining = remaining[ioa_size:]
 
-            # IOA
-            ioa = remaining[0] | (remaining[1] << 8) | (remaining[2] << 16)
-            if sq:
-                ioa += i
-            remaining = remaining[ioa_size:]
+            ioa = base_ioa + i if sq else base_ioa
 
             # Data + Time tag
             obj_data, time_tag, consumed = cls._decode_object_data(
@@ -415,6 +416,46 @@ class ASDUBuilder:
             ioa=0,
             data=bytes([0xAA, 0x55]),  # 固定测试字
         ))
+        return asdu.encode()
+
+    @staticmethod
+    def build_single_point_sequence(common_addr: int, points: list[tuple[int, bool, int]],
+                                     cot: int = COT.INTROGEN) -> bytes:
+        """构造单点遥信序列 (M_SP_NA_1, SQ=1).
+
+        Args:
+            points: [(ioa, value, quality), ...] 必须按ioa连续排列
+        """
+        asdu = ASDU(
+            type_id=TypeID.M_SP_NA_1,
+            sq=True,
+            num=len(points),
+            cot=cot,
+            common_addr=common_addr,
+        )
+        for ioa, value, quality in points:
+            sp = SinglePoint(value=value, quality=QualityDescriptor(quality))
+            asdu.objects.append(InformationObject(ioa=ioa, data=sp))
+        return asdu.encode()
+
+    @staticmethod
+    def build_short_float_sequence(common_addr: int, points: list[tuple[int, float, int]],
+                                    cot: int = COT.INTROGEN) -> bytes:
+        """构造短浮点遥测序列 (M_ME_NC_1, SQ=1).
+
+        Args:
+            points: [(ioa, value, quality), ...] 必须按ioa连续排列
+        """
+        asdu = ASDU(
+            type_id=TypeID.M_ME_NC_1,
+            sq=True,
+            num=len(points),
+            cot=cot,
+            common_addr=common_addr,
+        )
+        for ioa, value, quality in points:
+            sf = ShortFloat(value=value, quality=QualityDescriptor(quality))
+            asdu.objects.append(InformationObject(ioa=ioa, data=sf))
         return asdu.encode()
 
     @staticmethod

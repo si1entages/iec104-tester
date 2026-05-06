@@ -61,6 +61,10 @@ class AsyncThread(QThread):
 class MainWindow(QMainWindow):
     """IEC 60870-5-104 测试软件主窗口."""
 
+    # 线程安全信号：从 asyncio 线程发射，Qt 主线程接收
+    _sig_event = Signal(str, dict)
+    _sig_raw_frame = Signal(bytes, str, str)  # data, direction, client_id
+
     def __init__(self, config: AppConfig, parent=None):
         super().__init__(parent)
         self._config = config
@@ -91,6 +95,10 @@ class MainWindow(QMainWindow):
         self._init_ui()
         self._init_engine()
 
+        # 线程安全信号 → Qt 主线程更新 UI
+        self._sig_event.connect(self._on_event_ui)
+        self._sig_raw_frame.connect(self._on_raw_frame_ui)
+
         logger.info(f"MainWindow initialized in {config.mode} mode")
 
     def _init_point_table(self) -> None:
@@ -120,9 +128,6 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(title)
         self.setMinimumSize(1280, 800)
         self.resize(1600, 1000)
-
-        # 菜单栏
-        self._create_menus()
 
         # 主布局
         central = QWidget()
@@ -180,6 +185,9 @@ class MainWindow(QMainWindow):
         # 日志
         self._log_viewer = LogViewer()
         right_tabs.addTab(self._log_viewer, "📋 日志")
+
+        # 菜单栏
+        self._create_menus()
 
         # 控制/模拟面板
         if is_master:
@@ -400,34 +408,41 @@ class MainWindow(QMainWindow):
             )
             self._conn_label.setText(f"连接: {engine.client_count} 客户端")
 
-    # ── 主站事件 ──────────────────────────────────────────────────
+    # ── 主站事件（asyncio 线程 → 信号 → Qt 主线程）────────────────
 
     def _on_master_event(self, event, data: dict) -> None:
-        """主站事件回调."""
-        from core.engine.master import MasterEvent
-        self._log_viewer.add_event(event.value, data)
+        """主站事件回调（从 asyncio 线程调用）."""
+        self._sig_event.emit(event.value, data)
 
+    def _on_raw_frame(self, data: bytes, direction: str) -> None:
+        """原始帧回调（从 asyncio 线程调用）."""
+        self._sig_raw_frame.emit(data, direction, "")
+
+    def _on_raw_frame_slave(self, data: bytes, direction: str, client_id: str) -> None:
+        """子站原始帧回调（从 asyncio 线程调用）."""
+        self._sig_raw_frame.emit(data, direction, client_id)
+
+    # ── UI 更新槽（Qt 主线程执行）────────────────────────────────
+
+    def _on_event_ui(self, event_type: str, data: dict) -> None:
+        """在 Qt 主线程中更新事件 UI."""
+        self._log_viewer.add_event(event_type, data)
         if hasattr(self, '_monitor_panel'):
             self._monitor_panel.add_event(
-                event.value,
+                event_type,
                 str(data.get("type_id", "")),
                 str(data)[:100],
             )
 
-    def _on_raw_frame(self, data: bytes, direction: str) -> None:
-        """原始帧回调."""
-        self._hex_viewer.add_frame(data, direction)
-
-    def _on_raw_frame_slave(self, data: bytes, direction: str, client_id: str) -> None:
-        """子站原始帧回调."""
+    def _on_raw_frame_ui(self, data: bytes, direction: str, client_id: str) -> None:
+        """在 Qt 主线程中更新报文 UI."""
         self._hex_viewer.add_frame(data, direction)
 
     # ── 子站事件 ──────────────────────────────────────────────────
 
     def _on_slave_event(self, event, data: dict) -> None:
-        """子站事件回调."""
-        from core.engine.slave import SlaveEvent
-        self._log_viewer.add_event(event.value, data)
+        """子站事件回调（从 asyncio 线程调用）."""
+        self._sig_event.emit(event.value, data)
 
     # ── 命令处理 ──────────────────────────────────────────────────
 

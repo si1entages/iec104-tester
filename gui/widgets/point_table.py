@@ -305,6 +305,34 @@ class YmTableModel(QAbstractTableModel):
 
 
 # ═══════════════════════════════════════════════════════════════════
+#  数值感知排序代理模型
+# ═══════════════════════════════════════════════════════════════════
+
+class _NumericSortProxyModel(QSortFilterProxyModel):
+    """支持数值列正确排序的代理模型.
+
+    默认 QSortFilterProxyModel 按字符串比较，导致 "10" < "2"。
+    此子类对可转为数值的列使用数值比较。
+    """
+
+    def lessThan(self, left: QModelIndex, right: QModelIndex) -> bool:
+        """比较两列值，数值列用数值比较，其他用默认字符串比较."""
+        left_data = self.sourceModel().data(left, Qt.DisplayRole)
+        right_data = self.sourceModel().data(right, Qt.DisplayRole)
+
+        if left_data is None:
+            return True
+        if right_data is None:
+            return False
+
+        # 尝试数值比较
+        try:
+            return float(left_data) < float(right_data)
+        except (ValueError, TypeError):
+            return str(left_data) < str(right_data)
+
+
+# ═══════════════════════════════════════════════════════════════════
 #  通用表格面板（带搜索和过滤）
 # ═══════════════════════════════════════════════════════════════════
 
@@ -314,7 +342,7 @@ class PointTablePanel(QWidget):
     def __init__(self, model: QAbstractTableModel, title: str = "", parent=None):
         super().__init__(parent)
         self._model = model
-        self._proxy = QSortFilterProxyModel(self)
+        self._proxy = _NumericSortProxyModel(self)
         self._proxy.setSourceModel(model)
         self._proxy.setFilterCaseSensitivity(Qt.CaseInsensitive)
         self._proxy.setFilterKeyColumn(-1)  # 全列搜索
@@ -352,6 +380,7 @@ class PointTablePanel(QWidget):
         self._table.setSelectionBehavior(QTableView.SelectRows)
         self._table.setSelectionMode(QTableView.SingleSelection)
         self._table.setSortingEnabled(True)
+        self._table.sortByColumn(0, Qt.AscendingOrder)
         self._table.setWordWrap(False)
         self._table.verticalHeader().setDefaultSectionSize(28)
         self._table.verticalHeader().setVisible(False)

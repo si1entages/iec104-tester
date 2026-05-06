@@ -435,6 +435,8 @@ class MasterEngine:
     def _handle_i_frame(self, apci: APCI, frame: bytes) -> None:
         """处理 I 帧."""
         self._seq.process_rx_i_frame(apci.tx_seq)
+        # I帧的rx_seq是隐式确认，等效于S帧
+        self._seq.process_rx_i_frame_ack(apci.rx_seq)
 
         # 解析 ASDU
         asdu_data = frame[6:6 + apci.asdu_length]
@@ -536,6 +538,11 @@ class MasterEngine:
                 logger.info("General Interrogation ACTCON received")
             elif cot == COT.ACTTERM:
                 logger.info("General Interrogation ACTTERM received")
+
+        # 初始化结束
+        elif type_id == TypeID.M_EI_NA_1:
+            logger.info(f"End of Initialization received, COT={cot}")
+
 
         else:
             logger.debug(f"Unhandled ASDU: type={type_id}, cot={cot}")
@@ -705,6 +712,13 @@ class MasterEngine:
         elif timer_type == TimerType.T1:
             # 发送超时
             logger.error("T1 timeout: no confirmation received")
+        elif timer_type == TimerType.T2:
+            # 无数据确认超时 — 发送S帧确认已收到的I帧
+            rx_seq = self._seq.get_recv_seq()
+            frame = APCICodec.encode_s(rx_seq)
+            asyncio.create_task(self._send_frame(frame))
+            self._state_machine.on_s_frame_sent()
+            logger.info(f"T2 expired: S-Frame sent (rx_seq={rx_seq})")
         elif timer_type == TimerType.T3:
             # 空闲超时，发送测试帧
             asyncio.create_task(self._send_frame(APCICodec.testfr_act()))

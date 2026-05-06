@@ -190,14 +190,17 @@ class SlaveEngine:
     def _on_client_connected(self, conn: TCPConnection) -> None:
         """新客户端连接."""
         conn_id = conn.name
-        self._client_states[conn_id] = _ClientState(
+        seq = SequenceManager(k=self._k, w=self._w)
+        state = _ClientState(
             conn=conn,
-            seq=SequenceManager(k=self._k, w=self._w),
+            seq=seq,
             state_machine=ConnectionStateMachine(
                 t0=self._t0, t1=self._t1, t2=self._t2, t3=self._t3,
             ),
         )
-        self._client_states[conn_id].state_machine.on_connected()
+        seq.set_s_frame_callback(lambda rx_seq: self._on_s_frame_needed(state, rx_seq))
+        self._client_states[conn_id] = state
+        state.state_machine.on_connected()
         logger.info(f"Client connected: {conn_id}")
         self._fire_event(SlaveEvent.CLIENT_CONNECTED, {"client_id": conn_id})
 
@@ -254,6 +257,12 @@ class SlaveEngine:
     def _handle_i_frame(self, state: _ClientState, apci: APCI, frame: bytes) -> None:
         """处理 I 帧."""
         state.seq.process_rx_i_frame(apci.tx_seq)
+        # I帧的rx_seq是隐式确认，等效于S帧
+        old_unconfirmed = state.seq.unconfirmed_count
+        state.seq.process_rx_i_frame_ack(apci.rx_seq)
+        # 如果隐式确认释放了窗口空间，通知等待的协程
+        if state.seq.unconfirmed_count < old_unconfirmed:
+            state.window_available.set()
 
         asdu_data = frame[6:6 + apci.asdu_length]
         try:
@@ -268,6 +277,8 @@ class SlaveEngine:
         """处理 S 帧."""
         state.seq.process_rx_s_frame(apci.rx_seq)
         state.state_machine.on_ack_received()
+        # 通知等待窗口空间的协程
+        state.window_available.set()
 
     def _handle_u_frame(self, state: _ClientState, apci: APCI) -> None:
         """处理 U 帧."""
@@ -279,6 +290,7 @@ class SlaveEngine:
             state.state_machine.on_startdt_con()
             state.seq.process_rx_u_frame_startdt_con()
             state.data_transfer_enabled = True
+            state.window_available.set()  # 序列号重置，窗口可用
             logger.info(f"STARTDT ACT from {state.conn.name}, CON sent")
             self._fire_event(SlaveEvent.STARTDT_RECEIVED, {
                 "client_id": state.conn.name
@@ -374,40 +386,53 @@ class SlaveEngine:
         })
 
     async def _send_interrogation_data(self, state: _ClientState, qoi: int) -> None:
-        """发送总召唤数据."""
-        # 发送遥信
+        """发送总召唤数据（批量打包，SQ=1，分批发送）."""
+        cot = COT.INTROGEN if qoi == 20 else COT.group_response(qoi)
+
+        # IEC 104 限制: VSQ 低7位最大127，APDU最大253字节
+        # 实际安全批次大小（考虑APDU长度限制）
+        MAX_SP_PER_FRAME = 120   # 单点遥信: 每对象1字节, 120+3+6=129B
+        MAX_MV_PER_FRAME = 45    # 短浮点遥测: 每对象5字节, 225+3+6=234B
+
+        # ── 遥信打包发送 ──
         yx_points = self._point_table.get_all_yx()
         if qoi != 20:
             yx_points = self._point_table.get_yx_by_group(qoi)
 
+        yx_batch = []
         for p in yx_points:
             if not p.enabled:
                 continue
             yx_data = self._data_store.get_yx(p.ioa)
             if yx_data:
-                cot = COT.INTROGEN if qoi == 20 else COT.group_response(qoi)
-                asdu_data = ASDUBuilder.build_single_point(
-                    self._common_addr, p.ioa, yx_data.value,
-                    yx_data.quality.to_int(), cot=cot
-                )
-                await self._send_i_frame(state, asdu_data)
+                yx_batch.append((p.ioa, yx_data.value, yx_data.quality.to_int()))
 
-        # 发送遥测
+        for i in range(0, len(yx_batch), MAX_SP_PER_FRAME):
+            chunk = yx_batch[i:i + MAX_SP_PER_FRAME]
+            asdu_data = ASDUBuilder.build_single_point_sequence(
+                self._common_addr, chunk, cot=cot
+            )
+            await self._send_i_frame(state, asdu_data)
+
+        # ── 遥测打包发送 ──
         yc_points = self._point_table.get_all_yc()
         if qoi != 20:
             yc_points = self._point_table.get_yc_by_group(qoi)
 
+        yc_batch = []
         for p in yc_points:
             if not p.enabled:
                 continue
             yc_data = self._data_store.get_yc(p.ioa)
             if yc_data:
-                cot = COT.INTROGEN if qoi == 20 else COT.group_response(qoi)
-                asdu_data = ASDUBuilder.build_short_float(
-                    self._common_addr, p.ioa, yc_data.value,
-                    yc_data.quality.to_int(), cot=cot
-                )
-                await self._send_i_frame(state, asdu_data)
+                yc_batch.append((p.ioa, yc_data.value, yc_data.quality.to_int()))
+
+        for i in range(0, len(yc_batch), MAX_MV_PER_FRAME):
+            chunk = yc_batch[i:i + MAX_MV_PER_FRAME]
+            asdu_data = ASDUBuilder.build_short_float_sequence(
+                self._common_addr, chunk, cot=cot
+            )
+            await self._send_i_frame(state, asdu_data)
 
     async def _handle_counter_interrogation(self, state: _ClientState, asdu: ASDU) -> None:
         """处理累计量召唤."""
@@ -674,10 +699,32 @@ class SlaveEngine:
                         new_value = max(p.min_value, min(p.max_value, new_value))
                         await self.send_spontaneous_yc(p.ioa, new_value)
 
+    # ── S帧回调 ───────────────────────────────────────────────────
+
+    def _on_s_frame_needed(self, state: _ClientState, rx_seq: int) -> None:
+        """当收到w个未确认的I帧时，由SequenceManager回调发送S帧."""
+        frame = APCICodec.encode_s(rx_seq)
+        asyncio.create_task(self._send_to_client(state, frame))
+        state.state_machine.on_s_frame_sent()
+        logger.debug(f"S-Frame sent to {state.conn.name}: rx_seq={rx_seq}")
+        # 通知等待窗口空间的协程
+        state.window_available.set()
+
     # ── 内部发送 ──────────────────────────────────────────────────
 
     async def _send_i_frame(self, state: _ClientState, asdu_data: bytes) -> None:
-        """向指定客户端发送 I 帧."""
+        """向指定客户端发送 I 帧，窗口满时等待确认."""
+        # 等待发送窗口可用（最多等 t1 超时时间）
+        if not state.seq.send_window_available:
+            logger.debug(f"Send window full for {state.conn.name}, waiting for S-frame...")
+            state.window_available.clear()
+            try:
+                await asyncio.wait_for(state.window_available.wait(), timeout=self._t1)
+            except asyncio.TimeoutError:
+                raise RuntimeError(
+                    f"Send window timeout: no S-frame received within t1={self._t1}s"
+                )
+
         tx_seq = state.seq.get_send_seq()
         rx_seq = state.seq.get_recv_seq()
         frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
@@ -753,3 +800,5 @@ class _ClientState:
         self.state_machine = state_machine
         self.data_transfer_enabled = False
         self.connected_at = time.monotonic()
+        self.window_available = asyncio.Event()  # S帧确认后触发
+        self.window_available.set()  # 初始时窗口可用
