@@ -1,0 +1,35 @@
+[project]
+name = "iec104-tester"
+version = "1.0.0"
+description = "IEC 60870-5-104 协议测试工具 — 主站/子站模拟器"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "IEC104 Tester"}
+]
+
+dependencies = [
+    "PySide6>=6.6.0",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+build = [
+    "pyinstaller>=6.0",
+    "nuitka>=1.8",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+]
+
+[project.scripts]
+iec104-tester = "app:main"
+
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["core*", "gui*"]

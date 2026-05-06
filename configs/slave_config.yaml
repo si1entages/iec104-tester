@@ -1,0 +1,38 @@
+# IEC 60870-5-104 子站配置示例
+mode: slave
+
+connection:
+  host: "0.0.0.0"
+  port: 2404
+  common_addr: 1
+  max_connections: 16
+
+timers:
+  t0: 30
+  t1: 15
+  t2: 10
+  t3: 20
+
+flow_control:
+  k: 12
+  w: 8
+
+slave:
+  spontaneous_enabled: true
+  simulation_enabled: false
+  yx_interval: 5.0
+  yc_interval: 2.0
+  yx_change_rate: 0.1
+  yc_change_range: 0.05
+
+display:
+  theme: dark
+  refresh_interval_ms: 500
+
+point_table:
+  file: ""
+  auto_generate: true
+  yx_count: 100
+  yc_count: 50
+  yk_count: 20
+  ym_count: 10

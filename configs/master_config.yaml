@@ -1,0 +1,36 @@
+# IEC 60870-5-104 主站配置示例
+mode: master
+
+connection:
+  host: "127.0.0.1"
+  port: 2404
+  common_addr: 1
+  reconnect: true
+  reconnect_interval: 5.0
+
+timers:
+  t0: 30
+  t1: 15
+  t2: 10
+  t3: 20
+
+flow_control:
+  k: 12
+  w: 8
+
+master:
+  auto_start: true
+  auto_gi: true
+  auto_clock_sync: false
+
+display:
+  theme: dark
+  refresh_interval_ms: 500
+
+point_table:
+  file: ""
+  auto_generate: true
+  yx_count: 100
+  yc_count: 50
+  yk_count: 20
+  ym_count: 10

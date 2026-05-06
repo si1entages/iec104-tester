@@ -1,0 +1,102 @@
+# 演示点表
+station_name: "Demo Substation"
+common_addr: 1
+
+yx:
+  - ioa: 1
+    name: "1#开关位置"
+    group: 1
+    type: single
+  - ioa: 2
+    name: "2#开关位置"
+    group: 1
+    type: single
+  - ioa: 3
+    name: "1#变压器保护动作"
+    group: 1
+    type: single
+  - ioa: 4
+    name: "2#变压器保护动作"
+    group: 1
+    type: single
+  - ioa: 17
+    name: "母线接地信号"
+    group: 2
+    type: single
+  - ioa: 18
+    name: "过负荷告警"
+    group: 2
+    type: single
+
+yc:
+  - ioa: 1001
+    name: "1#变高压侧电压"
+    group: 1
+    type: short_float
+    unit: "kV"
+    min_value: 0
+    max_value: 120
+  - ioa: 1002
+    name: "1#变低压侧电压"
+    group: 1
+    type: short_float
+    unit: "kV"
+    min_value: 0
+    max_value: 12
+  - ioa: 1003
+    name: "1#变电流"
+    group: 1
+    type: short_float
+    unit: "A"
+    min_value: 0
+    max_value: 3000
+  - ioa: 1004
+    name: "1#变有功功率"
+    group: 1
+    type: short_float
+    unit: "MW"
+    min_value: -500
+    max_value: 500
+  - ioa: 1005
+    name: "1#变无功功率"
+    group: 1
+    type: short_float
+    unit: "MVar"
+    min_value: -500
+    max_value: 500
+  - ioa: 1006
+    name: "频率"
+    group: 1
+    type: short_float
+    unit: "Hz"
+    min_value: 49.5
+    max_value: 50.5
+
+yk:
+  - ioa: 2001
+    name: "1#开关分闸"
+    type: single
+    sbo: true
+  - ioa: 2002
+    name: "1#开关合闸"
+    type: single
+    sbo: true
+  - ioa: 2003
+    name: "2#开关分闸"
+    type: single
+    sbo: true
+  - ioa: 2004
+    name: "2#开关合闸"
+    type: single
+    sbo: true
+
+ym:
+  - ioa: 3001
+    name: "正向有功电度"
+    group: 1
+  - ioa: 3002
+    name: "反向有功电度"
+    group: 1
+  - ioa: 3003
+    name: "正向无功电度"
+    group: 1
