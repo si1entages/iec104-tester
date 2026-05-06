@@ -24,8 +24,10 @@ from ..protocol.types import (
     TypeID, COT, ConnState,
     SinglePoint, DoublePoint, NormalizedValue, ScaledValue, ShortFloat,
     CounterValue, QualityDescriptor, CP56Time2a,
-    SingleCommand, DoubleCommand,
-    SetpointCommandN, SetpointCommandS,
+    SingleCommand, DoubleCommand, RegulatingStepCommand,
+    SetpointCommandN, SetpointCommandS, SetpointCommandScaled,
+    BitString32Command, BitString32, StepPosition,
+    ProtectionEvent, GroupSinglePointWithStatus, InitializationEnd,
 )
 from ..protocol.sequence import SequenceManager
 from ..protocol.state_machine import ConnectionStateMachine, TimerType
@@ -495,23 +497,25 @@ class MasterEngine:
         type_id = asdu.type_id
         cot = asdu.cot
 
-        # 总召唤响应
-        if type_id == TypeID.M_SP_NA_1 and cot >= COT.INTROGEN:
-            self._process_interrogation_response(asdu)
+        # 总召唤
+        if type_id == TypeID.C_IC_NA_1:
+            if cot == COT.ACTCON:
+                logger.info("General Interrogation ACTCON received")
+            elif cot == COT.ACTTERM:
+                logger.info("General Interrogation ACTTERM received")
+            elif cot >= COT.INTROGEN:
+                self._process_interrogation_response(asdu)
 
-        # 遥测数据
-        elif type_id in (TypeID.M_ME_NC_1, TypeID.M_ME_TF_1):
-            self._process_short_float(asdu)
+        # 累计量召唤
+        elif type_id == TypeID.C_CI_NA_1:
+            if cot == COT.ACTCON:
+                logger.info("Counter Interrogation ACTCON received")
+            elif cot == COT.ACTTERM:
+                logger.info("Counter Interrogation ACTTERM received")
+            elif cot >= COT.INTROGEN:
+                self._process_counter(asdu)
 
-        # 归一化值
-        elif type_id in (TypeID.M_ME_NA_1, TypeID.M_ME_TD_1, TypeID.M_ME_ND_1):
-            self._process_normalized(asdu)
-
-        # 标度化值
-        elif type_id in (TypeID.M_ME_NB_1, TypeID.M_ME_TB_1, TypeID.M_ME_TE_1):
-            self._process_scaled(asdu)
-
-        # 遥信
+        # 单点遥信
         elif type_id in (TypeID.M_SP_NA_1, TypeID.M_SP_TB_1):
             self._process_single_point(asdu)
 
@@ -519,30 +523,87 @@ class MasterEngine:
         elif type_id in (TypeID.M_DP_NA_1, TypeID.M_DP_TB_1):
             self._process_double_point(asdu)
 
+        # 步位置信息
+        elif type_id in (TypeID.M_ST_NA_1, TypeID.M_ST_TB_1):
+            self._process_step_position(asdu)
+
+        # 32比特串
+        elif type_id in (TypeID.M_BO_NA_1, TypeID.M_BO_TB_1):
+            self._process_bitstring32(asdu)
+
+        # 归一化值
+        elif type_id in (TypeID.M_ME_NA_1, TypeID.M_ME_TA_1, TypeID.M_ME_TD_1, TypeID.M_ME_ND_1):
+            self._process_normalized(asdu)
+
+        # 标度化值
+        elif type_id in (TypeID.M_ME_NB_1, TypeID.M_ME_TB_1, TypeID.M_ME_TE_1):
+            self._process_scaled(asdu)
+
+        # 短浮点数
+        elif type_id in (TypeID.M_ME_NC_1, TypeID.M_ME_TC_1, TypeID.M_ME_TF_1):
+            self._process_short_float(asdu)
+
         # 累计量
         elif type_id in (TypeID.M_IT_NA_1, TypeID.M_IT_TB_1):
             self._process_counter(asdu)
 
+        # 继电保护事件
+        elif type_id in (TypeID.M_EP_TA_1, TypeID.M_EP_TB_1, TypeID.M_EP_TC_1,
+                          TypeID.M_EP_TD_1, TypeID.M_EP_TE_1, TypeID.M_EP_TF_1):
+            self._process_protection_event(asdu)
+
+        # 成组单点状态检出
+        elif type_id in (TypeID.M_PS_NA_1, TypeID.M_PS_TB_1):
+            self._process_group_single_point(asdu)
+
         # 命令确认
-        elif type_id in (TypeID.C_SC_NA_1, TypeID.C_DC_NA_1,
-                          TypeID.C_SE_NA_1, TypeID.C_SE_NB_1, TypeID.C_SE_NC_1):
+        elif type_id in (TypeID.C_SC_NA_1, TypeID.C_DC_NA_1, TypeID.C_RC_NA_1,
+                          TypeID.C_SE_NA_1, TypeID.C_SE_NB_1, TypeID.C_SE_NC_1,
+                          TypeID.C_BO_NA_1):
             self._process_command_ack(asdu)
 
         # 时钟同步确认
         elif type_id == TypeID.C_CS_NA_1:
             logger.info(f"Clock Sync ACK received, COT={cot}")
 
-        # 总召唤确认/结束
-        elif type_id == TypeID.C_IC_NA_1:
+        # 读命令响应
+        elif type_id == TypeID.C_RD_NA_1:
+            self._process_read_response(asdu)
+
+        # 测试命令确认
+        elif type_id in (TypeID.C_TS_NA_1, TypeID.C_TS_TA_1, TypeID.C_TS_NB_1):
+            logger.info(f"Test Command ACK received, COT={cot}")
+
+        # 复位进程确认
+        elif type_id == TypeID.C_RP_NA_1:
             if cot == COT.ACTCON:
-                logger.info("General Interrogation ACTCON received")
+                logger.info("Reset Process ACTCON received")
             elif cot == COT.ACTTERM:
-                logger.info("General Interrogation ACTTERM received")
+                logger.info("Reset Process ACTTERM received")
+
+        # 延时获得
+        elif type_id == TypeID.C_CD_NA_1:
+            logger.info(f"Delay Command received, COT={cot}")
 
         # 初始化结束
         elif type_id == TypeID.M_EI_NA_1:
-            logger.info(f"End of Initialization received, COT={cot}")
+            for obj in asdu.objects:
+                if hasattr(obj.data, 'cause_str'):
+                    logger.info(f"End of Initialization: {obj.data.cause_str}")
+                else:
+                    logger.info(f"End of Initialization received, COT={cot}")
 
+        # 参数命令确认
+        elif type_id in (TypeID.P_ME_NA_1, TypeID.P_ME_NB_1, TypeID.P_ME_NC_1,
+                          TypeID.P_ME_ND_1, TypeID.P_AC_NA_1):
+            logger.info(f"Parameter Command ACK: type={type_id}, COT={cot}")
+
+        # 文件传输
+        elif type_id in (TypeID.F_FR_NA_1, TypeID.F_SR_NA_1, TypeID.F_SC_NA_1,
+                          TypeID.F_LS_NA_1, TypeID.F_AF_NA_1, TypeID.F_SG_NA_1,
+                          TypeID.F_DR_TA_1, TypeID.F_SC_NB_1,
+                          TypeID.F_FR_NB_1, TypeID.F_SR_NB_1):
+            logger.info(f"File Transfer: type={type_id}, COT={cot}")
 
         else:
             logger.debug(f"Unhandled ASDU: type={type_id}, cot={cot}")
@@ -641,6 +702,36 @@ class MasterEngine:
             logger.info("Command ACTTERM received")
         else:
             logger.warning(f"Command with COT={cot}")
+
+    def _process_step_position(self, asdu: ASDU) -> None:
+        """处理步位置信息."""
+        for obj in asdu.objects:
+            sp: StepPosition = obj.data
+            self._data_store.update_yc(obj.ioa, float(sp.value), sp.quality)
+
+    def _process_bitstring32(self, asdu: ASDU) -> None:
+        """处理32比特串."""
+        for obj in asdu.objects:
+            bs: BitString32 = obj.data
+            self._data_store.update_yc(obj.ioa, float(bs.value), QualityDescriptor())
+
+    def _process_protection_event(self, asdu: ASDU) -> None:
+        """处理继电保护事件."""
+        for obj in asdu.objects:
+            pe: ProtectionEvent = obj.data
+            logger.info(f"Protection Event: IOA={obj.ioa} value={pe.event_value}")
+
+    def _process_group_single_point(self, asdu: ASDU) -> None:
+        """处理成组单点状态检出."""
+        for obj in asdu.objects:
+            gsp: GroupSinglePointWithStatus = obj.data
+            for i, (state, detected) in enumerate(gsp.points):
+                self._data_store.update_yx(obj.ioa + i, state, QualityDescriptor())
+
+    def _process_read_response(self, asdu: ASDU) -> None:
+        """处理读命令响应."""
+        for obj in asdu.objects:
+            logger.info(f"Read Response: IOA={obj.ioa}")
 
     # ── 内部发送 ──────────────────────────────────────────────────
 

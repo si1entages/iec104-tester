@@ -25,6 +25,15 @@ from .types import (
     SetpointCommandN, SetpointCommandS,
     CP24Time2a, CP56Time2a,
     QualifierOfInterrogation, QualifierOfCounterInterrogation,
+    RegulatingStepCommand, BitString32Command,
+    SetpointCommandScaled,
+    ProtectionEvent, GroupSinglePointWithStatus,
+    InitializationEnd,
+    TestCommandBitPattern,
+    ParameterCommandNormalized, ParameterCommandScaled as ParamCmdScaled, ParameterCommandFloat,
+    ParameterCommandNormalizedNoQuality, ParameterActivation,
+    FileReady, SectionReady, CallDirectory, LastSection, AckFileSection,
+    FileSegment, DirectoryEntry, FileSelectCallGet, FileReadyAck, SectionReadyAck,
 )
 
 
@@ -214,16 +223,17 @@ class ASDU:
 
             # ── 累计量 ──
             TypeID.M_IT_NA_1: (5, lambda d: CounterValue.from_bytes(d)),
+            TypeID.M_IT_TA_1: (5, lambda d: CounterValue.from_bytes(d)),
             TypeID.M_IT_TB_1: (5, lambda d: CounterValue.from_bytes(d)),
 
             # ── 控制命令 ──
             TypeID.C_SC_NA_1: (1, lambda d: SingleCommand.from_bytes(d)),
             TypeID.C_DC_NA_1: (1, lambda d: DoubleCommand.from_bytes(d)),
-            TypeID.C_RC_NA_1: (1, lambda d: None),  # 升降命令
+            TypeID.C_RC_NA_1: (1, lambda d: RegulatingStepCommand.from_bytes(d)),
             TypeID.C_SE_NA_1: (3, lambda d: SetpointCommandN.from_bytes(d)),
-            TypeID.C_SE_NB_1: (3, lambda d: ScaledValue.from_bytes(d)),
+            TypeID.C_SE_NB_1: (3, lambda d: SetpointCommandScaled.from_bytes(d)),
             TypeID.C_SE_NC_1: (5, lambda d: SetpointCommandS.from_bytes(d)),
-            TypeID.C_BO_NA_1: (4, lambda d: BitString32.from_bytes(d)),
+            TypeID.C_BO_NA_1: (4, lambda d: BitString32Command.from_bytes(d)),
 
             # ── 系统命令 ──
             TypeID.C_IC_NA_1: (1, lambda d: d),      # 总召唤
@@ -234,6 +244,49 @@ class ASDU:
             TypeID.C_RP_NA_1: (1, lambda d: d),      # 复位进程
             TypeID.C_CD_NA_1: (2, lambda d: d),      # 延时获得
             TypeID.C_TS_TA_1: (9, lambda d: d),      # 带时标测试
+
+            # ── 步位置（带时标）──
+            TypeID.M_ST_TA_1: (2, lambda d: StepPosition.from_bytes(d)),
+
+            # ── 32比特串（带时标）──
+            TypeID.M_BO_TA_1: (4, lambda d: BitString32.from_bytes(d)),
+
+            # ── 继电保护事件 ──
+            TypeID.M_EP_TA_1: (3, lambda d: ProtectionEvent.from_bytes_short_time(d)),
+            TypeID.M_EP_TB_1: (5, lambda d: ProtectionEvent.from_bytes_short_time(d)),
+            TypeID.M_EP_TC_1: (4, lambda d: ProtectionEvent.from_bytes_short_time(d)),
+            TypeID.M_EP_TD_1: (3, lambda d: ProtectionEvent.from_bytes_long_time(d)),
+            TypeID.M_EP_TE_1: (5, lambda d: ProtectionEvent.from_bytes_long_time(d)),
+            TypeID.M_EP_TF_1: (4, lambda d: ProtectionEvent.from_bytes_long_time(d)),
+
+            # ── 成组单点 ──
+            TypeID.M_PS_NA_1: (2, lambda d: GroupSinglePointWithStatus.from_bytes(d)),
+            TypeID.M_PS_TB_1: (2, lambda d: GroupSinglePointWithStatus.from_bytes(d)),
+
+            # ── 初始化结束 ──
+            TypeID.M_EI_NA_1: (1, lambda d: InitializationEnd.from_bytes(d)),
+
+            # ── 测试命令（位模式）──
+            TypeID.C_TS_NB_1: (2, lambda d: TestCommandBitPattern.from_bytes(d)),
+
+            # ── 参数命令 ──
+            TypeID.P_ME_NA_1: (3, lambda d: ParameterCommandNormalized.from_bytes(d)),
+            TypeID.P_ME_NB_1: (3, lambda d: ParamCmdScaled.from_bytes(d)),
+            TypeID.P_ME_NC_1: (5, lambda d: ParameterCommandFloat.from_bytes(d)),
+            TypeID.P_ME_ND_1: (2, lambda d: ParameterCommandNormalizedNoQuality.from_bytes(d)),
+            TypeID.P_AC_NA_1: (1, lambda d: ParameterActivation.from_bytes(d)),
+
+            # ── 文件传输 ──
+            TypeID.F_FR_NA_1: (7, lambda d: FileReady.from_bytes(d)),
+            TypeID.F_SR_NA_1: (8, lambda d: SectionReady.from_bytes(d)),
+            TypeID.F_SC_NA_1: (4, lambda d: CallDirectory.from_bytes(d)),
+            TypeID.F_LS_NA_1: (5, lambda d: LastSection.from_bytes(d)),
+            TypeID.F_AF_NA_1: (4, lambda d: AckFileSection.from_bytes(d)),
+            TypeID.F_SG_NA_1: (5, lambda d: FileSegment.from_bytes(d, length=d[4] if len(d) > 4 else 0)),
+            TypeID.F_DR_TA_1: (14, lambda d: DirectoryEntry.from_bytes(d)),
+            TypeID.F_SC_NB_1: (4, lambda d: FileSelectCallGet.from_bytes(d)),
+            TypeID.F_FR_NB_1: (7, lambda d: FileReadyAck.from_bytes(d)),
+            TypeID.F_SR_NB_1: (8, lambda d: SectionReadyAck.from_bytes(d)),
         }
 
         # 带时标的类型
@@ -246,6 +299,9 @@ class ASDU:
             TypeID.M_ME_TB_1, TypeID.M_ME_TE_1,
             TypeID.M_ME_TC_1, TypeID.M_ME_TF_1,
             TypeID.M_IT_TA_1, TypeID.M_IT_TB_1,
+            TypeID.M_EP_TA_1, TypeID.M_EP_TB_1, TypeID.M_EP_TC_1,
+            TypeID.M_EP_TD_1, TypeID.M_EP_TE_1, TypeID.M_EP_TF_1,
+            TypeID.M_PS_TB_1,
         }
 
         # 使用CP56Time2a的类型
@@ -254,6 +310,8 @@ class ASDU:
             TypeID.M_ST_TB_1, TypeID.M_BO_TB_1,
             TypeID.M_ME_TD_1, TypeID.M_ME_TE_1,
             TypeID.M_ME_TF_1, TypeID.M_IT_TB_1,
+            TypeID.M_EP_TD_1, TypeID.M_EP_TE_1, TypeID.M_EP_TF_1,
+            TypeID.M_PS_TB_1,
         }
 
         if type_id not in handlers:
@@ -630,6 +688,136 @@ class ASDUBuilder:
             sv = ScaledValue(value=v)
             asdu.objects.append(InformationObject(ioa=ioa_base, data=sv))
         return asdu.encode()
+
+    @staticmethod
+    def build_double_point(common_addr: int, ioa: int, value: int,
+                            quality: int = 0, cot: int = COT.SPONT,
+                            with_time: bool = False) -> bytes:
+        """构造双点遥信 (M_DP_NA_1 或 M_DP_TB_1)."""
+        type_id = TypeID.M_DP_TB_1 if with_time else TypeID.M_DP_NA_1
+        asdu = ASDU(type_id=type_id, sq=False, num=1, cot=cot, common_addr=common_addr)
+        dp = DoublePoint(value=value, quality=QualityDescriptor(quality))
+        obj = InformationObject(ioa=ioa, data=dp)
+        if with_time:
+            obj.time_tag = CP56Time2a.now()
+        asdu.objects.append(obj)
+        return asdu.encode()
+
+    @staticmethod
+    def build_step_position(common_addr: int, ioa: int, value: int,
+                             quality: int = 0, transient: bool = False,
+                             cot: int = COT.SPONT, with_time: bool = False) -> bytes:
+        """构造步位置信息 (M_ST_NA_1 或 M_ST_TB_1)."""
+        type_id = TypeID.M_ST_TB_1 if with_time else TypeID.M_ST_NA_1
+        asdu = ASDU(type_id=type_id, sq=False, num=1, cot=cot, common_addr=common_addr)
+        sp = StepPosition(value=value, quality=QualityDescriptor(quality), transient=transient)
+        obj = InformationObject(ioa=ioa, data=sp)
+        if with_time:
+            obj.time_tag = CP56Time2a.now()
+        asdu.objects.append(obj)
+        return asdu.encode()
+
+    @staticmethod
+    def build_bitstring32(common_addr: int, ioa: int, value: int,
+                           quality: int = 0, cot: int = COT.SPONT,
+                           with_time: bool = False) -> bytes:
+        """构造32比特串 (M_BO_NA_1 或 M_BO_TB_1)."""
+        type_id = TypeID.M_BO_TB_1 if with_time else TypeID.M_BO_NA_1
+        asdu = ASDU(type_id=type_id, sq=False, num=1, cot=cot, common_addr=common_addr)
+        bs = BitString32(value=value)
+        obj = InformationObject(ioa=ioa, data=bs)
+        if with_time:
+            obj.time_tag = CP56Time2a.now()
+        asdu.objects.append(obj)
+        return asdu.encode()
+
+    @staticmethod
+    def build_counter_value(common_addr: int, ioa: int, value: int,
+                             quality: int = 0, sequence: int = 0,
+                             cot: int = COT.SPONT, with_time: bool = False) -> bytes:
+        """构造累计量 (M_IT_NA_1 或 M_IT_TB_1)."""
+        type_id = TypeID.M_IT_TB_1 if with_time else TypeID.M_IT_NA_1
+        asdu = ASDU(type_id=type_id, sq=False, num=1, cot=cot, common_addr=common_addr)
+        cv = CounterValue(value=value, quality=QualityDescriptor(quality), sequence=sequence)
+        obj = InformationObject(ioa=ioa, data=cv)
+        if with_time:
+            obj.time_tag = CP56Time2a.now()
+        asdu.objects.append(obj)
+        return asdu.encode()
+
+    @staticmethod
+    def build_regulating_step_command(common_addr: int, ioa: int, state: int,
+                                        select: bool = False, qu: int = 0) -> bytes:
+        """构造升降命令 (C_RC_NA_1)."""
+        asdu = ASDU(type_id=TypeID.C_RC_NA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        rc = RegulatingStepCommand(ioa=ioa, state=state, select=select, qu=qu)
+        asdu.objects.append(InformationObject(ioa=ioa, data=rc))
+        return asdu.encode()
+
+    @staticmethod
+    def build_bitstring_command(common_addr: int, ioa: int, value: int) -> bytes:
+        """构造比特串命令 (C_BO_NA_1)."""
+        asdu = ASDU(type_id=TypeID.C_BO_NA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        bc = BitString32Command(ioa=ioa, value=value)
+        asdu.objects.append(InformationObject(ioa=ioa, data=bc))
+        return asdu.encode()
+
+    @staticmethod
+    def build_read_command(common_addr: int, ioa: int) -> bytes:
+        """构造读命令 (C_RD_NA_1)."""
+        asdu = ASDU(type_id=TypeID.C_RD_NA_1, sq=False, num=1, cot=COT.REQ, common_addr=common_addr)
+        asdu.objects.append(InformationObject(ioa=ioa, data=b''))
+        return asdu.encode()
+
+    @staticmethod
+    def build_test_command_with_time(common_addr: int, time_tag: Optional[CP56Time2a] = None) -> bytes:
+        """构造带时标测试命令 (C_TS_TA_1)."""
+        if time_tag is None:
+            time_tag = CP56Time2a.now()
+        asdu = ASDU(type_id=TypeID.C_TS_TA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        data = bytes([0xAA, 0x55]) + time_tag.to_bytes()
+        asdu.objects.append(InformationObject(ioa=0, data=data))
+        return asdu.encode()
+
+    @staticmethod
+    def build_delay_command(common_addr: int, delay_ms: int) -> bytes:
+        """构造延时获得命令 (C_CD_NA_1)."""
+        asdu = ASDU(type_id=TypeID.C_CD_NA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        asdu.objects.append(InformationObject(ioa=0, data=bytes([delay_ms & 0xFF, (delay_ms >> 8) & 0xFF])))
+        return asdu.encode()
+
+    @staticmethod
+    def build_counter_interrogation_ack(common_addr: int, qcc: int = 0) -> bytes:
+        """构造累计量召唤确认."""
+        return ASDUBuilder.build_counter_interrogation(common_addr, qcc)
+
+    @staticmethod
+    def build_counter_interrogation_end(common_addr: int, qcc: int = 0) -> bytes:
+        """构造累计量召唤结束."""
+        asdu = ASDU(type_id=TypeID.C_CI_NA_1, sq=False, num=1, cot=COT.ACTTERM, common_addr=common_addr)
+        asdu.objects.append(InformationObject(ioa=0, data=bytes([qcc])))
+        return asdu.encode()
+
+    @staticmethod
+    def build_setpoint_scaled(common_addr: int, ioa: int, value: int,
+                                select: bool = False) -> bytes:
+        """构造标度化设点命令 (C_SE_NB_1)."""
+        asdu = ASDU(type_id=TypeID.C_SE_NB_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        ss = SetpointCommandScaled(ioa=ioa, value=value, select=select)
+        asdu.objects.append(InformationObject(ioa=ioa, data=ss))
+        return asdu.encode()
+
+    @staticmethod
+    def build_reset_process_ack(common_addr: int, qrp: int = 1) -> bytes:
+        """构造复位进程确认."""
+        asdu = ASDU(type_id=TypeID.C_RP_NA_1, sq=False, num=1, cot=COT.ACTCON, common_addr=common_addr)
+        asdu.objects.append(InformationObject(ioa=0, data=bytes([qrp])))
+        return asdu.encode()
+
+    @staticmethod
+    def build_test_command_ack(common_addr: int) -> bytes:
+        """构造测试命令确认."""
+        return ASDUBuilder.build_test_command(common_addr)
 
 
 # ═══════════════════════════════════════════════════════════════════

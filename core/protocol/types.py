@@ -48,6 +48,8 @@ class TypeID(enum.IntEnum):
     M_EP_TD_1 = 38      # 带时标CP56Time2a的继电保护设备事件
     M_EP_TE_1 = 39      # 带时标CP56Time2a的继电保护设备成组启动事件
     M_EP_TF_1 = 40      # 带时标CP56Time2a的继电保护设备成组输出电路信息
+    # 41-44: 保留
+    M_PS_TB_1 = 71      # 带时标CP56Time2a的带状态检出成组单点信息 (IEC 60870-5-101)
 
     # ── 控制方向（控制命令，主站→子站）──
     C_SC_NA_1 = 45      # 单命令
@@ -68,6 +70,8 @@ class TypeID(enum.IntEnum):
     C_RP_NA_1 = 105     # 复位进程命令
     C_CD_NA_1 = 106     # 延时获得命令
     C_TS_TA_1 = 107     # 带时标CP56Time2a的测试命令
+    C_TS_NB_1 = 108     # 测试命令（位模式，无时标）(IEC 60870-5-101)
+    P_ME_ND_1 = 109     # 不带品质描述词的测量值参数，归一化值 (IEC 60870-5-101)
 
     # ── 参数命令 ──
     P_ME_NA_1 = 110     # 测量值参数，归一化值
@@ -84,6 +88,8 @@ class TypeID(enum.IntEnum):
     F_SG_NA_1 = 125     # 段
     F_DR_TA_1 = 126     # 目录
     F_SC_NB_1 = 127     # 文件选择/召唤/获取
+    F_FR_NB_1 = 128     # 文件准备就绪（确认）(IEC 60870-5-101)
+    F_SR_NB_1 = 129     # 节准备就绪（确认）(IEC 60870-5-101)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -108,11 +114,13 @@ class COT(enum.IntEnum):
     FILE        = 13    # 文件传输
     # 14-19: 保留
     INTROGEN    = 20    # 响应总召唤
-    # 21-31: 特殊用途（兼容范围 32-47, 48-63）
+    # 21-31: 兼容范围（特殊用途）
+    # 32-47: 保留（特殊用途范围）
     # 41: 响应第1组召唤
     # 42: 响应第2组召唤
     # ...
     # 63: 响应第23组召唤
+    # 48-63: 特殊用途（由使用者约定）
 
     @classmethod
     def group_response(cls, group: int) -> int:
@@ -120,6 +128,18 @@ class COT(enum.IntEnum):
         if not 1 <= group <= 23:
             raise ValueError(f"Group must be 1-23, got {group}")
         return 40 + group
+
+    @classmethod
+    def is_group_response(cls, cot: int) -> bool:
+        """判断传送原因是否为组召唤响应 (41-63)."""
+        return 41 <= cot <= 63
+
+    @classmethod
+    def get_group_number(cls, cot: int) -> int:
+        """从组召唤响应传送原因中提取组号 (1-23)."""
+        if not 41 <= cot <= 63:
+            raise ValueError(f"Not a group response COT: {cot}")
+        return cot - 40
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -588,13 +608,812 @@ class SetpointCommandS:
         return struct.pack('<f', self.value) + bytes([q])
 
 
+@dataclass
+class SetpointCommandScaled:
+    """设点命令-标度化值 (C_SE_NB_1) — -32768..+32767."""
+    ioa: int = 0
+    value: int = 0           # -32768..+32767
+    select: bool = False     # S/E: 1=选择, 0=执行
+    qu: int = 0              # 限定词 (0-31)
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> SetpointCommandScaled:
+        raw = data[offset] | (data[offset + 1] << 8)
+        signed_val = raw if raw < 0x8000 else raw - 0x10000
+        q = data[offset + 2]
+        return cls(
+            ioa=ioa,
+            value=signed_val,
+            select=bool(q & 0x80),
+            qu=(q >> 2) & 0x1F,
+        )
+
+    def to_bytes(self) -> bytes:
+        raw = self.value
+        if raw < 0:
+            raw += 0x10000
+        q = (0x80 if self.select else 0x00) | ((self.qu & 0x1F) << 2)
+        return bytes([raw & 0xFF, (raw >> 8) & 0xFF, q])
+
+
+@dataclass
+class RegulatingStepCommand:
+    """升降命令 (C_RC_NA_1) — 控制步位置升降."""
+    ioa: int = 0
+    state: int = 0           # 0=不允许, 1=降一步, 2=升一步, 3=不允许
+    select: bool = False     # S/E: 1=选择, 0=执行
+    qu: int = 0              # 限定词 (0-31)
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> RegulatingStepCommand:
+        b = data[offset]
+        return cls(
+            ioa=ioa,
+            state=b & 0x03,
+            select=bool(b & 0x80),
+            qu=(b >> 2) & 0x1F,
+        )
+
+    def to_bytes(self) -> bytes:
+        b = self.state & 0x03
+        b |= 0x80 if self.select else 0x00
+        b |= (self.qu & 0x1F) << 2
+        return bytes([b])
+
+    @property
+    def state_str(self) -> str:
+        return {0: "不允许", 1: "降一步", 2: "升一步", 3: "不允许"}.get(self.state, "?")
+
+    @property
+    def action_str(self) -> str:
+        return "选择" if self.select else "执行"
+
+
+@dataclass
+class BitString32Command:
+    """32比特串命令 (C_BO_NA_1) — 控制方向的比特串."""
+    ioa: int = 0
+    value: int = 0           # 32-bit 无符号
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> BitString32Command:
+        import struct
+        val = struct.unpack_from('<I', data, offset)[0]
+        return cls(ioa=ioa, value=val)
+
+    def to_bytes(self) -> bytes:
+        import struct
+        return struct.pack('<I', self.value)
+
+
+@dataclass
+class ProtectionEvent:
+    """继电保护设备事件 (M_EP_TA_1 / M_EP_TB_1 / M_EP_TC_1 / M_EP_TD_1 / M_EP_TE_1 / M_EP_TF_1).
+
+    - M_EP_TA_1 (17): 带时标CP24Time2a的继电保护设备事件
+    - M_EP_TB_1 (18): 带时标CP24Time2a的继电保护设备成组启动事件
+    - M_EP_TC_1 (19): 带时标CP24Time2a的继电保护设备成组输出电路信息
+    - M_EP_TD_1 (38): 带时标CP56Time2a的继电保护设备事件
+    - M_EP_TE_1 (39): 带时标CP56Time2a的继电保护设备成组启动事件
+    - M_EP_TF_1 (40): 带时标CP56Time2a的继电保护设备成组输出电路信息
+    """
+    ioa: int = 0
+    event_value: int = 0     # 16-bit 事件值 (2 bytes)
+    quality: QualityDescriptor = field(default_factory=QualityDescriptor)
+    # 继电器保护设备附加信息
+    elapsed_time: int = 0    # 动作时间 (M_EP_TB_1 / M_EP_TE_1)
+    # 成组启动事件 / 成组输出电路信息
+    group_start_info: int = 0    # 成组启动信息 (M_EP_TB_1 / M_EP_TE_1)
+    group_output_info: int = 0   # 成组输出电路信息 (M_EP_TC_1 / M_EP_TF_1)
+    # 时标
+    time_short: Optional[CP24Time2a] = None    # M_EP_TA_1/TB_1/TC_1
+    time_long: Optional[CP56Time2a] = None     # M_EP_TD_1/TE_1/TF_1
+
+    @classmethod
+    def from_bytes_short_time(cls, data: bytes, offset: int = 0, ioa: int = 0) -> ProtectionEvent:
+        """解析带CP24Time2a的继电保护事件 (M_EP_TA_1)."""
+        event_val = data[offset] | (data[offset + 1] << 8)
+        q = QualityDescriptor(data[offset + 2]) if len(data) > offset + 2 else QualityDescriptor()
+        time_tag = CP24Time2a.from_bytes(data, offset + 3) if len(data) >= offset + 6 else None
+        return cls(
+            ioa=ioa,
+            event_value=event_val,
+            quality=q,
+            time_short=time_tag,
+        )
+
+    @classmethod
+    def from_bytes_long_time(cls, data: bytes, offset: int = 0, ioa: int = 0) -> ProtectionEvent:
+        """解析带CP56Time2a的继电保护事件 (M_EP_TD_1)."""
+        event_val = data[offset] | (data[offset + 1] << 8)
+        q = QualityDescriptor(data[offset + 2]) if len(data) > offset + 2 else QualityDescriptor()
+        time_tag = CP56Time2a.from_bytes(data, offset + 3) if len(data) >= offset + 10 else None
+        return cls(
+            ioa=ioa,
+            event_value=event_val,
+            quality=q,
+            time_long=time_tag,
+        )
+
+    def to_bytes_short_time(self) -> bytes:
+        result = bytes([self.event_value & 0xFF, (self.event_value >> 8) & 0xFF, self.quality.to_int()])
+        if self.time_short:
+            result += self.time_short.to_bytes()
+        return result
+
+    def to_bytes_long_time(self) -> bytes:
+        result = bytes([self.event_value & 0xFF, (self.event_value >> 8) & 0xFF, self.quality.to_int()])
+        if self.time_long:
+            result += self.time_long.to_bytes()
+        return result
+
+    @property
+    def has_short_time(self) -> bool:
+        return self.time_short is not None
+
+    @property
+    def has_long_time(self) -> bool:
+        return self.time_long is not None
+
+
+@dataclass
+class GroupSinglePointWithStatus:
+    """带状态检出的成组单点信息 (M_PS_NA_1 = 20 / M_PS_TB_1 = 71).
+
+    每个信息对象包含最多 8 个单点的状态和状态检出标志。
+    """
+    ioa: int = 0
+    points: list = field(default_factory=list)  # list of (state: bool, detected: bool)
+    time_long: Optional[CP56Time2a] = None      # M_PS_TB_1 带时标
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0, count: int = 8) -> GroupSinglePointWithStatus:
+        """解析成组单点信息，每组最多8个点。"""
+        # 状态检出标志 (1 byte)
+        detected_byte = data[offset]
+        # 状态字节 (1 byte)
+        state_byte = data[offset + 1]
+        points = []
+        for i in range(min(count, 8)):
+            state = bool(state_byte & (1 << i))
+            detected = bool(detected_byte & (1 << i))
+            points.append((state, detected))
+        return cls(ioa=ioa, points=points)
+
+    @classmethod
+    def from_bytes_with_time(cls, data: bytes, offset: int = 0, ioa: int = 0, count: int = 8) -> GroupSinglePointWithStatus:
+        """解析带CP56Time2a的成组单点信息 (M_PS_TB_1 = 71)."""
+        detected_byte = data[offset]
+        state_byte = data[offset + 1]
+        points = []
+        for i in range(min(count, 8)):
+            state = bool(state_byte & (1 << i))
+            detected = bool(detected_byte & (1 << i))
+            points.append((state, detected))
+        time_tag = CP56Time2a.from_bytes(data, offset + 2) if len(data) >= offset + 9 else None
+        return cls(ioa=ioa, points=points, time_long=time_tag)
+
+    def to_bytes(self) -> bytes:
+        detected_byte = 0
+        state_byte = 0
+        for i, (state, detected) in enumerate(self.points[:8]):
+            if state:
+                state_byte |= (1 << i)
+            if detected:
+                detected_byte |= (1 << i)
+        result = bytes([detected_byte, state_byte])
+        if self.time_long:
+            result += self.time_long.to_bytes()
+        return result
+
+
+@dataclass
+class InitializationEnd:
+    """初始化结束 (M_EI_NA_1 = 70)."""
+    ioa: int = 0
+    cause: int = 0           # 0=当地电源合上, 1=当地手动复位, 2=远方复位
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> InitializationEnd:
+        return cls(ioa=ioa, cause=data[offset] & 0x0F)
+
+    def to_bytes(self) -> bytes:
+        return bytes([self.cause & 0x0F])
+
+    @property
+    def cause_str(self) -> str:
+        return {
+            0: "当地电源合上",
+            1: "当地手动复位",
+            2: "远方复位",
+        }.get(self.cause, f"未知({self.cause})")
+
+
+@dataclass
+class TestCommand:
+    """测试命令 (C_TS_NA_1 = 104)."""
+    ioa: int = 0
+    test_pattern: int = 0x55AA  # 默认测试模式
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> TestCommand:
+        val = data[offset] | (data[offset + 1] << 8)
+        return cls(ioa=ioa, test_pattern=val)
+
+    def to_bytes(self) -> bytes:
+        return bytes([self.test_pattern & 0xFF, (self.test_pattern >> 8) & 0xFF])
+
+
+@dataclass
+class TestCommandWithTime:
+    """带时标CP56Time2a的测试命令 (C_TS_TA_1 = 107)."""
+    ioa: int = 0
+    test_pattern: int = 0x55AA
+    time_tag: CP56Time2a = field(default_factory=CP56Time2a)
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> TestCommandWithTime:
+        val = data[offset] | (data[offset + 1] << 8)
+        tt = CP56Time2a.from_bytes(data, offset + 2) if len(data) >= offset + 9 else CP56Time2a()
+        return cls(ioa=ioa, test_pattern=val, time_tag=tt)
+
+    def to_bytes(self) -> bytes:
+        return bytes([self.test_pattern & 0xFF, (self.test_pattern >> 8) & 0xFF]) + self.time_tag.to_bytes()
+
+
+@dataclass
+class ReadCommand:
+    """读命令 (C_RD_NA_1 = 102)."""
+    ioa: int = 0
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> ReadCommand:
+        return cls(ioa=ioa)
+
+    def to_bytes(self) -> bytes:
+        return b''  # 读命令的信息体为空（仅依赖IOA）
+
+
+@dataclass
+class ClockSyncCommand:
+    """时钟同步命令 (C_CS_NA_1 = 103)."""
+    ioa: int = 0
+    time_tag: CP56Time2a = field(default_factory=CP56Time2a.now)
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> ClockSyncCommand:
+        tt = CP56Time2a.from_bytes(data, offset) if len(data) >= offset + 7 else CP56Time2a()
+        return cls(ioa=ioa, time_tag=tt)
+
+    def to_bytes(self) -> bytes:
+        return self.time_tag.to_bytes()
+
+
+@dataclass
+class ResetProcessCommand:
+    """复位进程命令 (C_RP_NA_1 = 105)."""
+    ioa: int = 0
+    qualifier: int = 0       # 复位限定词 (0=未用)
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> ResetProcessCommand:
+        return cls(ioa=ioa, qualifier=data[offset])
+
+    def to_bytes(self) -> bytes:
+        return bytes([self.qualifier])
+
+
+@dataclass
+class ParameterCommandNormalized:
+    """测量值参数-归一化 (P_ME_NA_1 = 110)."""
+    ioa: int = 0
+    value: float = 0.0       # -1..+1
+    param_change: int = 0    # bit0-1: 0=未用, 1=运行中使用, 2=运行中不使用
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> ParameterCommandNormalized:
+        raw = data[offset] | (data[offset + 1] << 8)
+        signed_val = raw if raw < 0x8000 else raw - 0x10000
+        q = data[offset + 2]
+        return cls(
+            ioa=ioa,
+            value=signed_val / 32767.0,
+            param_change=q & 0x03,
+        )
+
+    def to_bytes(self) -> bytes:
+        raw = int(self.value * 32767)
+        raw = max(-32768, min(32767, raw))
+        if raw < 0:
+            raw += 0x10000
+        return bytes([raw & 0xFF, (raw >> 8) & 0xFF, self.param_change & 0x03])
+
+
+@dataclass
+class ParameterCommandScaled:
+    """测量值参数-标度化 (P_ME_NB_1 = 111)."""
+    ioa: int = 0
+    value: int = 0           # -32768..+32767
+    param_change: int = 0
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> ParameterCommandScaled:
+        raw = data[offset] | (data[offset + 1] << 8)
+        signed_val = raw if raw < 0x8000 else raw - 0x10000
+        q = data[offset + 2]
+        return cls(ioa=ioa, value=signed_val, param_change=q & 0x03)
+
+    def to_bytes(self) -> bytes:
+        raw = self.value
+        if raw < 0:
+            raw += 0x10000
+        return bytes([raw & 0xFF, (raw >> 8) & 0xFF, self.param_change & 0x03])
+
+
+@dataclass
+class ParameterCommandFloat:
+    """测量值参数-短浮点 (P_ME_NC_1 = 112)."""
+    ioa: int = 0
+    value: float = 0.0
+    param_change: int = 0
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> ParameterCommandFloat:
+        import struct
+        val = struct.unpack_from('<f', data, offset)[0]
+        q = data[offset + 4]
+        return cls(ioa=ioa, value=val, param_change=q & 0x03)
+
+    def to_bytes(self) -> bytes:
+        import struct
+        return struct.pack('<f', self.value) + bytes([self.param_change & 0x03])
+
+
+@dataclass
+class ParameterActivation:
+    """参数激活 (P_AC_NA_1 = 113)."""
+    ioa: int = 0
+    qualifier: int = 0       # 0=未用/取消, 1=激活/周期, 2=去激活
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> ParameterActivation:
+        return cls(ioa=ioa, qualifier=data[offset] & 0x03)
+
+    def to_bytes(self) -> bytes:
+        return bytes([self.qualifier & 0x03])
+
+    @property
+    def action_str(self) -> str:
+        return {0: "未用", 1: "激活", 2: "去激活"}.get(self.qualifier, f"未知({self.qualifier})")
+
+
+@dataclass
+class CounterInterrogationCommand:
+    """累计量召唤命令 (C_CI_NA_1 = 101)."""
+    ioa: int = 0
+    qcc: int = 0             # 累计量召唤限定词 (高5位=冻结, 低3位=组号)
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> CounterInterrogationCommand:
+        return cls(ioa=ioa, qcc=data[offset])
+
+    def to_bytes(self) -> bytes:
+        return bytes([self.qcc])
+
+    @property
+    def freeze_code(self) -> int:
+        """冻结码 (bit7-5): 0=读, 1=计数器冻结不复位, 2=计数器冻结复位, 3=计数器复位."""
+        return (self.qcc >> 5) & 0x07
+
+    @property
+    def group(self) -> int:
+        """组号 (bit2-0): 0=站召唤, 1-4=组召唤."""
+        return self.qcc & 0x07
+
+    @property
+    def freeze_str(self) -> str:
+        return {0: "读", 1: "冻结不复位", 2: "冻结复位", 3: "复位"}.get(self.freeze_code, f"未知({self.freeze_code})")
+
+
+@dataclass
+class DelayCommand:
+    """延时获得命令 (C_CD_NA_1 = 106)."""
+    ioa: int = 0
+    delay_ms: int = 0        # 延时值 (毫秒, 16-bit)
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> DelayCommand:
+        val = data[offset] | (data[offset + 1] << 8)
+        return cls(ioa=ioa, delay_ms=val)
+
+    def to_bytes(self) -> bytes:
+        return bytes([self.delay_ms & 0xFF, (self.delay_ms >> 8) & 0xFF])
+
+
+@dataclass
+class TestCommandBitPattern:
+    """测试命令-位模式，无时标 (C_TS_NB_1 = 108) — IEC 60870-5-101."""
+    ioa: int = 0
+    test_pattern_low: int = 0x55   # 低位字节
+    test_pattern_high: int = 0xAA  # 高位字节
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> TestCommandBitPattern:
+        return cls(ioa=ioa, test_pattern_low=data[offset], test_pattern_high=data[offset + 1])
+
+    def to_bytes(self) -> bytes:
+        return bytes([self.test_pattern_low, self.test_pattern_high])
+
+    @property
+    def pattern(self) -> int:
+        return self.test_pattern_low | (self.test_pattern_high << 8)
+
+
+@dataclass
+class ParameterCommandNormalizedNoQuality:
+    """不带品质描述词的测量值参数-归一化 (P_ME_ND_1 = 109) — IEC 60870-5-101."""
+    ioa: int = 0
+    value: float = 0.0       # -1..+1, 仅2字节归一化值，无品质描述词
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> ParameterCommandNormalizedNoQuality:
+        raw = data[offset] | (data[offset + 1] << 8)
+        signed_val = raw if raw < 0x8000 else raw - 0x10000
+        return cls(ioa=ioa, value=signed_val / 32767.0)
+
+    def to_bytes(self) -> bytes:
+        raw = int(self.value * 32767)
+        raw = max(-32768, min(32767, raw))
+        if raw < 0:
+            raw += 0x10000
+        return bytes([raw & 0xFF, (raw >> 8) & 0xFF])
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  File Transfer Objects (文件传输)
+# ═══════════════════════════════════════════════════════════════════
+
+@dataclass
+class FileReady:
+    """文件准备就绪 (F_FR_NA_1 = 120)."""
+    ioa: int = 0
+    file_name: int = 0       # 文件名 (16-bit)
+    file_length: int = 0     # 文件长度 (32-bit)
+    status: int = 0          # 0=缺省, 1=请求/读, 2=停止, 3=删除, 4=选择
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> FileReady:
+        import struct
+        fn = data[offset] | (data[offset + 1] << 8)
+        fl = struct.unpack_from('<I', data, offset + 2)[0]
+        st = data[offset + 6]
+        return cls(ioa=ioa, file_name=fn, file_length=fl, status=st)
+
+    def to_bytes(self) -> bytes:
+        import struct
+        return (bytes([self.file_name & 0xFF, (self.file_name >> 8) & 0xFF])
+                + struct.pack('<I', self.file_length)
+                + bytes([self.status]))
+
+    @property
+    def status_str(self) -> str:
+        return {0: "缺省", 1: "请求/读", 2: "停止", 3: "删除", 4: "选择"}.get(self.status, f"未知({self.status})")
+
+
+@dataclass
+class SectionReady:
+    """节准备就绪 (F_SR_NA_1 = 121)."""
+    ioa: int = 0
+    file_name: int = 0
+    section_name: int = 0    # 节名 (8-bit)
+    section_length: int = 0  # 节长度 (32-bit)
+    status: int = 0
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> SectionReady:
+        import struct
+        fn = data[offset] | (data[offset + 1] << 8)
+        sn = data[offset + 2]
+        sl = struct.unpack_from('<I', data, offset + 3)[0]
+        st = data[offset + 7]
+        return cls(ioa=ioa, file_name=fn, section_name=sn, section_length=sl, status=st)
+
+    def to_bytes(self) -> bytes:
+        import struct
+        return (bytes([self.file_name & 0xFF, (self.file_name >> 8) & 0xFF, self.section_name])
+                + struct.pack('<I', self.section_length)
+                + bytes([self.status]))
+
+
+@dataclass
+class CallDirectory:
+    """召唤目录/选择文件/召唤文件 (F_SC_NA_1 = 122)."""
+    ioa: int = 0
+    file_name: int = 0       # 文件名 (16-bit)
+    section_name: int = 0    # 节名 (8-bit)
+    qualifier: int = 0       # 0=缺省, 1=选择文件, 2=请求文件, 3=停止, 4=删除, 5=目录
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> CallDirectory:
+        fn = data[offset] | (data[offset + 1] << 8)
+        sn = data[offset + 2]
+        q = data[offset + 3]
+        return cls(ioa=ioa, file_name=fn, section_name=sn, qualifier=q)
+
+    def to_bytes(self) -> bytes:
+        return bytes([self.file_name & 0xFF, (self.file_name >> 8) & 0xFF, self.section_name, self.qualifier])
+
+    @property
+    def qualifier_str(self) -> str:
+        return {0: "缺省", 1: "选择文件", 2: "请求文件", 3: "停止", 4: "删除", 5: "目录"}.get(self.qualifier, f"未知({self.qualifier})")
+
+
+@dataclass
+class LastSection:
+    """最后的节/最后的段 (F_LS_NA_1 = 123)."""
+    ioa: int = 0
+    file_name: int = 0
+    section_name: int = 0
+    last_segment: int = 0    # 最后段号 (8-bit)
+    status: int = 0          # 0=缺省, 1=不带停止, 2=带停止, 3=不带停止(段丢失), 4=带停止(段丢失)
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> LastSection:
+        fn = data[offset] | (data[offset + 1] << 8)
+        sn = data[offset + 2]
+        ls = data[offset + 3]
+        st = data[offset + 4]
+        return cls(ioa=ioa, file_name=fn, section_name=sn, last_segment=ls, status=st)
+
+    def to_bytes(self) -> bytes:
+        return bytes([self.file_name & 0xFF, (self.file_name >> 8) & 0xFF,
+                      self.section_name, self.last_segment, self.status])
+
+    @property
+    def status_str(self) -> str:
+        return {0: "缺省", 1: "不带停止", 2: "带停止", 3: "不带停止(段丢失)", 4: "带停止(段丢失)"}.get(self.status, f"未知({self.status})")
+
+
+@dataclass
+class AckFileSection:
+    """确认文件/确认节 (F_AF_NA_1 = 124)."""
+    ioa: int = 0
+    file_name: int = 0
+    section_name: int = 0
+    qualifier: int = 0       # 0=缺省, 1=肯定文件, 2=否定文件, 3=肯定节, 4=否定节
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> AckFileSection:
+        fn = data[offset] | (data[offset + 1] << 8)
+        sn = data[offset + 2]
+        q = data[offset + 3]
+        return cls(ioa=ioa, file_name=fn, section_name=sn, qualifier=q)
+
+    def to_bytes(self) -> bytes:
+        return bytes([self.file_name & 0xFF, (self.file_name >> 8) & 0xFF, self.section_name, self.qualifier])
+
+    @property
+    def qualifier_str(self) -> str:
+        return {0: "缺省", 1: "肯定文件", 2: "否定文件", 3: "肯定节", 4: "否定节"}.get(self.qualifier, f"未知({self.qualifier})")
+
+
+@dataclass
+class FileSegment:
+    """段 (F_SG_NA_1 = 125)."""
+    ioa: int = 0
+    file_name: int = 0
+    section_name: int = 0
+    segment_number: int = 0  # 段号 (8-bit)
+    data: bytes = b''        # 段数据 (可变长度, 最多233字节)
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0, length: int = 0) -> FileSegment:
+        fn = data[offset] | (data[offset + 1] << 8)
+        sn = data[offset + 2]
+        seg_num = data[offset + 3]
+        seg_len = data[offset + 4]
+        seg_data = data[offset + 5:offset + 5 + seg_len]
+        return cls(ioa=ioa, file_name=fn, section_name=sn, segment_number=seg_num, data=seg_data)
+
+    def to_bytes(self) -> bytes:
+        return (bytes([self.file_name & 0xFF, (self.file_name >> 8) & 0xFF,
+                       self.section_name, self.segment_number, len(self.data)])
+                + self.data)
+
+
+@dataclass
+class DirectoryEntry:
+    """目录 (F_DR_TA_1 = 126) — 带时标CP56Time2a."""
+    ioa: int = 0
+    file_name: int = 0
+    file_length: int = 0     # 32-bit
+    status: int = 0          # 文件状态
+    time_tag: CP56Time2a = field(default_factory=CP56Time2a)
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> DirectoryEntry:
+        import struct
+        fn = data[offset] | (data[offset + 1] << 8)
+        fl = struct.unpack_from('<I', data, offset + 2)[0]
+        st = data[offset + 6]
+        tt = CP56Time2a.from_bytes(data, offset + 7) if len(data) >= offset + 14 else CP56Time2a()
+        return cls(ioa=ioa, file_name=fn, file_length=fl, status=st, time_tag=tt)
+
+    def to_bytes(self) -> bytes:
+        import struct
+        return (bytes([self.file_name & 0xFF, (self.file_name >> 8) & 0xFF])
+                + struct.pack('<I', self.file_length)
+                + bytes([self.status])
+                + self.time_tag.to_bytes())
+
+
+@dataclass
+class FileSelectCallGet:
+    """文件选择/召唤/获取 (F_SC_NB_1 = 127)."""
+    ioa: int = 0
+    file_name: int = 0
+    section_name: int = 0
+    qualifier: int = 0       # 0=缺省, 1=请求读, 2=停止, 3=删除, 4=选择, 5=请求目录
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> FileSelectCallGet:
+        fn = data[offset] | (data[offset + 1] << 8)
+        sn = data[offset + 2]
+        q = data[offset + 3]
+        return cls(ioa=ioa, file_name=fn, section_name=sn, qualifier=q)
+
+    def to_bytes(self) -> bytes:
+        return bytes([self.file_name & 0xFF, (self.file_name >> 8) & 0xFF, self.section_name, self.qualifier])
+
+    @property
+    def qualifier_str(self) -> str:
+        return {0: "缺省", 1: "请求读", 2: "停止", 3: "删除", 4: "选择", 5: "请求目录"}.get(self.qualifier, f"未知({self.qualifier})")
+
+
+@dataclass
+class FileReadyAck:
+    """文件准备就绪-确认 (F_FR_NB_1 = 128) — IEC 60870-5-101."""
+    ioa: int = 0
+    file_name: int = 0
+    file_length: int = 0
+    status: int = 0
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> FileReadyAck:
+        import struct
+        fn = data[offset] | (data[offset + 1] << 8)
+        fl = struct.unpack_from('<I', data, offset + 2)[0]
+        st = data[offset + 6]
+        return cls(ioa=ioa, file_name=fn, file_length=fl, status=st)
+
+    def to_bytes(self) -> bytes:
+        import struct
+        return (bytes([self.file_name & 0xFF, (self.file_name >> 8) & 0xFF])
+                + struct.pack('<I', self.file_length)
+                + bytes([self.status]))
+
+
+@dataclass
+class SectionReadyAck:
+    """节准备就绪-确认 (F_SR_NB_1 = 129) — IEC 60870-5-101."""
+    ioa: int = 0
+    file_name: int = 0
+    section_name: int = 0
+    section_length: int = 0
+    status: int = 0
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> SectionReadyAck:
+        import struct
+        fn = data[offset] | (data[offset + 1] << 8)
+        sn = data[offset + 2]
+        sl = struct.unpack_from('<I', data, offset + 3)[0]
+        st = data[offset + 7]
+        return cls(ioa=ioa, file_name=fn, section_name=sn, section_length=sl, status=st)
+
+    def to_bytes(self) -> bytes:
+        import struct
+        return (bytes([self.file_name & 0xFF, (self.file_name >> 8) & 0xFF, self.section_name])
+                + struct.pack('<I', self.section_length)
+                + bytes([self.status]))
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Type ID Registry (类型标识注册表)
+# ═══════════════════════════════════════════════════════════════════
+
+# 类型标识 → 数据类的映射（用于自动解码ASDU信息体）
+TYPE_REGISTRY: dict[int, type] = {
+    # 监控方向 - 基础类型
+    TypeID.M_SP_NA_1: SinglePoint,
+    TypeID.M_SP_TA_1: SinglePoint,
+    TypeID.M_DP_NA_1: DoublePoint,
+    TypeID.M_DP_TA_1: DoublePoint,
+    TypeID.M_ST_NA_1: StepPosition,
+    TypeID.M_ST_TA_1: StepPosition,
+    TypeID.M_BO_NA_1: BitString32,
+    TypeID.M_BO_TA_1: BitString32,
+    TypeID.M_ME_NA_1: NormalizedValue,
+    TypeID.M_ME_TA_1: NormalizedValue,
+    TypeID.M_ME_NB_1: ScaledValue,
+    TypeID.M_ME_TB_1: ScaledValue,
+    TypeID.M_ME_NC_1: ShortFloat,
+    TypeID.M_ME_TC_1: ShortFloat,
+    TypeID.M_IT_NA_1: CounterValue,
+    TypeID.M_IT_TA_1: CounterValue,
+    TypeID.M_ME_ND_1: NormalizedValue,   # 不带品质描述词，但结构兼容
+    TypeID.M_PS_NA_1: GroupSinglePointWithStatus,
+    TypeID.M_PS_TB_1: GroupSinglePointWithStatus,
+    # 继电保护
+    TypeID.M_EP_TA_1: ProtectionEvent,
+    TypeID.M_EP_TB_1: ProtectionEvent,
+    TypeID.M_EP_TC_1: ProtectionEvent,
+    TypeID.M_EP_TD_1: ProtectionEvent,
+    TypeID.M_EP_TE_1: ProtectionEvent,
+    TypeID.M_EP_TF_1: ProtectionEvent,
+    # 带CP56Time2a的监控类型
+    TypeID.M_SP_TB_1: SinglePoint,
+    TypeID.M_DP_TB_1: DoublePoint,
+    TypeID.M_ST_TB_1: StepPosition,
+    TypeID.M_BO_TB_1: BitString32,
+    TypeID.M_ME_TD_1: NormalizedValue,
+    TypeID.M_ME_TE_1: ScaledValue,
+    TypeID.M_ME_TF_1: ShortFloat,
+    TypeID.M_IT_TB_1: CounterValue,
+    # 控制方向
+    TypeID.C_SC_NA_1: SingleCommand,
+    TypeID.C_DC_NA_1: DoubleCommand,
+    TypeID.C_RC_NA_1: RegulatingStepCommand,
+    TypeID.C_SE_NA_1: SetpointCommandN,
+    TypeID.C_SE_NB_1: SetpointCommandScaled,
+    TypeID.C_SE_NC_1: SetpointCommandS,
+    TypeID.C_BO_NA_1: BitString32Command,
+    # 系统命令
+    TypeID.C_IC_NA_1: SingleCommand,     # 总召限定词复用
+    TypeID.C_CI_NA_1: CounterInterrogationCommand,
+    TypeID.C_RD_NA_1: ReadCommand,
+    TypeID.C_CS_NA_1: ClockSyncCommand,
+    TypeID.C_TS_NA_1: TestCommand,
+    TypeID.C_TS_TA_1: TestCommandWithTime,
+    TypeID.C_TS_NB_1: TestCommandBitPattern,
+    TypeID.C_RP_NA_1: ResetProcessCommand,
+    TypeID.C_CD_NA_1: DelayCommand,
+    TypeID.M_EI_NA_1: InitializationEnd,
+    # 参数命令
+    TypeID.P_ME_NA_1: ParameterCommandNormalized,
+    TypeID.P_ME_NB_1: ParameterCommandScaled,
+    TypeID.P_ME_NC_1: ParameterCommandFloat,
+    TypeID.P_ME_ND_1: ParameterCommandNormalizedNoQuality,
+    TypeID.P_AC_NA_1: ParameterActivation,
+    # 文件传输
+    TypeID.F_FR_NA_1: FileReady,
+    TypeID.F_SR_NA_1: SectionReady,
+    TypeID.F_SC_NA_1: CallDirectory,
+    TypeID.F_LS_NA_1: LastSection,
+    TypeID.F_AF_NA_1: AckFileSection,
+    TypeID.F_SG_NA_1: FileSegment,
+    TypeID.F_DR_TA_1: DirectoryEntry,
+    TypeID.F_SC_NB_1: FileSelectCallGet,
+    TypeID.F_FR_NB_1: FileReadyAck,
+    TypeID.F_SR_NB_1: SectionReadyAck,
+}
+
+
+def get_type_info(type_id: int) -> str:
+    """返回类型标识的中文描述."""
+    try:
+        tid = TypeID(type_id)
+        return tid.name
+    except ValueError:
+        return f"未知类型({type_id})"
+
+
 # ═══════════════════════════════════════════════════════════════════
 #  Group Call Definitions
 # ═══════════════════════════════════════════════════════════════════
 
 class QualifierOfInterrogation(enum.IntEnum):
-    """总召唤限定词."""
-    STATION = 20       # 站召唤
+    """总召唤限定词 — IEC 60870-5-104 Table 1-75."""
     GROUP_1 = 1        # 第1组
     GROUP_2 = 2        # 第2组
     GROUP_3 = 3
@@ -611,19 +1430,37 @@ class QualifierOfInterrogation(enum.IntEnum):
     GROUP_14 = 14
     GROUP_15 = 15
     GROUP_16 = 16
+    STATION = 20       # 站召唤（全局）
+
+    @classmethod
+    def is_valid(cls, qoi: int) -> bool:
+        """判断限定词是否有效 (1-16 或 20)."""
+        return (1 <= qoi <= 16) or qoi == 20
+
+    @classmethod
+    def get_group_number(cls, qoi: int) -> Optional[int]:
+        """提取组号 (1-16), 站召唤返回 None."""
+        if 1 <= qoi <= 16:
+            return qoi
+        return None
 
 
 class QualifierOfCounterInterrogation(enum.IntEnum):
-    """累计量召唤限定词."""
+    """累计量召唤限定词 — IEC 60870-5-104 Table 1-76."""
     STATION = 0        # 站召唤
-    GROUP_1 = 1
-    GROUP_2 = 2
-    GROUP_3 = 3
-    GROUP_4 = 4
-    REQUEST_1 = 5      # 请求第1组
-    REQUEST_2 = 6
-    REQUEST_3 = 7
-    REQUEST_4 = 8
+    GROUP_1 = 1        # 第1组
+    GROUP_2 = 2        # 第2组
+    GROUP_3 = 3        # 第3组
+    GROUP_4 = 4        # 第4组
+    REQUEST_GROUP_1 = 5   # 请求第1组
+    REQUEST_GROUP_2 = 6   # 请求第2组
+    REQUEST_GROUP_3 = 7   # 请求第3组
+    REQUEST_GROUP_4 = 8   # 请求第4组
+
+    @classmethod
+    def is_freeze_request(cls, qcc: int) -> bool:
+        """判断是否为冻结请求 (5-8)."""
+        return 5 <= qcc <= 8
 
 
 # ═══════════════════════════════════════════════════════════════════

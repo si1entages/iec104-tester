@@ -25,8 +25,9 @@ from ..protocol.types import (
     TypeID, COT, ConnState,
     SinglePoint, DoublePoint, NormalizedValue, ScaledValue, ShortFloat,
     CounterValue, QualityDescriptor, CP56Time2a,
-    SingleCommand, DoubleCommand,
-    SetpointCommandN, SetpointCommandS,
+    SingleCommand, DoubleCommand, RegulatingStepCommand,
+    SetpointCommandN, SetpointCommandS, SetpointCommandScaled,
+    BitString32Command,
     QualifierOfInterrogation,
 )
 from ..protocol.sequence import SequenceManager
@@ -344,7 +345,7 @@ class SlaveEngine:
             asyncio.create_task(self._handle_reset_process(state, asdu))
 
         # 测试命令
-        elif type_id == TypeID.C_TS_NA_1 and cot == COT.ACT:
+        elif type_id in (TypeID.C_TS_NA_1, TypeID.C_TS_TA_1, TypeID.C_TS_NB_1) and cot == COT.ACT:
             asyncio.create_task(self._handle_test_command(state, asdu))
 
         # 单命令
@@ -355,9 +356,33 @@ class SlaveEngine:
         elif type_id == TypeID.C_DC_NA_1:
             asyncio.create_task(self._handle_double_command(state, asdu))
 
+        # 升降命令
+        elif type_id == TypeID.C_RC_NA_1:
+            asyncio.create_task(self._handle_regulating_command(state, asdu))
+
         # 设点命令
         elif type_id in (TypeID.C_SE_NA_1, TypeID.C_SE_NB_1, TypeID.C_SE_NC_1):
             asyncio.create_task(self._handle_setpoint_command(state, asdu))
+
+        # 比特串命令
+        elif type_id == TypeID.C_BO_NA_1:
+            asyncio.create_task(self._handle_bitstring_command(state, asdu))
+
+        # 延时获得
+        elif type_id == TypeID.C_CD_NA_1:
+            asyncio.create_task(self._handle_delay_command(state, asdu))
+
+        # 参数命令
+        elif type_id in (TypeID.P_ME_NA_1, TypeID.P_ME_NB_1, TypeID.P_ME_NC_1,
+                          TypeID.P_ME_ND_1, TypeID.P_AC_NA_1):
+            asyncio.create_task(self._handle_parameter_command(state, asdu))
+
+        # 文件传输
+        elif type_id in (TypeID.F_FR_NA_1, TypeID.F_SR_NA_1, TypeID.F_SC_NA_1,
+                          TypeID.F_LS_NA_1, TypeID.F_AF_NA_1, TypeID.F_SG_NA_1,
+                          TypeID.F_DR_TA_1, TypeID.F_SC_NB_1,
+                          TypeID.F_FR_NB_1, TypeID.F_SR_NB_1):
+            asyncio.create_task(self._handle_file_transfer(state, asdu))
 
         else:
             logger.warning(f"Unhandled ASDU: type={type_id}, cot={cot}")
@@ -454,7 +479,7 @@ class SlaveEngine:
                 continue
             ym_data = self._data_store.get_ym(p.ioa)
             if ym_data:
-                self._send_i_frame(state, ASDUBuilder.build_short_float(
+                await self._send_i_frame(state, ASDUBuilder.build_short_float(
                     self._common_addr, p.ioa, float(ym_data.value),
                     ym_data.quality.to_int(), cot=COT.INTROGEN
                 ))
@@ -592,6 +617,68 @@ class SlaveEngine:
             )
             ack_asdu.objects.append(obj)
             await self._send_i_frame(state, ack_asdu.encode())
+
+    async def _handle_regulating_command(self, state: _ClientState, asdu: ASDU) -> None:
+        """处理升降命令."""
+        if not asdu.objects:
+            return
+        obj = asdu.objects[0]
+        cmd: RegulatingStepCommand = obj.data
+        logger.info(
+            f"Regulating Command from {state.conn.name}: "
+            f"IOA={obj.ioa} state={cmd.state_str} select={cmd.select}"
+        )
+        self._fire_event(SlaveEvent.COMMAND_RECEIVED, {
+            "client_id": state.conn.name,
+            "type": "regulating",
+            "ioa": obj.ioa,
+            "state": cmd.state,
+            "select": cmd.select,
+        })
+        if asdu.cot == COT.ACT:
+            ack_asdu = ASDU(
+                type_id=TypeID.C_RC_NA_1, sq=False, num=1,
+                cot=COT.ACTCON, common_addr=self._common_addr,
+            )
+            ack_asdu.objects.append(obj)
+            await self._send_i_frame(state, ack_asdu.encode())
+
+    async def _handle_bitstring_command(self, state: _ClientState, asdu: ASDU) -> None:
+        """处理比特串命令."""
+        if not asdu.objects:
+            return
+        obj = asdu.objects[0]
+        cmd: BitString32Command = obj.data
+        logger.info(f"Bitstring Command from {state.conn.name}: IOA={obj.ioa} value=0x{cmd.value:08X}")
+        if asdu.cot == COT.ACT:
+            ack_asdu = ASDU(
+                type_id=TypeID.C_BO_NA_1, sq=False, num=1,
+                cot=COT.ACTCON, common_addr=self._common_addr,
+            )
+            ack_asdu.objects.append(obj)
+            await self._send_i_frame(state, ack_asdu.encode())
+
+    async def _handle_delay_command(self, state: _ClientState, asdu: ASDU) -> None:
+        """处理延时获得命令."""
+        logger.info(f"Delay Command from {state.conn.name}")
+
+    async def _handle_parameter_command(self, state: _ClientState, asdu: ASDU) -> None:
+        """处理参数命令."""
+        if not asdu.objects:
+            return
+        obj = asdu.objects[0]
+        logger.info(f"Parameter Command from {state.conn.name}: type={asdu.type_id} IOA={obj.ioa}")
+        if asdu.cot == COT.ACT:
+            ack_asdu = ASDU(
+                type_id=asdu.type_id, sq=False, num=1,
+                cot=COT.ACTCON, common_addr=self._common_addr,
+            )
+            ack_asdu.objects.append(obj)
+            await self._send_i_frame(state, ack_asdu.encode())
+
+    async def _handle_file_transfer(self, state: _ClientState, asdu: ASDU) -> None:
+        """处理文件传输."""
+        logger.info(f"File Transfer from {state.conn.name}: type={asdu.type_id}")
 
     # ── 数据变化上送 ──────────────────────────────────────────────
 

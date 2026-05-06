@@ -31,7 +31,7 @@ class ParsedIO:
     display_value: str = ""         # 显示用字符串
     quality: QualityDescriptor = field(default_factory=QualityDescriptor)
     time_tag: Optional[CP56Time2a] = None
-    raw_bytes: bytes = b ""
+    raw_bytes: bytes = b""
 
     @property
     def has_time(self) -> bool:
