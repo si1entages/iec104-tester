@@ -8,10 +8,13 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Callable, Optional
 
 from .constants import K_DEFAULT, W_DEFAULT
+
+logger = logging.getLogger("iec104.sequence")
 
 
 class SequenceManager:
@@ -109,6 +112,7 @@ class SequenceManager:
         with self._lock:
             expected = self._recv_seq
             if rx_seq != expected:
+                logger.warning(f"Sequence mismatch: expected={expected}, received={rx_seq}")
                 return False
 
             self._recv_seq = (self._recv_seq + 1) & 0x7FFF

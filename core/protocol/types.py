@@ -830,6 +830,29 @@ class InitializationEnd:
 
 
 @dataclass
+class InterrogationCommand:
+    """总召唤命令 (C_IC_NA_1 = 100)."""
+    ioa: int = 0
+    qoi: int = 20            # 限定词 (20=站召唤, 1-16=组召唤)
+
+    @classmethod
+    def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> InterrogationCommand:
+        return cls(ioa=ioa, qoi=data[offset] & 0xFF)
+
+    def to_bytes(self) -> bytes:
+        return bytes([self.qoi & 0xFF])
+
+    @property
+    def qoi_str(self) -> str:
+        if self.qoi == 20:
+            return "站召唤"
+        elif 1 <= self.qoi <= 16:
+            return f"第{self.qoi}组召唤"
+        else:
+            return f"未知({self.qoi})"
+
+
+@dataclass
 class TestCommand:
     """测试命令 (C_TS_NA_1 = 104)."""
     ioa: int = 0
@@ -1369,7 +1392,7 @@ TYPE_REGISTRY: dict[int, type] = {
     TypeID.C_SE_NC_1: SetpointCommandS,
     TypeID.C_BO_NA_1: BitString32Command,
     # 系统命令
-    TypeID.C_IC_NA_1: SingleCommand,     # 总召限定词复用
+    TypeID.C_IC_NA_1: InterrogationCommand,  # 总召唤命令
     TypeID.C_CI_NA_1: CounterInterrogationCommand,
     TypeID.C_RD_NA_1: ReadCommand,
     TypeID.C_CS_NA_1: ClockSyncCommand,

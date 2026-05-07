@@ -142,10 +142,12 @@ class ConnectionStateMachine:
         """收到 STOPDT CON — 停止数据传输."""
         with self._lock:
             old = self._state.value
-            self._state = ConnState.CONNECTING
-            self._stop_timer(TimerType.T1)
-            self._start_timer(TimerType.T3)
-            self._notify_state_change(old, self._state.value)
+            # 只有在RUNNING或CONNECTING状态才处理STOPDT CON
+            if self._state in (ConnState.RUNNING, ConnState.CONNECTING):
+                self._state = ConnState.CONNECTING
+                self._stop_timer(TimerType.T1)
+                self._start_timer(TimerType.T3)
+                self._notify_state_change(old, self._state.value)
 
     def on_disconnected(self) -> None:
         """TCP 连接断开."""
@@ -162,7 +164,6 @@ class ConnectionStateMachine:
     def on_i_frame_sent(self) -> None:
         """发送了 I 帧 — 启动/重置 t1."""
         self._start_timer(TimerType.T1)
-        self._start_timer(TimerType.T2)
 
     def on_i_frame_received(self) -> None:
         """收到 I 帧 — 启动 t2（延迟确认）."""

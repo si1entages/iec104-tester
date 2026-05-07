@@ -163,11 +163,27 @@ def main():
 
     # 应用主题
     from gui.themes import get_theme
-    app.setStyleSheet(get_theme(config.display.theme))
+    base_theme = get_theme(config.display.theme)
+
+    # 加载补充样式
+    style_qss_path = os.path.join(os.path.dirname(__file__), "resources", "style.qss")
+    extra_style = ""
+    if os.path.exists(style_qss_path):
+        with open(style_qss_path, "r", encoding="utf-8") as f:
+            extra_style = f.read()
+
+    app.setStyleSheet(base_theme + "\n" + extra_style)
 
     # 创建主窗口
     from gui.main_window import MainWindow
     window = MainWindow(config)
+
+    # 设置窗口图标
+    from PySide6.QtGui import QIcon
+    icon_path = os.path.join(os.path.dirname(__file__), "resources", "icon.svg")
+    if os.path.exists(icon_path):
+        window.setWindowIcon(QIcon(icon_path))
+
     window.show()
 
     logger.info(

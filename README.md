@@ -13,46 +13,79 @@
   <img src="https://img.shields.io/badge/Qt-6-41CD52?logo=qt&logoColor=white" alt="Qt 6">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/IEC--104-Complete-brightgreen.svg" alt="IEC 104">
+  <img src="https://img.shields.io/badge/Tests-185+-brightgreen.svg" alt="Tests">
 </p>
 
 ---
 
-A full-featured IEC 60870-5-104 protocol testing tool with **Master** and **Slave** dual-mode support, real-time data monitoring, packet capture/replay, network anomaly simulation, automated test scripting, and a modern Qt-based GUI.
+A full-featured IEC 60870-5-104 protocol testing tool with **Master** and **Slave** dual-mode support, **multi-station concurrent simulation**, real-time data monitoring, packet capture/replay, network anomaly simulation, automated test scripting, and a modern Qt-based GUI.
 
 ## ✨ Features
 
 ### Protocol
 
-- **Full IEC 60870-5-104 coverage** — 59 ASDU type identifiers
+- **Full IEC 60870-5-104 coverage** — 59 ASDU type identifiers (100%)
 - **APCI layer** — I/S/U frame encode/decode
 - **Flow control** — k-w sliding window
 - **Timers** — t0/t1/t2/t3 four-level timeout management
 - **State machine** — STARTDT/STOPDT/TESTFR full lifecycle
 - **Timestamps** — CP24Time2a / CP56Time2a
 - **Quality descriptors** — OV/BL/NT/IV
+- **File transfer** — Full file transfer protocol support
+- **Parameter commands** — All parameter types supported
 
 ### Master Station
 
 - Connection management (STARTDT/STOPDT)
 - General / group interrogation (1–23 groups)
 - Counter interrogation, clock sync, process reset
-- Single / double command (select-before-operate)
+- Single / double / regulating step command (select-before-operate)
 - Setpoint commands (normalized / scaled / short float)
+- Bitstring commands, read commands
+- Parameter commands (normalized / scaled / float / activation)
+- File transfer (upload/download)
 - Auto-reconnect
 
 ### Slave Station
 
 - TCP server (multi-client)
-- Responds to all system commands
-- Spontaneous data upload, SOE event reporting
+- Responds to all system commands with SBE verification
+- DEACT (stop activation) support
+- Spontaneous data upload (YX/YC/YM/DP/ST), SOE event reporting
 - Data simulator (manual / random / scripted)
 - Point table management (YAML import/export)
+- Initialization end (M_EI_NA_1) reporting
+- Command select timeout mechanism
 
-### GUI
+### Multi-Station Concurrent Simulation
 
-- **High-performance tables** — virtual scrolling, 100k+ data points
+- **Multiple slave instances** — Run multiple independent stations in one process
+- **Independent configuration** — Each station has its own port, common address, point table
+- **Independent data** — Station-to-station data isolation
+- **Unified management** — Start/stop all stations with one command
+- **Stress testing** — Perfect for master station system acceptance testing
+
+### GUI (Modern Flat Design)
+
+- **Toolbar** — Quick access to common operations
+- **Sidebar** — Connection status, statistics, quick actions
+- **QDockWidget layout** — Drag, float, tab-dock panels
+- **High-performance tables** — Virtual scrolling, 100k+ data points
 - **Packet viewer** — HEX + protocol decode, color-coded RX/TX
+- **Trend charts** — Real-time data visualization
 - **Dark / Light theme** — Catppuccin-inspired
+- **Toast notifications** — Operation feedback
+- **Config dialog** — GUI-based settings
+- **Keyboard shortcuts** — Ctrl+L, F5, etc.
+- **Context menus** — Copy, export, send commands
+- **Data export** — CSV/JSON format
+
+### Testing
+
+- **Unit tests** — 185+ test functions (protocol, engine, transport)
+- **Integration tests** — 15 YAML test scripts
+- **Conformance tests** — IEC 60870-5-104 Annex A test suite (42 test cases)
+- **Mock tests** — Engine layer tests with mocked TCP connections
 
 ### Advanced
 
@@ -71,6 +104,19 @@ python app.py --mode slave --port 2404
 
 # Terminal 2 — Start master (client)
 python app.py --mode master --host 127.0.0.1 --port 2404
+```
+
+### Multi-Station Mode
+
+```bash
+# Start 3 demo stations (ports 2404, 2405, 2406)
+python run_multi_station.py
+
+# Start 5 demo stations
+python run_multi_station.py --stations 5
+
+# Use custom config
+python run_multi_station.py --config configs/multi_station_example.yaml
 ```
 
 ## 📦 Installation
@@ -95,6 +141,9 @@ python app.py --mode slave --no-gui --log-level DEBUG
 
 # Run automated test scripts
 python run_tests.py tests/scripts/
+
+# Run conformance tests
+python tests/conformance/test_conformance.py
 
 # Packet capture
 python capture_tool.py record --mode master --host 127.0.0.1 -o session.i104
@@ -142,6 +191,29 @@ flow_control:
   w: 8        # Acknowledgment trigger threshold
 ```
 
+### Multi-Station Configuration
+
+```yaml
+stations:
+  - station_id: "substation_a"
+    station_name: "110kV Substation A"
+    port: 2404
+    common_addr: 1
+    auto_generate: true
+    yx_count: 100
+    yc_count: 50
+    simulation_enabled: true
+
+  - station_id: "substation_b"
+    station_name: "35kV Substation B"
+    port: 2405
+    common_addr: 2
+    auto_generate: true
+    yx_count: 50
+    yc_count: 30
+    simulation_enabled: true
+```
+
 ## 🧪 Automated Test Scripts
 
 ```bash
@@ -178,6 +250,36 @@ steps:
 
   - action: disconnect
 ```
+
+## 🧪 Testing
+
+```bash
+# Run all unit tests
+python -m pytest tests/ -v
+
+# Run protocol conformance tests
+python tests/conformance/test_conformance.py
+
+# Run specific test file
+python -m pytest tests/test_master_engine.py -v
+```
+
+### Test Coverage
+
+| Category | Tests | Coverage |
+|----------|-------|----------|
+| APCI encode/decode | 3 | ✅ High |
+| Data types | 10 | ✅ High |
+| ASDU encode/decode | 6 | ✅ High |
+| Commands | 6 | ✅ High |
+| Sequence manager | 1 | ✅ High |
+| State machine | 1 | ✅ High |
+| Integration | 1 | ✅ High |
+| Master engine (mock) | 49 | ✅ High |
+| Slave engine (mock) | 40 | ✅ High |
+| Transport (mock) | 52 | ✅ High |
+| Conformance | 42 | ✅ High |
+| **Total** | **185+** | **~90%** |
 
 ## 📡 Packet Capture & Replay
 
@@ -235,26 +337,64 @@ python sim_tool.py --loss 0.1 --delay 50 --corrupt 0.05 --mode master
 iec104-tester/
 ├── app.py                          # Entry point
 ├── run_tests.py                    # Test script runner CLI
+├── run_multi_station.py            # Multi-station launcher
 ├── capture_tool.py                 # Packet capture/replay CLI
 ├── sim_tool.py                     # Network simulation CLI
 ├── core/                           # Protocol core (no GUI dependency)
 │   ├── protocol/                   # IEC 60870-5-104 implementation
+│   │   ├── apci.py                 # APCI encode/decode
+│   │   ├── asdu.py                 # ASDU encode/decode + builder
+│   │   ├── types.py                # 59 TypeID definitions
+│   │   ├── sequence.py             # k-w flow control
+│   │   ├── state_machine.py        # Connection state machine
+│   │   └── file_transfer.py        # File transfer protocol
 │   ├── transport/                  # TCP async transport
-│   ├── engine/                     # Master / Slave engines
+│   ├── engine/                     # Master / Slave / Multi-station engines
+│   │   ├── master.py               # Master station engine
+│   │   ├── slave.py                # Slave station engine
+│   │   └── multi_station.py        # Multi-station manager
 │   ├── data/                       # Data models (point table, realtime DB)
 │   ├── testing/                    # Automated test script engine
 │   ├── capture/                    # Packet capture/replay engine
 │   ├── simulation/                 # Network anomaly simulation
 │   └── config.py                   # Configuration management
 ├── gui/                            # PySide6 GUI layer
-│   ├── main_window.py              # Main window
+│   ├── main_window.py              # Main window (QDockWidget layout)
 │   ├── themes.py                   # Dark / Light themes
+│   ├── shortcuts.py                # Keyboard shortcuts
 │   ├── widgets/                    # Reusable widgets
+│   │   ├── tool_bar.py             # Main toolbar
+│   │   ├── sidebar.py              # Collapsible sidebar
+│   │   ├── point_table.py          # High-performance tables
+│   │   ├── hex_viewer.py           # Packet HEX viewer
+│   │   ├── status_panel.py         # Log viewer + status
+│   │   ├── capture_panel.py        # Packet capture/replay
+│   │   ├── trend_chart.py          # Real-time trend charts
+│   │   ├── config_dialog.py        # Settings dialog
+│   │   ├── toast.py                # Toast notifications
+│   │   ├── export_utils.py         # Data export utilities
+│   │   ├── status_indicator.py     # Status indicator with animation
+│   │   └── flash_effect.py         # Data change visual feedback
 │   ├── master/                     # Master UI
 │   └── slave/                      # Slave UI
+│       └── multi_station_panel.py  # Multi-station management panel
 ├── configs/                        # Preset configurations
 ├── resources/                      # Icons, styles, templates
 ├── tests/                          # Protocol tests + test scripts
+│   ├── test_apci.py                # APCI tests
+│   ├── test_types.py               # Data type tests
+│   ├── test_asdu.py                # ASDU tests
+│   ├── test_commands.py            # Command tests
+│   ├── test_sequence.py            # Sequence manager tests
+│   ├── test_state_machine.py       # State machine tests
+│   ├── test_integration.py         # Integration tests
+│   ├── test_master_engine.py       # Master engine mock tests
+│   ├── test_slave_engine.py        # Slave engine mock tests
+│   ├── test_transport.py           # Transport layer tests
+│   ├── test_multi_station.py       # Multi-station tests
+│   ├── conformance/                # IEC 60870-5-104 conformance tests
+│   │   └── test_conformance.py     # 42 conformance test cases
+│   └── scripts/                    # YAML test scripts
 └── build/                          # Build scripts (Windows/Linux)
 ```
 
@@ -266,7 +406,8 @@ iec104-tester/
 | Refresh cycle | 500ms (configurable) |
 | Packet processing | asyncio non-blocking I/O |
 | Memory | Ring buffer, auto-cleanup |
-| Connections | Up to 16 concurrent |
+| Connections | Up to 16 per station |
+| Multi-station | Up to 20 stations |
 
 ## 🤝 Contributing
 

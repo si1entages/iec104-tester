@@ -1,0 +1,97 @@
+# 读命令测试
+# 验证: 读命令/响应流程
+
+name: read_command
+description: "读命令测试"
+version: "1.0"
+tags: [read, master, functional]
+
+config:
+  role: master
+  timeout: 30
+  connection:
+    host: "127.0.0.1"
+    port: 2404
+    common_addr: 1
+    reconnect: false
+  timers:
+    t0: 10
+    t1: 10
+    t2: 5
+    t3: 15
+  flow_control:
+    k: 12
+    w: 8
+
+steps:
+  # Step 0: 建立连接
+  - action: connect
+    description: "建立 TCP 连接"
+    assert:
+      - type: state
+        params: { expected: "connected" }
+
+  # Step 1: 等待 STARTDT 完成
+  - action: wait_state
+    description: "等待进入运行态"
+    params:
+      state: running
+      timeout: 10
+    assert:
+      - type: state
+        params: { expected: "running" }
+
+  # Step 2: 发送读命令-遥信
+  - action: read_command
+    description: "发送读命令-遥信 (C_RD_NA_1)"
+    params:
+      ioa: 1
+    assert:
+      - type: frame_count
+        params: { direction: tx, frame_type: I, min: 1 }
+
+  # Step 3: 等待读响应
+  - action: wait_frames
+    description: "等待子站读响应"
+    params:
+      direction: rx
+      count: 1
+      frame_type: I
+      timeout: 5
+
+  # Step 4: 发送读命令-遥测
+  - action: read_command
+    description: "发送读命令-遥测 (C_RD_NA_1)"
+    params:
+      ioa: 100
+    assert:
+      - type: frame_count
+        params: { direction: tx, frame_type: I, min: 1 }
+
+  # Step 5: 等待读响应
+  - action: wait_frames
+    description: "等待子站读响应"
+    params:
+      direction: rx
+      count: 1
+      frame_type: I
+      timeout: 5
+
+  # Step 6: 等待一段时间
+  - action: wait
+    description: "等待数据传输完成"
+    params:
+      seconds: 1
+
+  # Step 7: 记录统计信息
+  - action: log
+    description: "记录统计信息"
+    params:
+      message: "读命令测试完成"
+
+  # Step 8: 断开连接
+  - action: disconnect
+    description: "断开连接"
+    assert:
+      - type: state
+        params: { expected: "disconnected" }

@@ -16,7 +16,18 @@ from .types import (
     NormalizedValue, ScaledValue, ShortFloat,
     CounterValue, BitString32,
     SingleCommand, DoubleCommand,
-    SetpointCommandN, SetpointCommandS,
+    SetpointCommandN, SetpointCommandS, SetpointCommandScaled,
+    RegulatingStepCommand, BitString32Command,
+    InterrogationCommand, CounterInterrogationCommand,
+    ReadCommand, ClockSyncCommand,
+    TestCommand, TestCommandWithTime, TestCommandBitPattern,
+    ResetProcessCommand, DelayCommand,
+    InitializationEnd, ProtectionEvent, GroupSinglePointWithStatus,
+    ParameterCommandNormalized, ParameterCommandScaled as ParamCmdScaled,
+    ParameterCommandFloat, ParameterCommandNormalizedNoQuality,
+    ParameterActivation,
+    FileReady, SectionReady, CallDirectory, LastSection, AckFileSection,
+    FileSegment, DirectoryEntry, FileSelectCallGet, FileReadyAck, SectionReadyAck,
     CP24Time2a, CP56Time2a,
 )
 
@@ -147,6 +158,68 @@ def format_value_display(type_id: TypeID, value: Any) -> str:
         return f"{'选择' if value.select else '执行'} {value.value:.6f}"
     elif isinstance(value, SetpointCommandS):
         return f"{'选择' if value.select else '执行'} {value.value:.4f}"
+    elif isinstance(value, SetpointCommandScaled):
+        return f"{'选择' if value.select else '执行'} {value.value}"
+    elif isinstance(value, RegulatingStepCommand):
+        return f"{'选择' if value.select else '执行'} {value.state_str}"
+    elif isinstance(value, BitString32Command):
+        return f"0x{value.value:08X}"
+    elif isinstance(value, InterrogationCommand):
+        return f"QOI={value.qoi} ({value.qoi_str})"
+    elif isinstance(value, CounterInterrogationCommand):
+        return f"QCC=0x{value.qcc:02X} (冻结={value.freeze_code}, 组={value.group})"
+    elif isinstance(value, ReadCommand):
+        return f"IOA={value.ioa}"
+    elif isinstance(value, ClockSyncCommand):
+        return f"时间={value.time_tag.to_datetime_str()}"
+    elif isinstance(value, TestCommand):
+        return f"测试模式=0x{value.test_pattern:04X}"
+    elif isinstance(value, TestCommandWithTime):
+        return f"测试模式=0x{value.test_pattern:04X} 时间={value.time_tag.to_datetime_str()}"
+    elif isinstance(value, TestCommandBitPattern):
+        return f"测试模式=0x{value.pattern:04X}"
+    elif isinstance(value, ResetProcessCommand):
+        return f"限定词={value.qualifier}"
+    elif isinstance(value, DelayCommand):
+        return f"延时={value.delay_ms}ms"
+    elif isinstance(value, InitializationEnd):
+        return f"原因={value.cause_str}"
+    elif isinstance(value, ParameterCommandNormalized):
+        return f"值={value.value:.6f} 变更={value.param_change}"
+    elif isinstance(value, ParameterCommandScaled):
+        return f"值={value.value} 变更={value.param_change}"
+    elif isinstance(value, ParameterCommandFloat):
+        return f"值={value.value:.4f} 变更={value.param_change}"
+    elif isinstance(value, ParameterCommandNormalizedNoQuality):
+        return f"值={value.value:.6f}"
+    elif isinstance(value, ParameterActivation):
+        return f"操作={value.action_str}"
+    elif isinstance(value, ProtectionEvent):
+        return f"事件值={value.event_value} 品质={value.quality}"
+    elif isinstance(value, GroupSinglePointWithStatus):
+        points_str = ", ".join([f"{i}:{'合' if s else '分'}({'检' if d else '未检'})"
+                                for i, (s, d) in enumerate(value.points)])
+        return f"[{points_str}]"
+    elif isinstance(value, FileReady):
+        return f"文件={value.file_name} 长度={value.file_length} 状态={value.status_str}"
+    elif isinstance(value, SectionReady):
+        return f"文件={value.file_name} 节={value.section_name} 长度={value.section_length} 状态={value.status}"
+    elif isinstance(value, CallDirectory):
+        return f"文件={value.file_name} 节={value.section_name} 限定词={value.qualifier_str}"
+    elif isinstance(value, LastSection):
+        return f"文件={value.file_name} 节={value.section_name} 最后段={value.last_segment} 状态={value.status_str}"
+    elif isinstance(value, AckFileSection):
+        return f"文件={value.file_name} 节={value.section_name} 限定词={value.qualifier_str}"
+    elif isinstance(value, FileSegment):
+        return f"文件={value.file_name} 节={value.section_name} 段={value.segment_number} 数据长度={len(value.data)}"
+    elif isinstance(value, DirectoryEntry):
+        return f"文件={value.file_name} 长度={value.file_length} 状态={value.status} 时间={value.time_tag.to_datetime_str()}"
+    elif isinstance(value, FileSelectCallGet):
+        return f"文件={value.file_name} 节={value.section_name} 限定词={value.qualifier_str}"
+    elif isinstance(value, FileReadyAck):
+        return f"文件={value.file_name} 长度={value.file_length} 状态={value.status}"
+    elif isinstance(value, SectionReadyAck):
+        return f"文件={value.file_name} 节={value.section_name} 长度={value.section_length} 状态={value.status}"
     elif isinstance(value, bytes):
         return value.hex().upper()
     elif isinstance(value, (int, float)):

@@ -35,6 +35,7 @@ from ..transport.connection import TCPClient, ConnectionStats
 from ..data.data_store import RealtimeDB
 from ..data.history import HistoryDB
 from .scheduler import TaskScheduler
+from ..protocol.file_transfer import FileTransferMaster, FileTransferState
 
 logger = logging.getLogger("iec104.master")
 
@@ -132,6 +133,17 @@ class MasterEngine:
         # 报文缓冲
         self._rx_buffer: list[tuple[float, bytes]] = []
         self._tx_buffer: list[tuple[float, bytes]] = []
+
+        # 时钟同步校验
+        self._last_clock_sync_sent_time: Optional[float] = None
+
+        # 文件传输管理器
+        self._file_transfer = FileTransferMaster(common_addr)
+        self._file_transfer.set_callbacks(
+            on_send_asdu=lambda data: asyncio.create_task(self._send_i_frame_with_data(data)),
+            on_file_received=self._on_file_received,
+            on_error=self._on_file_transfer_error,
+        )
 
     # ── 属性 ──────────────────────────────────────────────────────
 
@@ -282,6 +294,9 @@ class MasterEngine:
         self._state_machine.on_i_frame_sent()
         await self._send_frame(frame)
 
+        # 记录发送时间用于校验
+        self._last_clock_sync_sent_time = time.monotonic()
+
         logger.info("Clock Sync sent")
         self._fire_event(MasterEvent.CLOCK_SYNC)
 
@@ -396,6 +411,382 @@ class MasterEngine:
         action = "SELECT" if select else "EXECUTE"
         logger.info(f"Setpoint ShortFloat: IOA={ioa} {action} value={value}")
 
+    async def regulating_step_command(self, ioa: int, state: int,
+                                       select: bool = False, qu: int = 0) -> None:
+        """发送升降命令 (C_RC_NA_1).
+
+        Args:
+            ioa: 信息对象地址
+            state: 1=降一步, 2=升一步
+            select: True=选择, False=执行
+            qu: 限定词 (0-31)
+        """
+        if not self._state_machine.is_running:
+            raise RuntimeError("Not in running state")
+
+        asdu_data = ASDUBuilder.build_regulating_step_command(
+            self._common_addr, ioa, state, select, qu
+        )
+        tx_seq = self._seq.get_send_seq()
+        rx_seq = self._seq.get_recv_seq()
+        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
+
+        self._state_machine.on_i_frame_sent()
+        await self._send_frame(frame)
+
+        action = "SELECT" if select else "EXECUTE"
+        state_str = {1: "降一步", 2: "升一步"}.get(state, f"未知({state})")
+        logger.info(f"Regulating Step Command: IOA={ioa} {action} {state_str}")
+        self._fire_event(MasterEvent.COMMAND_SENT, {
+            "type": "regulating_step", "ioa": ioa,
+            "state": state, "select": select
+        })
+
+    async def setpoint_scaled(self, ioa: int, value: int,
+                               select: bool = False) -> None:
+        """发送标度化设点命令 (C_SE_NB_1).
+
+        Args:
+            ioa: 信息对象地址
+            value: 标度化值 (-32768..+32767)
+            select: True=选择, False=执行
+        """
+        if not self._state_machine.is_running:
+            raise RuntimeError("Not in running state")
+
+        asdu_data = ASDUBuilder.build_setpoint_scaled(
+            self._common_addr, ioa, value, select
+        )
+        tx_seq = self._seq.get_send_seq()
+        rx_seq = self._seq.get_recv_seq()
+        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
+
+        self._state_machine.on_i_frame_sent()
+        await self._send_frame(frame)
+
+        action = "SELECT" if select else "EXECUTE"
+        logger.info(f"Setpoint Scaled: IOA={ioa} {action} value={value}")
+        self._fire_event(MasterEvent.COMMAND_SENT, {
+            "type": "setpoint_scaled", "ioa": ioa,
+            "value": value, "select": select
+        })
+
+    async def bitstring_command(self, ioa: int, value: int) -> None:
+        """发送比特串命令 (C_BO_NA_1).
+
+        Args:
+            ioa: 信息对象地址
+            value: 32位无符号整数
+        """
+        if not self._state_machine.is_running:
+            raise RuntimeError("Not in running state")
+
+        asdu_data = ASDUBuilder.build_bitstring_command(
+            self._common_addr, ioa, value
+        )
+        tx_seq = self._seq.get_send_seq()
+        rx_seq = self._seq.get_recv_seq()
+        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
+
+        self._state_machine.on_i_frame_sent()
+        await self._send_frame(frame)
+
+        logger.info(f"Bitstring Command: IOA={ioa} value=0x{value:08X}")
+        self._fire_event(MasterEvent.COMMAND_SENT, {
+            "type": "bitstring", "ioa": ioa, "value": value
+        })
+
+    async def read_command(self, ioa: int) -> None:
+        """发送读命令 (C_RD_NA_1).
+
+        Args:
+            ioa: 信息对象地址
+        """
+        if not self._state_machine.is_running:
+            raise RuntimeError("Not in running state")
+
+        asdu_data = ASDUBuilder.build_read_command(
+            self._common_addr, ioa
+        )
+        tx_seq = self._seq.get_send_seq()
+        rx_seq = self._seq.get_recv_seq()
+        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
+
+        self._state_machine.on_i_frame_sent()
+        await self._send_frame(frame)
+
+        logger.info(f"Read Command: IOA={ioa}")
+
+    async def delay_command(self, delay_ms: int) -> None:
+        """发送延时获得命令 (C_CD_NA_1).
+
+        Args:
+            delay_ms: 延时值（毫秒）
+        """
+        if not self._state_machine.is_running:
+            raise RuntimeError("Not in running state")
+
+        asdu_data = ASDUBuilder.build_delay_command(
+            self._common_addr, delay_ms
+        )
+        tx_seq = self._seq.get_send_seq()
+        rx_seq = self._seq.get_recv_seq()
+        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
+
+        self._state_machine.on_i_frame_sent()
+        await self._send_frame(frame)
+
+        logger.info(f"Delay Command: delay={delay_ms}ms")
+
+    async def test_command_with_time(self, time_tag: Optional[CP56Time2a] = None) -> None:
+        """发送带时标测试命令 (C_TS_TA_1).
+
+        Args:
+            time_tag: 时标，默认使用当前时间
+        """
+        if not self._state_machine.is_running:
+            raise RuntimeError("Not in running state")
+
+        asdu_data = ASDUBuilder.build_test_command_with_time(
+            self._common_addr, time_tag
+        )
+        tx_seq = self._seq.get_send_seq()
+        rx_seq = self._seq.get_recv_seq()
+        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
+
+        self._state_machine.on_i_frame_sent()
+        await self._send_frame(frame)
+
+        logger.info("Test Command with Time sent")
+
+    # ── 参数命令 ──────────────────────────────────────────────────
+
+    async def parameter_normalized(self, ioa: int, value: float,
+                                    param_change: int = 0) -> None:
+        """发送测量值参数-归一化 (P_ME_NA_1).
+
+        Args:
+            ioa: 信息对象地址
+            value: 归一化值 (-1.0..+1.0)
+            param_change: 参数变更标志 (0=未用, 1=运行中使用, 2=运行中不使用)
+        """
+        if not self._state_machine.is_running:
+            raise RuntimeError("Not in running state")
+
+        asdu_data = ASDUBuilder.build_parameter_normalized(
+            self._common_addr, ioa, value, param_change
+        )
+        tx_seq = self._seq.get_send_seq()
+        rx_seq = self._seq.get_recv_seq()
+        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
+
+        self._state_machine.on_i_frame_sent()
+        await self._send_frame(frame)
+
+        logger.info(f"Parameter Normalized: IOA={ioa} value={value} change={param_change}")
+
+    async def parameter_scaled(self, ioa: int, value: int,
+                                param_change: int = 0) -> None:
+        """发送测量值参数-标度化 (P_ME_NB_1).
+
+        Args:
+            ioa: 信息对象地址
+            value: 标度化值 (-32768..+32767)
+            param_change: 参数变更标志
+        """
+        if not self._state_machine.is_running:
+            raise RuntimeError("Not in running state")
+
+        asdu_data = ASDUBuilder.build_parameter_scaled(
+            self._common_addr, ioa, value, param_change
+        )
+        tx_seq = self._seq.get_send_seq()
+        rx_seq = self._seq.get_recv_seq()
+        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
+
+        self._state_machine.on_i_frame_sent()
+        await self._send_frame(frame)
+
+        logger.info(f"Parameter Scaled: IOA={ioa} value={value} change={param_change}")
+
+    async def parameter_float(self, ioa: int, value: float,
+                               param_change: int = 0) -> None:
+        """发送测量值参数-短浮点 (P_ME_NC_1).
+
+        Args:
+            ioa: 信息对象地址
+            value: 短浮点值
+            param_change: 参数变更标志
+        """
+        if not self._state_machine.is_running:
+            raise RuntimeError("Not in running state")
+
+        asdu_data = ASDUBuilder.build_parameter_float(
+            self._common_addr, ioa, value, param_change
+        )
+        tx_seq = self._seq.get_send_seq()
+        rx_seq = self._seq.get_recv_seq()
+        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
+
+        self._state_machine.on_i_frame_sent()
+        await self._send_frame(frame)
+
+        logger.info(f"Parameter Float: IOA={ioa} value={value} change={param_change}")
+
+    async def parameter_activation(self, ioa: int, qualifier: int = 1) -> None:
+        """发送参数激活 (P_AC_NA_1).
+
+        Args:
+            ioa: 信息对象地址
+            qualifier: 0=未用/取消, 1=激活/周期, 2=去激活
+        """
+        if not self._state_machine.is_running:
+            raise RuntimeError("Not in running state")
+
+        asdu_data = ASDUBuilder.build_parameter_activation(
+            self._common_addr, ioa, qualifier
+        )
+        tx_seq = self._seq.get_send_seq()
+        rx_seq = self._seq.get_recv_seq()
+        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
+
+        self._state_machine.on_i_frame_sent()
+        await self._send_frame(frame)
+
+        action_str = {0: "未用", 1: "激活", 2: "去激活"}.get(qualifier, f"未知({qualifier})")
+        logger.info(f"Parameter Activation: IOA={ioa} qualifier={action_str}")
+
+    # ── 文件传输命令 ──────────────────────────────────────────────
+
+    async def file_call_directory(self, ioa: int = 0) -> None:
+        """发送召唤目录命令 (F_SC_NA_1).
+
+        Args:
+            ioa: 信息对象地址
+        """
+        if not self._state_machine.is_running:
+            raise RuntimeError("Not in running state")
+
+        asdu_data = ASDUBuilder.build_call_directory(
+            self._common_addr, ioa, qualifier=5
+        )
+        tx_seq = self._seq.get_send_seq()
+        rx_seq = self._seq.get_recv_seq()
+        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
+
+        self._state_machine.on_i_frame_sent()
+        await self._send_frame(frame)
+
+        logger.info("File Call Directory sent")
+
+    async def file_select(self, ioa: int, file_name: int) -> None:
+        """发送文件选择命令 (F_SC_NB_1).
+
+        Args:
+            ioa: 信息对象地址
+            file_name: 文件名 (16-bit)
+        """
+        if not self._state_machine.is_running:
+            raise RuntimeError("Not in running state")
+
+        asdu_data = ASDUBuilder.build_file_select_call_get(
+            self._common_addr, ioa, file_name, qualifier=4
+        )
+        tx_seq = self._seq.get_send_seq()
+        rx_seq = self._seq.get_recv_seq()
+        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
+
+        self._state_machine.on_i_frame_sent()
+        await self._send_frame(frame)
+
+        logger.info(f"File Select: file_name={file_name}")
+
+    async def file_request(self, ioa: int, file_name: int) -> None:
+        """发送文件请求命令 (F_SC_NB_1).
+
+        Args:
+            ioa: 信息对象地址
+            file_name: 文件名 (16-bit)
+        """
+        if not self._state_machine.is_running:
+            raise RuntimeError("Not in running state")
+
+        asdu_data = ASDUBuilder.build_file_select_call_get(
+            self._common_addr, ioa, file_name, qualifier=1
+        )
+        tx_seq = self._seq.get_send_seq()
+        rx_seq = self._seq.get_recv_seq()
+        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
+
+        self._state_machine.on_i_frame_sent()
+        await self._send_frame(frame)
+
+        logger.info(f"File Request: file_name={file_name}")
+
+    async def file_ack(self, ioa: int, file_name: int,
+                        section_name: int = 0, qualifier: int = 1) -> None:
+        """发送文件/节确认命令 (F_AF_NA_1).
+
+        Args:
+            ioa: 信息对象地址
+            file_name: 文件名 (16-bit)
+            section_name: 节名 (8-bit)
+            qualifier: 0=缺省, 1=肯定文件, 2=否定文件, 3=肯定节, 4=否定节
+        """
+        if not self._state_machine.is_running:
+            raise RuntimeError("Not in running state")
+
+        asdu_data = ASDUBuilder.build_ack_file_section(
+            self._common_addr, ioa, file_name, section_name, qualifier
+        )
+        tx_seq = self._seq.get_send_seq()
+        rx_seq = self._seq.get_recv_seq()
+        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
+
+        self._state_machine.on_i_frame_sent()
+        await self._send_frame(frame)
+
+        qual_str = {0: "缺省", 1: "肯定文件", 2: "否定文件", 3: "肯定节", 4: "否定节"}.get(qualifier, f"未知({qualifier})")
+        logger.info(f"File ACK: file_name={file_name} section={section_name} qualifier={qual_str}")
+
+    async def request_file(self, ioa: int, file_name: int) -> None:
+        """请求文件（使用文件传输管理器）.
+
+        Args:
+            ioa: 信息对象地址
+            file_name: 文件名 (16-bit)
+        """
+        if not self._state_machine.is_running:
+            raise RuntimeError("Not in running state")
+        self._file_transfer.request_file(ioa, file_name)
+
+    async def _send_i_frame_with_data(self, asdu_data: bytes) -> None:
+        """发送I帧（内部方法）."""
+        tx_seq = self._seq.get_send_seq()
+        rx_seq = self._seq.get_recv_seq()
+        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
+        self._state_machine.on_i_frame_sent()
+        await self._send_frame(frame)
+
+    def _on_file_received(self, file_name: int, data: bytes) -> None:
+        """文件接收完成回调."""
+        logger.info(f"File received: name={file_name} size={len(data)}")
+        self._fire_event(MasterEvent.DATA_RECEIVED, {
+            "type_id": "file",
+            "file_name": file_name,
+            "data": data,
+        })
+
+    def _on_file_transfer_error(self, error: str) -> None:
+        """文件传输错误回调."""
+        logger.error(f"File transfer error: {error}")
+        self._fire_event(MasterEvent.ERROR, {"error": error})
+
+    @property
+    def file_transfer_state(self) -> FileTransferState:
+        """获取文件传输状态."""
+        return self._file_transfer.state
+
     # ── 帧接收处理 ────────────────────────────────────────────────
 
     def _on_frame_received(self, frame: bytes) -> None:
@@ -494,6 +885,13 @@ class MasterEngine:
 
     def _process_asdu(self, asdu: ASDU) -> None:
         """处理解析后的 ASDU."""
+        # 公共地址校验（广播地址255不检查）
+        if asdu.common_addr != 255 and asdu.common_addr != self._common_addr:
+            logger.warning(
+                f"Common addr mismatch: expected={self._common_addr}, got={asdu.common_addr}"
+            )
+            return
+
         type_id = asdu.type_id
         cot = asdu.cot
 
@@ -564,7 +962,12 @@ class MasterEngine:
 
         # 时钟同步确认
         elif type_id == TypeID.C_CS_NA_1:
-            logger.info(f"Clock Sync ACK received, COT={cot}")
+            if self._last_clock_sync_sent_time:
+                round_trip = time.monotonic() - self._last_clock_sync_sent_time
+                logger.info(f"Clock Sync ACK received: round-trip={round_trip*1000:.1f}ms, COT={cot}")
+                self._last_clock_sync_sent_time = None
+            else:
+                logger.info(f"Clock Sync ACK received, COT={cot}")
 
         # 读命令响应
         elif type_id == TypeID.C_RD_NA_1:
@@ -603,7 +1006,7 @@ class MasterEngine:
                           TypeID.F_LS_NA_1, TypeID.F_AF_NA_1, TypeID.F_SG_NA_1,
                           TypeID.F_DR_TA_1, TypeID.F_SC_NB_1,
                           TypeID.F_FR_NB_1, TypeID.F_SR_NB_1):
-            logger.info(f"File Transfer: type={type_id}, COT={cot}")
+            self._process_file_transfer(asdu)
 
         else:
             logger.debug(f"Unhandled ASDU: type={type_id}, cot={cot}")
@@ -680,6 +1083,31 @@ class MasterEngine:
                 obj.ioa, cv.value, cv.quality
             )
 
+    def _process_file_transfer(self, asdu: ASDU) -> None:
+        """处理文件传输."""
+        type_id = asdu.type_id
+        if not asdu.objects:
+            return
+
+        obj = asdu.objects[0]
+
+        if type_id == TypeID.F_FR_NA_1:
+            self._file_transfer.handle_file_ready(obj.data)
+        elif type_id == TypeID.F_SR_NA_1:
+            self._file_transfer.handle_section_ready(obj.data)
+        elif type_id == TypeID.F_SG_NA_1:
+            self._file_transfer.handle_file_segment(obj.data)
+        elif type_id == TypeID.F_LS_NA_1:
+            self._file_transfer.handle_last_section(obj.data)
+        elif type_id == TypeID.F_DR_TA_1:
+            self._file_transfer.handle_directory_entry(obj.data)
+        elif type_id == TypeID.F_FR_NB_1:
+            logger.info(f"File Ready ACK: file_name={obj.data.file_name if hasattr(obj.data, 'file_name') else 'N/A'}")
+        elif type_id == TypeID.F_SR_NB_1:
+            logger.info(f"Section Ready ACK: file_name={obj.data.file_name if hasattr(obj.data, 'file_name') else 'N/A'}")
+
+        logger.info(f"File Transfer: type={type_id}, state={self._file_transfer.state}")
+
     def _process_interrogation_response(self, asdu: ASDU) -> None:
         """处理总召唤响应."""
         for obj in asdu.objects:
@@ -690,18 +1118,46 @@ class MasterEngine:
                     obj.ioa, obj.data.value == 2, obj.data.quality,
                     double_state=obj.data.value
                 )
+            elif isinstance(obj.data, NormalizedValue):
+                self._data_store.update_yc(obj.ioa, obj.data.value, obj.data.quality)
+            elif isinstance(obj.data, ScaledValue):
+                self._data_store.update_yc(obj.ioa, float(obj.data.value), obj.data.quality)
+            elif isinstance(obj.data, ShortFloat):
+                self._data_store.update_yc(obj.ioa, obj.data.value, obj.data.quality)
+            elif isinstance(obj.data, StepPosition):
+                self._data_store.update_yc(obj.ioa, float(obj.data.value), obj.data.quality)
+            elif isinstance(obj.data, BitString32):
+                self._data_store.update_yc(obj.ioa, float(obj.data.value), QualityDescriptor())
+            elif isinstance(obj.data, CounterValue):
+                self._data_store.update_ym(obj.ioa, obj.data.value, obj.data.quality)
+            elif isinstance(obj.data, GroupSinglePointWithStatus):
+                for i, (state, detected) in enumerate(obj.data.points):
+                    self._data_store.update_yx(obj.ioa + i, state, QualityDescriptor())
 
     def _process_command_ack(self, asdu: ASDU) -> None:
         """处理命令确认."""
         cot = asdu.cot
-        if cot == COT.ACTCON:
-            logger.info("Command ACTCON received")
-        elif cot == COT.DEACTCON:
-            logger.info("Command DEACTCON received")
-        elif cot == COT.ACTTERM:
-            logger.info("Command ACTTERM received")
-        else:
-            logger.warning(f"Command with COT={cot}")
+        for obj in asdu.objects:
+            # 检查PN标志
+            pn = False
+            if hasattr(obj.data, 'to_bytes'):
+                data_bytes = obj.data.to_bytes()
+                if data_bytes and (data_bytes[0] & 0x80):
+                    pn = True
+
+            if cot == COT.ACTCON:
+                if pn:
+                    logger.warning(f"Command NACK (PN=1): type={asdu.type_id} IOA={obj.ioa}")
+                    self._data_store.update_yk(obj.ioa, "nack")
+                else:
+                    logger.info(f"Command ACK: type={asdu.type_id} IOA={obj.ioa}")
+                    self._data_store.update_yk(obj.ioa, "ack")
+            elif cot == COT.DEACTCON:
+                logger.info(f"Command DEACTCON: type={asdu.type_id} IOA={obj.ioa}")
+            elif cot == COT.ACTTERM:
+                logger.info(f"Command ACTTERM: type={asdu.type_id} IOA={obj.ioa}")
+            else:
+                logger.warning(f"Command with COT={cot}")
 
     def _process_step_position(self, asdu: ASDU) -> None:
         """处理步位置信息."""
@@ -801,8 +1257,9 @@ class MasterEngine:
             # 连接超时
             asyncio.create_task(self._client.stop())
         elif timer_type == TimerType.T1:
-            # 发送超时
-            logger.error("T1 timeout: no confirmation received")
+            # 发送超时 - 根据规范应断开连接
+            logger.error("T1 timeout: no confirmation received, disconnecting")
+            asyncio.create_task(self._client.stop())  # 断连，reconnect机制会自动重连
         elif timer_type == TimerType.T2:
             # 无数据确认超时 — 发送S帧确认已收到的I帧
             rx_seq = self._seq.get_recv_seq()

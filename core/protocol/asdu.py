@@ -34,6 +34,7 @@ from .types import (
     ParameterCommandNormalizedNoQuality, ParameterActivation,
     FileReady, SectionReady, CallDirectory, LastSection, AckFileSection,
     FileSegment, DirectoryEntry, FileSelectCallGet, FileReadyAck, SectionReadyAck,
+    ClockSyncCommand,
 )
 
 
@@ -72,7 +73,7 @@ class ASDU:
         buf.append(vsq)
 
         # COT (2 bytes: cause + origin)
-        buf.append(self.cot & 0x3F)
+        buf.append(self.cot & 0x7F)  # 保留bit6 (P/N位)
         buf.append(self.origin_addr & 0xFF)
 
         # Common Address (2 bytes, little-endian)
@@ -130,7 +131,7 @@ class ASDU:
         num = vsq & VSQ_NUM_MASK
 
         # COT
-        cot = data[pos] & 0x3F; pos += 1
+        cot = data[pos] & 0x7F; pos += 1  # 保留bit6 (P/N位)
         origin_addr = data[pos]; pos += 1
 
         # Common Address
@@ -239,7 +240,7 @@ class ASDU:
             TypeID.C_IC_NA_1: (1, lambda d: d),      # 总召唤
             TypeID.C_CI_NA_1: (1, lambda d: d),      # 累计量召唤
             TypeID.C_RD_NA_1: (0, lambda d: None),   # 读命令
-            TypeID.C_CS_NA_1: (7, lambda d: d),      # 时钟同步
+            TypeID.C_CS_NA_1: (7, lambda d: ClockSyncCommand.from_bytes(d)),  # 时钟同步
             TypeID.C_TS_NA_1: (2, lambda d: d),      # 测试命令
             TypeID.C_RP_NA_1: (1, lambda d: d),      # 复位进程
             TypeID.C_CD_NA_1: (2, lambda d: d),      # 延时获得
@@ -282,7 +283,7 @@ class ASDU:
             TypeID.F_SC_NA_1: (4, lambda d: CallDirectory.from_bytes(d)),
             TypeID.F_LS_NA_1: (5, lambda d: LastSection.from_bytes(d)),
             TypeID.F_AF_NA_1: (4, lambda d: AckFileSection.from_bytes(d)),
-            TypeID.F_SG_NA_1: (5, lambda d: FileSegment.from_bytes(d, length=d[4] if len(d) > 4 else 0)),
+            TypeID.F_SG_NA_1: (-1, lambda d: FileSegment.from_bytes(d)),  # 可变长度
             TypeID.F_DR_TA_1: (14, lambda d: DirectoryEntry.from_bytes(d)),
             TypeID.F_SC_NB_1: (4, lambda d: FileSelectCallGet.from_bytes(d)),
             TypeID.F_FR_NB_1: (7, lambda d: FileReadyAck.from_bytes(d)),
@@ -319,11 +320,21 @@ class ASDU:
             return None, None, 0
 
         data_size, decoder = handlers[type_id]
-        if len(data) < data_size:
-            return None, None, 0
 
-        obj_data = decoder(data[:data_size])
-        consumed = data_size
+        # 可变长度类型（如FileSegment）
+        if data_size == -1:
+            # 对于可变长度类型，传递所有剩余数据给decoder
+            obj_data = decoder(data)
+            # 计算实际消耗的字节数
+            if hasattr(obj_data, 'to_bytes'):
+                consumed = len(obj_data.to_bytes())
+            else:
+                consumed = len(data)
+        else:
+            if len(data) < data_size:
+                return None, None, 0
+            obj_data = decoder(data[:data_size])
+            consumed = data_size
 
         # 时标
         time_tag = None
@@ -333,9 +344,15 @@ class ASDU:
                     time_tag = CP56Time2a.from_bytes(data, consumed)
                     consumed += 7
             else:
-                # CP24Time2a (旧类型)
+                # CP24Time2a (旧类型) - 使用正确的解码方法
                 if len(data) >= consumed + 3:
-                    time_tag = CP56Time2a.from_bytes(data, consumed)
+                    cp24 = CP24Time2a.from_bytes(data, consumed)
+                    # 转换为CP56Time2a格式以便统一处理
+                    time_tag = CP56Time2a(
+                        millisecond=cp24.millisecond,
+                        minute=cp24.minute,
+                        invalid=cp24.invalid
+                    )
                     consumed += 3
 
         return obj_data, time_tag, consumed
@@ -690,6 +707,28 @@ class ASDUBuilder:
         return asdu.encode()
 
     @staticmethod
+    def build_counter_sequence(common_addr: int, points: list[tuple[int, int, int, int]],
+                                cot: int = COT.INTROGEN) -> bytes:
+        """构造累计量序列 (M_IT_NA_1, SQ=1).
+
+        Args:
+            common_addr: 公共地址
+            points: [(ioa, value, quality, sequence), ...] 必须按ioa连续排列
+            cot: 传送原因
+        """
+        asdu = ASDU(
+            type_id=TypeID.M_IT_NA_1,
+            sq=True,
+            num=len(points),
+            cot=cot,
+            common_addr=common_addr,
+        )
+        for ioa, value, quality, sequence in points:
+            cv = CounterValue(value=value, quality=QualityDescriptor(quality), sequence=sequence)
+            asdu.objects.append(InformationObject(ioa=ioa, data=cv))
+        return asdu.encode()
+
+    @staticmethod
     def build_double_point(common_addr: int, ioa: int, value: int,
                             quality: int = 0, cot: int = COT.SPONT,
                             with_time: bool = False) -> bytes:
@@ -818,6 +857,269 @@ class ASDUBuilder:
     def build_test_command_ack(common_addr: int) -> bytes:
         """构造测试命令确认."""
         return ASDUBuilder.build_test_command(common_addr)
+
+    # ── 参数命令构建方法 ──────────────────────────────────────────
+
+    @staticmethod
+    def build_parameter_normalized(common_addr: int, ioa: int, value: float,
+                                    param_change: int = 0) -> bytes:
+        """构造测量值参数-归一化 (P_ME_NA_1).
+
+        Args:
+            common_addr: 公共地址
+            ioa: 信息对象地址
+            value: 归一化值 (-1.0..+1.0)
+            param_change: 参数变更标志 (0=未用, 1=运行中使用, 2=运行中不使用)
+        """
+        asdu = ASDU(type_id=TypeID.P_ME_NA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        pc = ParameterCommandNormalized(ioa=ioa, value=value, param_change=param_change)
+        asdu.objects.append(InformationObject(ioa=ioa, data=pc))
+        return asdu.encode()
+
+    @staticmethod
+    def build_parameter_scaled(common_addr: int, ioa: int, value: int,
+                                param_change: int = 0) -> bytes:
+        """构造测量值参数-标度化 (P_ME_NB_1).
+
+        Args:
+            common_addr: 公共地址
+            ioa: 信息对象地址
+            value: 标度化值 (-32768..+32767)
+            param_change: 参数变更标志
+        """
+        asdu = ASDU(type_id=TypeID.P_ME_NB_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        ps = ParamCmdScaled(ioa=ioa, value=value, param_change=param_change)
+        asdu.objects.append(InformationObject(ioa=ioa, data=ps))
+        return asdu.encode()
+
+    @staticmethod
+    def build_parameter_float(common_addr: int, ioa: int, value: float,
+                               param_change: int = 0) -> bytes:
+        """构造测量值参数-短浮点 (P_ME_NC_1).
+
+        Args:
+            common_addr: 公共地址
+            ioa: 信息对象地址
+            value: 短浮点值
+            param_change: 参数变更标志
+        """
+        asdu = ASDU(type_id=TypeID.P_ME_NC_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        pf = ParameterCommandFloat(ioa=ioa, value=value, param_change=param_change)
+        asdu.objects.append(InformationObject(ioa=ioa, data=pf))
+        return asdu.encode()
+
+    @staticmethod
+    def build_parameter_normalized_no_quality(common_addr: int, ioa: int, value: float) -> bytes:
+        """构造不带品质描述词的测量值参数-归一化 (P_ME_ND_1).
+
+        Args:
+            common_addr: 公共地址
+            ioa: 信息对象地址
+            value: 归一化值 (-1.0..+1.0)
+        """
+        asdu = ASDU(type_id=TypeID.P_ME_ND_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        pn = ParameterCommandNormalizedNoQuality(ioa=ioa, value=value)
+        asdu.objects.append(InformationObject(ioa=ioa, data=pn))
+        return asdu.encode()
+
+    @staticmethod
+    def build_parameter_activation(common_addr: int, ioa: int, qualifier: int = 1) -> bytes:
+        """构造参数激活 (P_AC_NA_1).
+
+        Args:
+            common_addr: 公共地址
+            ioa: 信息对象地址
+            qualifier: 0=未用/取消, 1=激活/周期, 2=去激活
+        """
+        asdu = ASDU(type_id=TypeID.P_AC_NA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        pa = ParameterActivation(ioa=ioa, qualifier=qualifier)
+        asdu.objects.append(InformationObject(ioa=ioa, data=pa))
+        return asdu.encode()
+
+    # ── 文件传输构建方法 ──────────────────────────────────────────
+
+    @staticmethod
+    def build_file_ready(common_addr: int, ioa: int, file_name: int,
+                          file_length: int, status: int = 0) -> bytes:
+        """构造文件准备就绪 (F_FR_NA_1).
+
+        Args:
+            common_addr: 公共地址
+            ioa: 信息对象地址
+            file_name: 文件名 (16-bit)
+            file_length: 文件长度 (32-bit)
+            status: 状态 (0=缺省, 1=请求/读, 2=停止, 3=删除, 4=选择)
+        """
+        asdu = ASDU(type_id=TypeID.F_FR_NA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        fr = FileReady(ioa=ioa, file_name=file_name, file_length=file_length, status=status)
+        asdu.objects.append(InformationObject(ioa=ioa, data=fr))
+        return asdu.encode()
+
+    @staticmethod
+    def build_section_ready(common_addr: int, ioa: int, file_name: int,
+                             section_name: int, section_length: int, status: int = 0) -> bytes:
+        """构造节准备就绪 (F_SR_NA_1).
+
+        Args:
+            common_addr: 公共地址
+            ioa: 信息对象地址
+            file_name: 文件名 (16-bit)
+            section_name: 节名 (8-bit)
+            section_length: 节长度 (32-bit)
+            status: 状态
+        """
+        asdu = ASDU(type_id=TypeID.F_SR_NA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        sr = SectionReady(ioa=ioa, file_name=file_name, section_name=section_name,
+                          section_length=section_length, status=status)
+        asdu.objects.append(InformationObject(ioa=ioa, data=sr))
+        return asdu.encode()
+
+    @staticmethod
+    def build_call_directory(common_addr: int, ioa: int, file_name: int = 0,
+                              section_name: int = 0, qualifier: int = 5) -> bytes:
+        """构造召唤目录/选择文件/召唤文件 (F_SC_NA_1).
+
+        Args:
+            common_addr: 公共地址
+            ioa: 信息对象地址
+            file_name: 文件名 (16-bit)
+            section_name: 节名 (8-bit)
+            qualifier: 0=缺省, 1=选择文件, 2=请求文件, 3=停止, 4=删除, 5=目录
+        """
+        asdu = ASDU(type_id=TypeID.F_SC_NA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        cd = CallDirectory(ioa=ioa, file_name=file_name, section_name=section_name, qualifier=qualifier)
+        asdu.objects.append(InformationObject(ioa=ioa, data=cd))
+        return asdu.encode()
+
+    @staticmethod
+    def build_last_section(common_addr: int, ioa: int, file_name: int,
+                            section_name: int, last_segment: int, status: int = 0) -> bytes:
+        """构造最后的节/最后的段 (F_LS_NA_1).
+
+        Args:
+            common_addr: 公共地址
+            ioa: 信息对象地址
+            file_name: 文件名 (16-bit)
+            section_name: 节名 (8-bit)
+            last_segment: 最后段号 (8-bit)
+            status: 状态
+        """
+        asdu = ASDU(type_id=TypeID.F_LS_NA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        ls = LastSection(ioa=ioa, file_name=file_name, section_name=section_name,
+                         last_segment=last_segment, status=status)
+        asdu.objects.append(InformationObject(ioa=ioa, data=ls))
+        return asdu.encode()
+
+    @staticmethod
+    def build_ack_file_section(common_addr: int, ioa: int, file_name: int,
+                                section_name: int, qualifier: int = 0) -> bytes:
+        """构造确认文件/确认节 (F_AF_NA_1).
+
+        Args:
+            common_addr: 公共地址
+            ioa: 信息对象地址
+            file_name: 文件名 (16-bit)
+            section_name: 节名 (8-bit)
+            qualifier: 0=缺省, 1=肯定文件, 2=否定文件, 3=肯定节, 4=否定节
+        """
+        asdu = ASDU(type_id=TypeID.F_AF_NA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        af = AckFileSection(ioa=ioa, file_name=file_name, section_name=section_name, qualifier=qualifier)
+        asdu.objects.append(InformationObject(ioa=ioa, data=af))
+        return asdu.encode()
+
+    @staticmethod
+    def build_file_segment(common_addr: int, ioa: int, file_name: int,
+                            section_name: int, segment_number: int, data: bytes) -> bytes:
+        """构造段 (F_SG_NA_1).
+
+        Args:
+            common_addr: 公共地址
+            ioa: 信息对象地址
+            file_name: 文件名 (16-bit)
+            section_name: 节名 (8-bit)
+            segment_number: 段号 (8-bit)
+            data: 段数据 (最大233字节)
+        """
+        asdu = ASDU(type_id=TypeID.F_SG_NA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        sg = FileSegment(ioa=ioa, file_name=file_name, section_name=section_name,
+                         segment_number=segment_number, data=data)
+        asdu.objects.append(InformationObject(ioa=ioa, data=sg))
+        return asdu.encode()
+
+    @staticmethod
+    def build_directory_entry(common_addr: int, ioa: int, file_name: int,
+                               file_length: int, status: int = 0,
+                               time_tag: Optional[CP56Time2a] = None) -> bytes:
+        """构造目录 (F_DR_TA_1).
+
+        Args:
+            common_addr: 公共地址
+            ioa: 信息对象地址
+            file_name: 文件名 (16-bit)
+            file_length: 文件长度 (32-bit)
+            status: 文件状态
+            time_tag: 时标
+        """
+        asdu = ASDU(type_id=TypeID.F_DR_TA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        if time_tag is None:
+            time_tag = CP56Time2a.now()
+        de = DirectoryEntry(ioa=ioa, file_name=file_name, file_length=file_length,
+                            status=status, time_tag=time_tag)
+        asdu.objects.append(InformationObject(ioa=ioa, data=de))
+        return asdu.encode()
+
+    @staticmethod
+    def build_file_select_call_get(common_addr: int, ioa: int, file_name: int,
+                                    section_name: int = 0, qualifier: int = 0) -> bytes:
+        """构造文件选择/召唤/获取 (F_SC_NB_1).
+
+        Args:
+            common_addr: 公共地址
+            ioa: 信息对象地址
+            file_name: 文件名 (16-bit)
+            section_name: 节名 (8-bit)
+            qualifier: 0=缺省, 1=请求读, 2=停止, 3=删除, 4=选择, 5=请求目录
+        """
+        asdu = ASDU(type_id=TypeID.F_SC_NB_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        fs = FileSelectCallGet(ioa=ioa, file_name=file_name, section_name=section_name, qualifier=qualifier)
+        asdu.objects.append(InformationObject(ioa=ioa, data=fs))
+        return asdu.encode()
+
+    @staticmethod
+    def build_file_ready_ack(common_addr: int, ioa: int, file_name: int,
+                              file_length: int, status: int = 0) -> bytes:
+        """构造文件准备就绪-确认 (F_FR_NB_1).
+
+        Args:
+            common_addr: 公共地址
+            ioa: 信息对象地址
+            file_name: 文件名 (16-bit)
+            file_length: 文件长度 (32-bit)
+            status: 状态
+        """
+        asdu = ASDU(type_id=TypeID.F_FR_NB_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        fra = FileReadyAck(ioa=ioa, file_name=file_name, file_length=file_length, status=status)
+        asdu.objects.append(InformationObject(ioa=ioa, data=fra))
+        return asdu.encode()
+
+    @staticmethod
+    def build_section_ready_ack(common_addr: int, ioa: int, file_name: int,
+                                 section_name: int, section_length: int, status: int = 0) -> bytes:
+        """构造节准备就绪-确认 (F_SR_NB_1).
+
+        Args:
+            common_addr: 公共地址
+            ioa: 信息对象地址
+            file_name: 文件名 (16-bit)
+            section_name: 节名 (8-bit)
+            section_length: 节长度 (32-bit)
+            status: 状态
+        """
+        asdu = ASDU(type_id=TypeID.F_SR_NB_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        sra = SectionReadyAck(ioa=ioa, file_name=file_name, section_name=section_name,
+                              section_length=section_length, status=status)
+        asdu.objects.append(InformationObject(ioa=ioa, data=sra))
+        return asdu.encode()
 
 
 # ═══════════════════════════════════════════════════════════════════

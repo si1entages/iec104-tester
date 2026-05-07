@@ -1,0 +1,81 @@
+# 多站并发模拟配置示例
+# 用于主站系统压力测试和验收测试
+
+# 全局默认配置
+global_timers:
+  t0: 30      # 连接建立超时(秒)
+  t1: 15      # 发送/测试超时(秒)
+  t2: 10      # 无数据确认超时(秒)
+  t3: 20      # 空闲测试超时(秒)
+
+global_flow_control:
+  k: 12       # 发送窗口大小
+  w: 8        # 确认阈值
+
+# 子站列表
+stations:
+  # 站1: 110kV变电站A
+  - station_id: "substation_a"
+    station_name: "110kV变电站A"
+    host: "0.0.0.0"
+    port: 2404
+    common_addr: 1
+    max_connections: 16
+    # 点表配置
+    auto_generate: true
+    yx_count: 100      # 遥信数量
+    yc_count: 50       # 遥测数量
+    yk_count: 20       # 遥控数量
+    ym_count: 10       # 遥脉数量
+    # 功能开关
+    spontaneous_enabled: true
+    # 自动模拟配置
+    simulation_enabled: true
+    yx_interval: 5.0   # 遥信变化间隔(秒)
+    yc_interval: 2.0   # 遥测变化间隔(秒)
+    yx_change_rate: 0.1  # 遥信变化概率(0-1)
+    yc_change_range: 0.05 # 遥测波动范围(0-1)
+    # 定时器配置(覆盖全局)
+    timers:
+      t0: 30
+      t1: 15
+      t2: 10
+      t3: 20
+    # 流控配置(覆盖全局)
+    flow_control:
+      k: 12
+      w: 8
+
+  # 站2: 35kV变电站B
+  - station_id: "substation_b"
+    station_name: "35kV变电站B"
+    host: "0.0.0.0"
+    port: 2405
+    common_addr: 2
+    max_connections: 8
+    auto_generate: true
+    yx_count: 50
+    yc_count: 30
+    yk_count: 10
+    ym_count: 5
+    spontaneous_enabled: true
+    simulation_enabled: true
+    yx_interval: 3.0
+    yc_interval: 1.5
+    yx_change_rate: 0.15
+    yc_change_range: 0.08
+
+  # 站3: 10kV配电站C
+  - station_id: "substation_c"
+    station_name: "10kV配电站C"
+    host: "0.0.0.0"
+    port: 2406
+    common_addr: 3
+    max_connections: 4
+    auto_generate: true
+    yx_count: 30
+    yc_count: 15
+    yk_count: 5
+    ym_count: 3
+    spontaneous_enabled: true
+    simulation_enabled: false  # 不启用自动模拟
