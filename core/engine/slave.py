@@ -31,6 +31,7 @@ from ..protocol.types import (
     QualifierOfInterrogation,
     FileReady, SectionReady, CallDirectory, LastSection, AckFileSection,
     FileSegment, DirectoryEntry, FileSelectCallGet, FileReadyAck, SectionReadyAck,
+    InitializationEnd,
 )
 from ..protocol.sequence import SequenceManager
 from ..protocol.state_machine import ConnectionStateMachine, TimerType
@@ -137,6 +138,13 @@ class SlaveEngine:
         self._rx_buffer: list[tuple[float, bytes, str]] = []
         self._tx_buffer: list[tuple[float, bytes, str]] = []
 
+        # 通信统计
+        self._frames_sent = 0
+        self._frames_received = 0
+        self._bytes_sent = 0
+        self._bytes_received = 0
+        self._errors = 0
+
         # 文件传输管理器
         self._file_transfer = FileTransferSlave(common_addr)
         self._file_transfer.set_callbacks(
@@ -160,6 +168,31 @@ class SlaveEngine:
     @property
     def client_count(self) -> int:
         return self._server.connection_count
+
+    @property
+    def client_list(self) -> list[str]:
+        """获取已连接客户端列表。"""
+        return list(self._server.connections.keys())
+
+    @property
+    def connection_stats(self):
+        """获取通信统计。"""
+        from ..transport.connection import ConnectionStats
+        stats = ConnectionStats()
+        stats.frames_sent = self._frames_sent
+        stats.frames_received = self._frames_received
+        stats.bytes_sent = self._bytes_sent
+        stats.bytes_received = self._bytes_received
+        stats.errors = self._errors
+        return stats
+
+    @property
+    def sequence_manager(self):
+        """获取第一个客户端的序列号管理器（用于显示）。"""
+        if self._client_states:
+            first_client = next(iter(self._client_states.values()))
+            return first_client.seq
+        return None
 
     # ── 回调设置 ──────────────────────────────────────────────────
 
@@ -194,6 +227,7 @@ class SlaveEngine:
     async def stop(self) -> None:
         """停止子站引擎."""
         await self.stop_simulation()
+        self._reset_change_counts()
 
         # 停止超时检查任务
         if hasattr(self, '_timeout_check_task') and self._timeout_check_task:
@@ -207,6 +241,17 @@ class SlaveEngine:
             self._history_db.flush()
         await self._server.stop()
         logger.info("Slave engine stopped")
+
+    def _reset_change_counts(self) -> None:
+        """重置所有点的变化次数。"""
+        with self._data_store._lock:
+            for point in self._data_store._yx.values():
+                point.change_count = 0
+            for point in self._data_store._yc.values():
+                point.change_count = 0
+            for point in self._data_store._ym.values():
+                point.change_count = 0
+        logger.info("Change counts reset")
 
     # ── 客户端连接管理 ────────────────────────────────────────────
 
@@ -236,8 +281,12 @@ class SlaveEngine:
         self._fire_event(SlaveEvent.CLIENT_DISCONNECTED, {"client_id": conn_id})
 
     def _on_frame_received(self, conn: TCPConnection, frame: bytes) -> None:
-        """收到帧."""
+        """收到帧。"""
         conn_id = conn.name
+
+        # 更新统计
+        self._frames_received += 1
+        self._bytes_received += len(frame)
 
         if self._raw_frame_callback:
             try:
@@ -1240,10 +1289,21 @@ class SlaveEngine:
         """模拟数据变化循环."""
         yx_tick = 0.0
         yc_tick = 0.0
+        auto_change_ticks: dict[int, float] = {}  # ioa -> last_change_time
 
         while self._simulation_running:
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.1)
             now = time.monotonic()
+
+            # 遥信自动变化（is_changing=True的点）
+            yx_data = self._data_store._yx
+            for ioa, point in list(yx_data.items()):
+                if point.is_changing:
+                    last_tick = auto_change_ticks.get(ioa, 0)
+                    if now - last_tick >= point.change_interval:
+                        auto_change_ticks[ioa] = now
+                        new_value = not point.value
+                        await self.send_spontaneous_yx(ioa, new_value)
 
             # 遥信随机变化
             if now - yx_tick >= yx_interval:
@@ -1338,9 +1398,13 @@ class SlaveEngine:
         state.state_machine.on_i_frame_sent()
 
     async def _send_to_client(self, state: _ClientState, frame: bytes) -> None:
-        """发送帧到指定客户端."""
+        """发送帧到指定客户端。"""
         try:
             await state.conn.send_frame(frame)
+
+            # 更新统计
+            self._frames_sent += 1
+            self._bytes_sent += len(frame)
 
             if self._raw_frame_callback:
                 try:
@@ -1363,6 +1427,7 @@ class SlaveEngine:
                 self._history_db.record_frame("tx", frame, frame_type=frame_type, client_id=state.conn.name)
         except Exception as e:
             logger.error(f"Send to {state.conn.name} failed: {e}")
+            self._errors += 1
 
     async def _broadcast_i_frame(self, asdu_data: bytes) -> None:
         """向所有已启动的客户端广播 I 帧."""

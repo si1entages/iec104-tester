@@ -47,7 +47,7 @@ class StatusIndicator(QWidget):
         if self._text:
             painter.setPen(QColor("#cdd6f4"))
             font = painter.font()
-            font.setPointSize(9)
+            font.setPointSize(10)
             painter.setFont(font)
             painter.drawText(
                 int(x + circle_size + 4), int(y),
@@ -60,20 +60,20 @@ class StatusIndicator(QWidget):
 
 
 class StatItem(QWidget):
-    """统计项组件."""
+    """统计项组件。"""
 
     def __init__(self, label: str, value: str = "0", parent=None):
         super().__init__(parent)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 2, 0, 2)
+        layout.setContentsMargins(0, 1, 0, 1)
         layout.setSpacing(4)
 
         self._label = QLabel(label)
-        self._label.setStyleSheet("color: #a6adc8; font-size: 11px;")
+        self._label.setStyleSheet("color: #a6adc8; font-size: 12px;")
         layout.addWidget(self._label)
 
         self._value = QLabel(value)
-        self._value.setStyleSheet("color: #cdd6f4; font-size: 11px; font-weight: bold;")
+        self._value.setStyleSheet("color: #cdd6f4; font-size: 12px; font-weight: bold;")
         self._value.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         layout.addWidget(self._value)
 
@@ -83,14 +83,14 @@ class StatItem(QWidget):
 
 
 class SidebarSection(QGroupBox):
-    """侧边栏分区."""
+    """侧边栏分区。"""
 
     def __init__(self, title: str, parent=None):
         super().__init__(title, parent)
         self.setObjectName("sidebarSection")
         self._layout = QVBoxLayout(self)
-        self._layout.setContentsMargins(8, 12, 8, 8)
-        self._layout.setSpacing(4)
+        self._layout.setContentsMargins(6, 8, 6, 6)
+        self._layout.setSpacing(2)
 
     def add_widget(self, widget: QWidget):
         """添加组件."""
@@ -116,7 +116,8 @@ class Sidebar(QWidget):
     def __init__(self, mode: str = "master", parent=None):
         super().__init__(parent)
         self._mode = mode
-        self._expanded = True
+        self.setMaximumWidth(200)
+        self.setMinimumWidth(150)
         self._setup_ui()
 
     def _setup_ui(self):
@@ -125,18 +126,11 @@ class Sidebar(QWidget):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # 折叠按钮
-        self._toggle_btn = QPushButton("◀")
-        self._toggle_btn.setObjectName("sidebarToggle")
-        self._toggle_btn.setFixedWidth(20)
-        self._toggle_btn.clicked.connect(self._toggle)
-        main_layout.addWidget(self._toggle_btn)
-
         # 内容区域
         self._content = QWidget()
         content_layout = QVBoxLayout(self._content)
-        content_layout.setContentsMargins(4, 4, 4, 4)
-        content_layout.setSpacing(8)
+        content_layout.setContentsMargins(6, 4, 6, 4)
+        content_layout.setSpacing(4)
 
         # 连接状态区
         self._status_section = SidebarSection("连接状态")
@@ -144,11 +138,11 @@ class Sidebar(QWidget):
         self._status_section.add_widget(self._status_indicator)
 
         self._peer_label = QLabel("对端: -")
-        self._peer_label.setStyleSheet("color: #a6adc8; font-size: 11px;")
+        self._peer_label.setStyleSheet("color: #a6adc8; font-size: 12px;")
         self._status_section.add_widget(self._peer_label)
 
         self._runtime_label = QLabel("运行: 00:00:00")
-        self._runtime_label.setStyleSheet("color: #a6adc8; font-size: 11px;")
+        self._runtime_label.setStyleSheet("color: #a6adc8; font-size: 12px;")
         self._status_section.add_widget(self._runtime_label)
 
         content_layout.addWidget(self._status_section)
@@ -201,19 +195,13 @@ class Sidebar(QWidget):
         main_layout.addWidget(self._content)
 
     def _add_action_button(self, text: str, tooltip: str, signal: Signal):
-        """添加操作按钮."""
+        """添加操作按钮。"""
         btn = QPushButton(text)
         btn.setToolTip(tooltip)
         btn.setObjectName("sidebarActionButton")
         btn.setMinimumHeight(28)
         btn.clicked.connect(signal.emit)
         self._actions_section.add_widget(btn)
-
-    def _toggle(self):
-        """折叠/展开侧边栏."""
-        self._expanded = not self._expanded
-        self._content.setVisible(self._expanded)
-        self._toggle_btn.setText("◀" if self._expanded else "▶")
 
     def set_connected(self, connected: bool, peer: str = ""):
         """设置连接状态."""

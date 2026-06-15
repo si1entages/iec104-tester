@@ -61,15 +61,13 @@ class MainToolBar(QToolBar):
         self._setup_ui()
 
     def _setup_ui(self):
-        """设置工具栏UI."""
+        """设置工具栏UI。"""
         if self._mode == "master":
             self._setup_master_ui()
         else:
             self._setup_slave_ui()
 
         # 通用按钮
-        self.addSeparator()
-        self._add_record_buttons()
         self.addSeparator()
         self._add_settings_button()
 

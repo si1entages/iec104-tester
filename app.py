@@ -61,6 +61,10 @@ def main():
         help="无GUI模式（仅CLI日志输出）"
     )
     parser.add_argument(
+        "--qss-reload", action="store_true",
+        help="启用QSS热重载（修改style.qss实时生效）"
+    )
+    parser.add_argument(
         "--history-db", type=str, default=None,
         help="历史数据库路径 (SQLite)"
     )
@@ -173,6 +177,13 @@ def main():
             extra_style = f.read()
 
     app.setStyleSheet(base_theme + "\n" + extra_style)
+
+    # QSS热重载（开发模式）
+    if args.qss_reload:
+        from gui.qss_reloader import QSSReloader
+        if os.path.exists(style_qss_path):
+            QSSReloader(app, style_qss_path)
+            logger.info(f"QSS hot-reload enabled: {style_qss_path}")
 
     # 创建主窗口
     from gui.main_window import MainWindow

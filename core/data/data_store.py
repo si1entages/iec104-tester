@@ -37,6 +37,10 @@ class YxData:
     timestamp: float = 0.0      # 最后更新时间 (monotonic)
     change_count: int = 0       # 变化次数
     name: str = ""
+    group: int = 1              # 组号
+    point_type: str = "single"  # single/double
+    is_changing: bool = False   # 是否自动变化
+    change_interval: float = 1.0  # 变化周期（秒）
 
     @property
     def state_str(self) -> str:
@@ -128,6 +132,11 @@ class RealtimeDB:
             maxlen=event_buffer_size
         )
 
+        # 变化追踪（用于增量更新）
+        self._changed_yx: set[int] = set()
+        self._changed_yc: set[int] = set()
+        self._changed_ym: set[int] = set()
+
         # 统计
         self._total_updates = 0
         self._total_changes = 0
@@ -145,6 +154,10 @@ class RealtimeDB:
                     quality=QualityDescriptor(p.initial_quality),
                     timestamp=time.monotonic(),
                     name=p.name,
+                    group=p.group,
+                    point_type=p.point_type.value,
+                    is_changing=p.is_changing,
+                    change_interval=p.change_interval,
                 )
 
             for p in point_table.get_all_yc():
@@ -206,6 +219,7 @@ class RealtimeDB:
             if changed:
                 point.change_count += 1
                 self._total_changes += 1
+                self._changed_yx.add(ioa)
                 self._fire_event(DataChangeEvent(
                     point_type="yx", ioa=ioa,
                     old_value=old_value, new_value=value,
@@ -222,7 +236,11 @@ class RealtimeDB:
 
     def get_all_yx(self) -> dict[int, YxData]:
         with self._lock:
-            return dict(self._yx)
+            return self._yx
+
+    def get_yx_ref(self) -> dict[int, YxData]:
+        """获取遥信数据引用（无拷贝，高性能）。"""
+        return self._yx
 
     # ── 遥测操作 ────────────────────────────────────────────────
 
@@ -254,6 +272,7 @@ class RealtimeDB:
             if changed:
                 point.change_count += 1
                 self._total_changes += 1
+                self._changed_yc.add(ioa)
                 self._fire_event(DataChangeEvent(
                     point_type="yc", ioa=ioa,
                     old_value=old_value, new_value=scaled_value,
@@ -270,7 +289,11 @@ class RealtimeDB:
 
     def get_all_yc(self) -> dict[int, YcData]:
         with self._lock:
-            return dict(self._yc)
+            return self._yc
+
+    def get_yc_ref(self) -> dict[int, YcData]:
+        """获取遥测数据引用（无拷贝，高性能）。"""
+        return self._yc
 
     # ── 遥控操作 ────────────────────────────────────────────────
 
@@ -295,7 +318,11 @@ class RealtimeDB:
 
     def get_all_yk(self) -> dict[int, YkData]:
         with self._lock:
-            return dict(self._yk)
+            return self._yk
+
+    def get_yk_ref(self) -> dict[int, YkData]:
+        """获取遥控数据引用（无拷贝，高性能）。"""
+        return self._yk
 
     # ── 遥脉操作 ────────────────────────────────────────────────
 
@@ -320,6 +347,7 @@ class RealtimeDB:
             if changed:
                 point.change_count += 1
                 self._total_changes += 1
+                self._changed_ym.add(ioa)
                 self._fire_event(DataChangeEvent(
                     point_type="ym", ioa=ioa,
                     old_value=old_value, new_value=value,
@@ -336,7 +364,22 @@ class RealtimeDB:
 
     def get_all_ym(self) -> dict[int, YmData]:
         with self._lock:
-            return dict(self._ym)
+            return self._ym
+
+    def get_ym_ref(self) -> dict[int, YmData]:
+        """获取遥脉数据引用（无拷贝，高性能）。"""
+        return self._ym
+
+    def get_changed_ioas(self) -> tuple[set[int], set[int], set[int]]:
+        """获取自上次调用以来变化的IOA集合，并清空。"""
+        with self._lock:
+            yx = self._changed_yx.copy()
+            yc = self._changed_yc.copy()
+            ym = self._changed_ym.copy()
+            self._changed_yx.clear()
+            self._changed_yc.clear()
+            self._changed_ym.clear()
+            return yx, yc, ym
 
     # ── 批量操作 ────────────────────────────────────────────────
 

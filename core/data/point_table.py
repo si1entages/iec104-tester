@@ -53,6 +53,8 @@ class YxPointDef(PointDef):
     point_type: YxType = YxType.SINGLE
     initial_value: bool = False
     inverted: bool = False          # 取反（常用于NC触点）
+    is_changing: bool = False       # 是否自动变化
+    change_interval: float = 1.0    # 变化周期（秒）
 
 
 @dataclass

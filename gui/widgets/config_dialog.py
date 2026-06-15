@@ -163,7 +163,7 @@ class DisplayConfigPage(QWidget):
         # 刷新间隔
         self._refresh_spin = QSpinBox()
         self._refresh_spin.setRange(100, 5000)
-        self._refresh_spin.setValue(config.display.refresh_interval if config else 500)
+        self._refresh_spin.setValue(config.display.refresh_interval_ms if config else 500)
         self._refresh_spin.setSuffix(" 毫秒")
         layout.addRow("刷新间隔:", self._refresh_spin)
 
@@ -173,11 +173,11 @@ class DisplayConfigPage(QWidget):
         layout.addRow("", self._auto_scroll_check)
 
     def get_values(self) -> dict:
-        """获取配置值."""
+        """获取配置值。"""
         theme = "dark" if self._theme_combo.currentIndex() == 0 else "light"
         return {
             "theme": theme,
-            "refresh_interval": self._refresh_spin.value(),
+            "refresh_interval_ms": self._refresh_spin.value(),
             "auto_scroll": self._auto_scroll_check.isChecked(),
         }
 

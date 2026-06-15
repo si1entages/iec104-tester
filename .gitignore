@@ -84,3 +84,6 @@ logs/
 
 # Config
 config.local.yaml
+
+# Executables
+*.exe

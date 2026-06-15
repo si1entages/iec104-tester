@@ -28,42 +28,56 @@ from core.data.point_table import (
 
 
 class PointEditorDialog(QDialog):
-    """点定义编辑对话框."""
+    """点定义编辑对话框。"""
 
     def __init__(self, point_type: str, point=None, parent=None):
         super().__init__(parent)
         self._point_type = point_type
         self._point = point
         self._result = None
+        self._is_add_mode = (point is None)  # 添加模式
 
-        self.setWindowTitle(f"编辑{'遥信' if point_type == 'yx' else '遥测' if point_type == 'yc' else '遥控' if point_type == 'yk' else '遥脉'}点")
+        type_names = {"yx": "遥信", "yc": "遥测", "yk": "遥控", "ym": "遥脉"}
+        self.setWindowTitle(f"{'添加' if self._is_add_mode else '编辑'}{type_names.get(point_type, point_type)}点")
         self.setMinimumWidth(400)
 
         layout = QFormLayout(self)
 
         self._ioa = QSpinBox()
         self._ioa.setRange(0, 16777215)
-        layout.addRow("IOA:", self._ioa)
+        layout.addRow("起始IOA:", self._ioa)
 
-        self._name = QLineEdit()
-        self._name.setPlaceholderText("点描述/名称")
-        layout.addRow("名称:", self._name)
+        # 添加模式下显示个数
+        if self._is_add_mode:
+            self._count = QSpinBox()
+            self._count.setRange(1, 1000)
+            self._count.setValue(1)
+            layout.addRow("个数:", self._count)
 
         self._group = QSpinBox()
         self._group.setRange(1, 16)
         layout.addRow("组号:", self._group)
-
-        self._enabled = QCheckBox("启用")
-        self._enabled.setChecked(True)
-        layout.addRow("", self._enabled)
 
         # 类型特定字段
         if point_type == "yx":
             self._yx_type = QComboBox()
             self._yx_type.addItems(["单点", "双点"])
             layout.addRow("类型:", self._yx_type)
-            self._inverted = QCheckBox("取反")
-            layout.addRow("", self._inverted)
+
+            self._is_changing = QComboBox()
+            self._is_changing.addItems(["否", "是"])
+            layout.addRow("是否变化:", self._is_changing)
+
+            self._change_interval = QSpinBox()
+            self._change_interval.setRange(1, 3600)
+            self._change_interval.setValue(1)
+            self._change_interval.setSuffix(" 秒")
+            self._change_interval.setEnabled(False)
+            layout.addRow("变化周期:", self._change_interval)
+
+            self._is_changing.currentIndexChanged.connect(
+                lambda idx: self._change_interval.setEnabled(idx == 1)
+            )
 
         elif point_type == "yc":
             self._yc_type = QComboBox()
@@ -91,9 +105,7 @@ class PointEditorDialog(QDialog):
         # 填充已有数据
         if point:
             self._ioa.setValue(point.ioa)
-            self._name.setText(point.name)
             self._group.setValue(point.group)
-            self._enabled.setChecked(point.enabled)
 
         # 按钮
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -102,30 +114,85 @@ class PointEditorDialog(QDialog):
         layout.addRow(buttons)
 
     def _on_accept(self) -> None:
-        if not self._name.text().strip():
-            QMessageBox.warning(self, "警告", "请输入点名称")
-            return
-        self._result = self._get_point_def()
+        """确定按钮。"""
+        if self._is_add_mode:
+            # 添加模式：返回多个点
+            self._result = self._get_points_list()
+        else:
+            # 编辑模式：返回单个点
+            self._result = self._get_point_def()
         self.accept()
 
+    def _get_points_list(self) -> list:
+        """获取点列表（批量添加）。"""
+        start_ioa = self._ioa.value()
+        count = self._count.value() if hasattr(self, '_count') else 1
+        points = []
+
+        for i in range(count):
+            ioa = start_ioa + i
+            name = f"{self._point_type.upper()}_{ioa:04d}"
+
+            if self._point_type == "yx":
+                points.append(YxPointDef(
+                    ioa=ioa,
+                    name=name,
+                    group=self._group.value(),
+                    enabled=True,
+                    point_type=YxType.DOUBLE if self._yx_type.currentIndex() == 1 else YxType.SINGLE,
+                    is_changing=self._is_changing.currentIndex() == 1 if hasattr(self, '_is_changing') else False,
+                    change_interval=float(self._change_interval.value()) if hasattr(self, '_change_interval') else 1.0,
+                ))
+            elif self._point_type == "yc":
+                types = [YcType.NORMALIZED, YcType.SCALED, YcType.SHORT_FLOAT]
+                points.append(YcPointDef(
+                    ioa=ioa,
+                    name=name,
+                    group=self._group.value(),
+                    enabled=True,
+                    data_type=types[self._yc_type.currentIndex()] if hasattr(self, '_yc_type') else YcType.SHORT_FLOAT,
+                    unit=self._unit.text() if hasattr(self, '_unit') else "",
+                    min_value=self._min_val.value() if hasattr(self, '_min_val') else -99999,
+                    max_value=self._max_val.value() if hasattr(self, '_max_val') else 99999,
+                ))
+            elif self._point_type == "yk":
+                points.append(YkPointDef(
+                    ioa=ioa,
+                    name=name,
+                    group=self._group.value(),
+                    enabled=True,
+                    command_type="double" if self._cmd_type.currentIndex() == 1 else "single",
+                    select_before_execute=self._sbo.isChecked() if hasattr(self, '_sbo') else True,
+                ))
+            else:
+                points.append(YmPointDef(
+                    ioa=ioa,
+                    name=name,
+                    group=self._group.value(),
+                    enabled=True,
+                ))
+
+        return points
+
     def _get_point_def(self):
-        """获取点定义."""
+        """获取单个点定义（编辑模式）。"""
         if self._point_type == "yx":
             return YxPointDef(
                 ioa=self._ioa.value(),
-                name=self._name.text(),
+                name=f"{self._point_type.upper()}_{self._ioa.value():04d}",
                 group=self._group.value(),
-                enabled=self._enabled.isChecked(),
+                enabled=True,
                 point_type=YxType.DOUBLE if self._yx_type.currentIndex() == 1 else YxType.SINGLE,
-                inverted=self._inverted.isChecked() if hasattr(self, '_inverted') else False,
+                is_changing=self._is_changing.currentIndex() == 1 if hasattr(self, '_is_changing') else False,
+                change_interval=float(self._change_interval.value()) if hasattr(self, '_change_interval') else 1.0,
             )
         elif self._point_type == "yc":
             types = [YcType.NORMALIZED, YcType.SCALED, YcType.SHORT_FLOAT]
             return YcPointDef(
                 ioa=self._ioa.value(),
-                name=self._name.text(),
+                name=f"{self._point_type.upper()}_{self._ioa.value():04d}",
                 group=self._group.value(),
-                enabled=self._enabled.isChecked(),
+                enabled=True,
                 data_type=types[self._yc_type.currentIndex()] if hasattr(self, '_yc_type') else YcType.SHORT_FLOAT,
                 unit=self._unit.text() if hasattr(self, '_unit') else "",
                 min_value=self._min_val.value() if hasattr(self, '_min_val') else -99999,
@@ -134,18 +201,18 @@ class PointEditorDialog(QDialog):
         elif self._point_type == "yk":
             return YkPointDef(
                 ioa=self._ioa.value(),
-                name=self._name.text(),
+                name=f"{self._point_type.upper()}_{self._ioa.value():04d}",
                 group=self._group.value(),
-                enabled=self._enabled.isChecked(),
+                enabled=True,
                 command_type="double" if self._cmd_type.currentIndex() == 1 else "single",
                 select_before_execute=self._sbo.isChecked() if hasattr(self, '_sbo') else True,
             )
         else:
             return YmPointDef(
                 ioa=self._ioa.value(),
-                name=self._name.text(),
+                name=f"{self._point_type.upper()}_{self._ioa.value():04d}",
                 group=self._group.value(),
-                enabled=self._enabled.isChecked(),
+                enabled=True,
             )
 
     @property

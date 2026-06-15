@@ -63,11 +63,11 @@ class DisplayConfig:
 @dataclass
 class PointTableConfig:
     file: str = ""
-    auto_generate: bool = True
-    yx_count: int = 100
-    yc_count: int = 50
-    yk_count: int = 20
-    ym_count: int = 10
+    auto_generate: bool = False
+    yx_count: int = 0
+    yc_count: int = 0
+    yk_count: int = 0
+    ym_count: int = 0
 
 
 @dataclass
