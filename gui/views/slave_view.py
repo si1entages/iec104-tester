@@ -8,7 +8,6 @@ from PySide6.QtWidgets import QTabWidget
 from core.config import AppConfig
 from core.engine.slave import SlaveEngine, SlaveEvent
 from core.data.point_table import PointTable
-from gui.slave.sim_panel import SimPanel
 from gui.slave.point_editor import PointEditorPanel
 from gui.slave.response_cfg import ResponseConfigPanel
 
@@ -16,12 +15,9 @@ from .base_view import BaseView
 
 
 class SlaveView(BaseView):
-    """子站视图 — 包含模拟面板、点表编辑、响应配置."""
+    """子站视图 — 包含点表编辑、响应配置."""
 
     # 信号
-    yx_change = Signal(int, bool)
-    yc_change = Signal(int, float)
-    simulation_toggled = Signal(bool)
     point_table_changed = Signal()
 
     def __init__(self, config: AppConfig, parent=None):
@@ -34,14 +30,8 @@ class SlaveView(BaseView):
         super()._init_ui()
 
         # 添加子站专用面板
-        self._sim_panel = SimPanel()
-        self._sim_panel.yx_change.connect(self._on_sim_yx)
-        self._sim_panel.yc_change.connect(self._on_sim_yc)
-        self._sim_panel.simulation_toggled.connect(self._on_sim_toggle)
-        self._func_tabs.insertTab(0, self._sim_panel, "模拟")
-
         self._response_cfg = ResponseConfigPanel()
-        self._func_tabs.insertTab(1, self._response_cfg, "响应配置")
+        self._func_tabs.insertTab(0, self._response_cfg, "响应配置")
 
     def _init_engine(self) -> None:
         """初始化子站引擎."""
@@ -126,26 +116,6 @@ class SlaveView(BaseView):
                 seq.unconfirmed_count, seq.k, seq.w
             )
 
-    def _on_sim_yx(self, ioa: int, value: bool) -> None:
-        """模拟遥信变化."""
-        if self._engine:
-            self._engine.simulate_yx_change(ioa, value)
-
-    def _on_sim_yc(self, ioa: int, value: float) -> None:
-        """模拟遥测变化."""
-        if self._engine:
-            self._engine.simulate_yc_change(ioa, value)
-
-    def _on_sim_toggle(self, enabled: bool) -> None:
-        """切换自动模拟."""
-        if not self._engine:
-            return
-        if enabled:
-            cfg = self._sim_panel.sim_config
-            self._engine.start_simulation(**cfg)
-        else:
-            self._engine.stop_simulation()
-
     def _on_point_table_changed(self) -> None:
         """点表变更."""
         if self._engine:
@@ -173,10 +143,6 @@ class SlaveView(BaseView):
             async_thread.run_coroutine(
                 self._engine.send_spontaneous_yx(ioa, value)
             )
-
-    def get_sim_panel(self) -> SimPanel:
-        """获取模拟面板."""
-        return self._sim_panel
 
     def get_response_cfg(self) -> ResponseConfigPanel:
         """获取响应配置面板."""

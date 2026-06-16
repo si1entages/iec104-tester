@@ -45,6 +45,8 @@ class PointEditorDialog(QDialog):
 
         self._ioa = QSpinBox()
         self._ioa.setRange(0, 16777215)
+        self._ioa.setMinimumWidth(120)
+        self._ioa.setButtonSymbols(QSpinBox.ButtonSymbols.UpDownArrows)
         layout.addRow("起始IOA:", self._ioa)
 
         # 添加模式下显示个数
@@ -52,10 +54,14 @@ class PointEditorDialog(QDialog):
             self._count = QSpinBox()
             self._count.setRange(1, 1000)
             self._count.setValue(1)
+            self._count.setMinimumWidth(120)
+            self._count.setButtonSymbols(QSpinBox.ButtonSymbols.UpDownArrows)
             layout.addRow("个数:", self._count)
 
         self._group = QSpinBox()
         self._group.setRange(1, 16)
+        self._group.setMinimumWidth(120)
+        self._group.setButtonSymbols(QSpinBox.ButtonSymbols.UpDownArrows)
         layout.addRow("组号:", self._group)
 
         # 类型特定字段
@@ -72,12 +78,12 @@ class PointEditorDialog(QDialog):
             self._change_interval.setRange(1, 3600)
             self._change_interval.setValue(1)
             self._change_interval.setSuffix(" 秒")
+            self._change_interval.setMinimumWidth(120)
+            self._change_interval.setButtonSymbols(QSpinBox.ButtonSymbols.UpDownArrows)
             self._change_interval.setEnabled(False)
             layout.addRow("变化周期:", self._change_interval)
 
-            self._is_changing.currentIndexChanged.connect(
-                lambda idx: self._change_interval.setEnabled(idx == 1)
-            )
+            self._is_changing.currentIndexChanged.connect(self._on_changing_changed)
 
         elif point_type == "yc":
             self._yc_type = QComboBox()
@@ -88,11 +94,31 @@ class PointEditorDialog(QDialog):
             layout.addRow("单位:", self._unit)
             self._min_val = QDoubleSpinBox()
             self._min_val.setRange(-999999, 999999)
+            self._min_val.setMinimumWidth(120)
+            self._min_val.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.UpDownArrows)
             layout.addRow("最小值:", self._min_val)
             self._max_val = QDoubleSpinBox()
             self._max_val.setRange(-999999, 999999)
             self._max_val.setValue(99999)
+            self._max_val.setMinimumWidth(120)
+            self._max_val.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.UpDownArrows)
             layout.addRow("最大值:", self._max_val)
+
+            self._yc_is_changing = QComboBox()
+            self._yc_is_changing.addItems(["否", "是"])
+            layout.addRow("是否变化:", self._yc_is_changing)
+
+            self._yc_change_interval = QDoubleSpinBox()
+            self._yc_change_interval.setRange(0.1, 3600)
+            self._yc_change_interval.setValue(1.0)
+            self._yc_change_interval.setSuffix(" 秒")
+            self._yc_change_interval.setDecimals(1)
+            self._yc_change_interval.setMinimumWidth(120)
+            self._yc_change_interval.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.UpDownArrows)
+            self._yc_change_interval.setEnabled(False)
+            layout.addRow("变化周期:", self._yc_change_interval)
+
+            self._yc_is_changing.currentIndexChanged.connect(self._on_yc_changing_changed)
 
         elif point_type == "yk":
             self._cmd_type = QComboBox()
@@ -112,6 +138,16 @@ class PointEditorDialog(QDialog):
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
+
+    def _on_changing_changed(self, index: int) -> None:
+        """是否变化选项改变时，启用/禁用变化周期输入框."""
+        if hasattr(self, '_change_interval'):
+            self._change_interval.setEnabled(index == 1)
+
+    def _on_yc_changing_changed(self, index: int) -> None:
+        """YC是否变化选项改变时，启用/禁用变化周期输入框."""
+        if hasattr(self, '_yc_change_interval'):
+            self._yc_change_interval.setEnabled(index == 1)
 
     def _on_accept(self) -> None:
         """确定按钮。"""
@@ -154,6 +190,8 @@ class PointEditorDialog(QDialog):
                     unit=self._unit.text() if hasattr(self, '_unit') else "",
                     min_value=self._min_val.value() if hasattr(self, '_min_val') else -99999,
                     max_value=self._max_val.value() if hasattr(self, '_max_val') else 99999,
+                    is_changing=self._yc_is_changing.currentIndex() == 1 if hasattr(self, '_yc_is_changing') else False,
+                    change_interval=float(self._yc_change_interval.value()) if hasattr(self, '_yc_change_interval') else 1.0,
                 ))
             elif self._point_type == "yk":
                 points.append(YkPointDef(
@@ -197,6 +235,8 @@ class PointEditorDialog(QDialog):
                 unit=self._unit.text() if hasattr(self, '_unit') else "",
                 min_value=self._min_val.value() if hasattr(self, '_min_val') else -99999,
                 max_value=self._max_val.value() if hasattr(self, '_max_val') else 99999,
+                is_changing=self._yc_is_changing.currentIndex() == 1 if hasattr(self, '_yc_is_changing') else False,
+                change_interval=float(self._yc_change_interval.value()) if hasattr(self, '_yc_change_interval') else 1.0,
             )
         elif self._point_type == "yk":
             return YkPointDef(

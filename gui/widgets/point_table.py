@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QTableView, QVBoxLayout, QHBoxLayout, QWidget,
     QLineEdit, QLabel, QComboBox, QPushButton, QHeaderView,
     QStyledItemDelegate, QStyleOptionViewItem, QStyle,
+    QSpinBox, QDoubleSpinBox,
 )
 
 from core.data.data_store import RealtimeDB, YxData, YcData, YmData
@@ -65,8 +66,8 @@ class YxTableModel(QAbstractTableModel):
         flags = super().flags(index)
         col = index.column()
 
-        # 名称(2)、组号(3)、类型(4)、变化(5)、周期(6)、状态(7) 列可编辑
-        if col in (2, 3, 4, 5, 6, 7):
+        # 名称(2)、组号(3)、类型(4)、变化(5)、周期(6)、状态(7)、品质(8) 列可编辑
+        if col in (2, 3, 4, 5, 6, 7, 8):
             flags |= Qt.ItemIsEditable
 
         return flags
@@ -193,11 +194,13 @@ class YxTableModel(QAbstractTableModel):
 #  遥测表格模型
 # ═══════════════════════════════════════════════════════════════════
 
-YC_HEADERS = ["序号", "IOA", "名称", "当前值", "单位", "品质", "最小值", "最大值", "变化次数"]
+YC_HEADERS = ["序号", "IOA", "名称", "组号", "类型", "当前值", "最小值", "最大值", "是否变化", "变化周期", "品质", "变化次数", "最后变化时间"]
 
 
 class YcTableModel(QAbstractTableModel):
     """遥测表格模型。"""
+
+    data_edited = Signal(int, str, object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -218,6 +221,53 @@ class YcTableModel(QAbstractTableModel):
                 idx_end = self.index(row, len(YC_HEADERS) - 1)
                 self.dataChanged.emit(idx_start, idx_end)
 
+    def flags(self, index: QModelIndex) -> Qt.ItemFlags:
+        if not index.isValid():
+            return Qt.NoItemFlags
+        flags = super().flags(index)
+        col = index.column()
+        # 名称(2)、组号(3)、类型(4)、是否变化(8)、变化周期(9) 列可编辑
+        if col in (2, 3, 4, 8, 9):
+            flags |= Qt.ItemIsEditable
+        return flags
+
+    def setData(self, index: QModelIndex, value, role: int = Qt.EditRole) -> bool:
+        if not index.isValid() or role != Qt.EditRole:
+            return False
+        row = index.row()
+        col = index.column()
+        if row >= len(self._points):
+            return False
+
+        point = self._points[row]
+        ioa = point.ioa
+
+        try:
+            if col == 2:  # 名称
+                point.name = str(value)
+                self.data_edited.emit(ioa, "name", str(value))
+            elif col == 3:  # 组号
+                point.group = int(value)
+                self.data_edited.emit(ioa, "group", int(value))
+            elif col == 4:  # 类型
+                types = ["normalized", "scaled", "short_float"]
+                new_type = types[types.index(str(value))] if str(value) in types else "short_float"
+                point.data_type = new_type
+                self.data_edited.emit(ioa, "data_type", new_type)
+            elif col == 8:  # 是否变化
+                new_val = str(value) == "是"
+                point.is_changing = new_val
+                self.data_edited.emit(ioa, "is_changing", new_val)
+            elif col == 9:  # 变化周期
+                new_val = float(str(value).replace("s", ""))
+                point.change_interval = new_val
+                self.data_edited.emit(ioa, "change_interval", new_val)
+
+            self.dataChanged.emit(index, index)
+            return True
+        except (ValueError, TypeError):
+            return False
+
     def rowCount(self, parent=QModelIndex()) -> int:
         return len(self._points)
 
@@ -229,6 +279,12 @@ class YcTableModel(QAbstractTableModel):
             return YC_HEADERS[section]
         return None
 
+    @staticmethod
+    def _fmt_time(ts: float) -> str:
+        if ts <= 0:
+            return "-"
+        return time.strftime("%H:%M:%S", time.localtime(ts))
+
     def data(self, index: QModelIndex, role=Qt.DisplayRole) -> Any:
         if not index.isValid() or index.row() >= len(self._points):
             return None
@@ -237,24 +293,23 @@ class YcTableModel(QAbstractTableModel):
         col = index.column()
 
         if role == Qt.DisplayRole:
-            if col == 0:
-                return str(index.row() + 1)
-            elif col == 1:
-                return str(point.ioa)
-            elif col == 2:
-                return point.name
-            elif col == 3:
-                return f"{point.value:.4f}"
+            if col == 0: return str(index.row() + 1)
+            elif col == 1: return str(point.ioa)
+            elif col == 2: return point.name
+            elif col == 3: return str(point.group)
             elif col == 4:
-                return point.unit
-            elif col == 5:
-                return str(point.quality) if not point.quality.is_good else "正常"
-            elif col == 6:
-                return f"{point.min_val:.4f}" if point.min_val != float('inf') else "-"
-            elif col == 7:
-                return f"{point.max_val:.4f}" if point.max_val != float('-inf') else "-"
-            elif col == 8:
-                return str(point.change_count)
+                type_names = {"normalized": "归一化", "scaled": "标度化", "short_float": "短浮点"}
+                return type_names.get(point.data_type, point.data_type)
+            elif col == 5: return f"{point.value:.4f}"
+            elif col == 6: return f"{point.min_val:.4f}" if point.min_val != float('inf') else "-"
+            elif col == 7: return f"{point.max_val:.4f}" if point.max_val != float('-inf') else "-"
+            elif col == 8: return "是" if point.is_changing else "否"
+            elif col == 9: return f"{point.change_interval:.1f}s"
+            elif col == 10:
+                q = point.quality
+                return str(q) if not q.is_good else "正常"
+            elif col == 11: return str(point.change_count)
+            elif col == 12: return self._fmt_time(point.last_change_time)
 
         elif role == Qt.BackgroundRole:
             if point.quality.invalid:
@@ -263,12 +318,12 @@ class YcTableModel(QAbstractTableModel):
                 return QBrush(QColor(249, 226, 175, 40))
 
         elif role == Qt.ForegroundRole:
-            if col == 5 and not point.quality.is_good:
+            if col == 10 and not point.quality.is_good:
                 return QBrush(QColor(249, 226, 175))
 
         elif role == Qt.TextAlignmentRole:
-            if col in (0, 1, 3, 5, 6, 7, 8):
-                return Qt.AlignCenter | Qt.AlignRight
+            if col in (0, 1, 3, 5, 6, 7, 8, 9, 11, 12):
+                return Qt.AlignCenter
 
         return None
 
@@ -581,6 +636,10 @@ class PointTablePanel(QWidget):
     def model(self) -> QAbstractTableModel:
         return self._model
 
+    @property
+    def proxy(self) -> QSortFilterProxyModel:
+        return self._proxy
+
     def _on_search(self, text: str) -> None:
         self._proxy.setFilterFixedString(text)
 
@@ -593,27 +652,25 @@ class PointTablePanel(QWidget):
             self._count_label.setText(f"{shown}/{total} 条")
 
     def _setup_delegates(self) -> None:
-        """为YX表格设置自定义委托。"""
-        # 检查是否是YX模型
-        if not hasattr(self._model, '_points') or not self._model._points:
+        """为表格设置自定义委托。"""
+        if not hasattr(self._model, 'data_edited'):
             return
 
-        # 检查第一个点是否有is_changing属性（YX数据特有）
-        first_point = self._model._points[0] if self._model._points else None
-        if not first_point or not hasattr(first_point, 'is_changing'):
-            return
+        # 判断是YX还是YC模型
+        is_yx = isinstance(self._model, YxTableModel)
+        is_yc = isinstance(self._model, YcTableModel)
 
-        # 设置各列委托
-        # 列2: 名称 - 文本输入（默认）
-        # 列3: 组号 - 数字输入框
-        self._table.setItemDelegateForColumn(3, _SpinBoxDelegate(1, 16, parent=self))
-        # 列4: 类型 - 下拉选框
-        self._table.setItemDelegateForColumn(4, _ComboDelegate(["单点", "双点"], parent=self))
-        # 列5: 变化 - 下拉选框
-        self._table.setItemDelegateForColumn(5, _ComboDelegate(["否", "是"], parent=self))
-        # 列6: 周期 - 数字输入框
-        self._table.setItemDelegateForColumn(6, _SpinBoxDelegate(1, 3600, " 秒", parent=self))
-        # 列7: 状态 - 下拉选框
-        self._table.setItemDelegateForColumn(7, _ComboDelegate(["分(OFF)", "合(ON)"], parent=self))
-        # 列8: 品质 - 下拉选框
-        self._table.setItemDelegateForColumn(8, _ComboDelegate(["正常", "无效", "闭锁", "取代"], parent=self))
+        if is_yx:
+            # YX表格委托
+            self._table.setItemDelegateForColumn(3, _SpinBoxDelegate(1, 16, parent=self))
+            self._table.setItemDelegateForColumn(4, _ComboDelegate(["单点", "双点"], parent=self))
+            self._table.setItemDelegateForColumn(5, _ComboDelegate(["否", "是"], parent=self))
+            self._table.setItemDelegateForColumn(6, _SpinBoxDelegate(1, 3600, " 秒", parent=self))
+            self._table.setItemDelegateForColumn(7, _ComboDelegate(["分(OFF)", "合(ON)"], parent=self))
+            self._table.setItemDelegateForColumn(8, _ComboDelegate(["正常", "无效", "闭锁", "取代"], parent=self))
+        elif is_yc:
+            # YC表格委托
+            self._table.setItemDelegateForColumn(3, _SpinBoxDelegate(1, 16, parent=self))
+            self._table.setItemDelegateForColumn(4, _ComboDelegate(["归一化", "标度化", "短浮点"], parent=self))
+            self._table.setItemDelegateForColumn(8, _ComboDelegate(["否", "是"], parent=self))
+            self._table.setItemDelegateForColumn(9, _DoubleSpinBoxDelegate(0.1, 3600.0, 1, " 秒", parent=self))

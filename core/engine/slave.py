@@ -134,6 +134,10 @@ class SlaveEngine:
         self._simulation_task: Optional[asyncio.Task] = None
         self._simulation_running = False
 
+        # 逐点自动变化任务
+        self._auto_change_task: Optional[asyncio.Task] = None
+        self._auto_change_running = False
+
         # 报文缓冲
         self._rx_buffer: list[tuple[float, bytes, str]] = []
         self._tx_buffer: list[tuple[float, bytes, str]] = []
@@ -219,6 +223,10 @@ class SlaveEngine:
         # 启动命令超时检查任务
         self._timeout_check_task = asyncio.create_task(self._timeout_check_loop())
 
+        # 启动逐点自动变化任务
+        self._auto_change_running = True
+        self._auto_change_task = asyncio.create_task(self._auto_change_loop())
+
         logger.info(
             f"Slave engine started on {self._host}:{self._port} "
             f"(YX={self._point_table.yx_count}, YC={self._point_table.yc_count})"
@@ -228,6 +236,15 @@ class SlaveEngine:
         """停止子站引擎."""
         await self.stop_simulation()
         self._reset_change_counts()
+
+        # 停止逐点自动变化任务
+        self._auto_change_running = False
+        if self._auto_change_task:
+            self._auto_change_task.cancel()
+            try:
+                await self._auto_change_task
+            except (asyncio.CancelledError, Exception):
+                pass
 
         # 停止超时检查任务
         if hasattr(self, '_timeout_check_task') and self._timeout_check_task:
@@ -1286,24 +1303,13 @@ class SlaveEngine:
         yx_change_rate: float,
         yc_change_range: float,
     ) -> None:
-        """模拟数据变化循环."""
+        """模拟数据变化循环（随机变化）."""
         yx_tick = 0.0
         yc_tick = 0.0
-        auto_change_ticks: dict[int, float] = {}  # ioa -> last_change_time
 
         while self._simulation_running:
             await asyncio.sleep(0.1)
             now = time.monotonic()
-
-            # 遥信自动变化（is_changing=True的点）
-            yx_data = self._data_store._yx
-            for ioa, point in list(yx_data.items()):
-                if point.is_changing:
-                    last_tick = auto_change_ticks.get(ioa, 0)
-                    if now - last_tick >= point.change_interval:
-                        auto_change_ticks[ioa] = now
-                        new_value = not point.value
-                        await self.send_spontaneous_yx(ioa, new_value)
 
             # 遥信随机变化
             if now - yx_tick >= yx_interval:
@@ -1326,6 +1332,38 @@ class SlaveEngine:
                         new_value = current.value + delta
                         new_value = max(p.min_value, min(p.max_value, new_value))
                         await self.send_spontaneous_yc(p.ioa, new_value)
+
+    async def _auto_change_loop(self) -> None:
+        """逐点自动变化循环 — 标记为 is_changing 的点按 change_interval 周期变化."""
+        change_ticks: dict[int, float] = {}
+
+        while self._auto_change_running:
+            await asyncio.sleep(0.1)
+            now = time.monotonic()
+
+            # 遥信自动变化（翻转）
+            yx_data = self._data_store._yx
+            for ioa, point in list(yx_data.items()):
+                if point.is_changing:
+                    last_tick = change_ticks.get(ioa, 0)
+                    if now - last_tick >= point.change_interval:
+                        change_ticks[ioa] = now
+                        new_value = not point.value
+                        await self.send_spontaneous_yx(ioa, new_value)
+
+            # 遥测自动变化（在最小值最大值范围内随机）
+            yc_data = self._data_store._yc
+            for ioa, point in list(yc_data.items()):
+                if point.is_changing:
+                    last_tick = change_ticks.get(f"yc_{ioa}", 0)
+                    if now - last_tick >= point.change_interval:
+                        change_ticks[f"yc_{ioa}"] = now
+                        min_val = point.min_val if point.min_val != float('inf') else 0.0
+                        max_val = point.max_val if point.max_val != float('-inf') else 100.0
+                        if min_val >= max_val:
+                            min_val, max_val = max_val - 100, max_val
+                        new_value = min_val + random.random() * (max_val - min_val)
+                        await self.send_spontaneous_yc(ioa, new_value)
 
     # ── 命令超时检查 ──────────────────────────────────────────────
 

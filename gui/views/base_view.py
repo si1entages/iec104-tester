@@ -188,7 +188,8 @@ class BaseView(QWidget):
         if not self._engine:
             return
 
-        # 重新初始化数据存储
+        # 清空并重新初始化数据存储
+        self._engine.data_store.clear()
         self._engine.data_store.init_from_point_table(self._point_table)
 
         # 刷新UI
@@ -318,7 +319,8 @@ class BaseView(QWidget):
         panel = panels[current_tab] if current_tab < len(panels) else None
 
         if panel:
-            selected_rows = [idx.row() for idx in panel.table.selectedIndexes()]
+            proxy = panel.proxy
+            selected_rows = [proxy.mapToSource(idx).row() for idx in panel.table.selectedIndexes()]
             if not selected_rows:
                 show_info(self, "请先选择一个或多个点")
                 return
@@ -339,7 +341,7 @@ class BaseView(QWidget):
 
     def _edit_single_point(self, point_type: str, point, model, row: int) -> None:
         """编辑单个点（弹窗修改名称和其他属性）。"""
-        from PySide6.QtWidgets import QInputDialog, QDialog, QFormLayout, QComboBox, QSpinBox, QDoubleSpinBox, QPushButton, QHBoxLayout
+        from PySide6.QtWidgets import QInputDialog, QDialog, QFormLayout, QComboBox, QSpinBox, QDoubleSpinBox, QPushButton, QHBoxLayout, QLineEdit
         from PySide6.QtCore import Qt
 
         dialog = QDialog(self)
@@ -359,6 +361,8 @@ class BaseView(QWidget):
         group_spin = QSpinBox()
         group_spin.setRange(1, 16)
         group_spin.setValue(point.group)
+        group_spin.setMinimumWidth(120)
+        group_spin.setButtonSymbols(QSpinBox.ButtonSymbols.UpDownArrows)
         form.addRow("组号:", group_spin)
 
         # 类型（仅YX）
@@ -379,13 +383,57 @@ class BaseView(QWidget):
             change_interval_spin.setRange(1, 3600)
             change_interval_spin.setValue(int(point.change_interval))
             change_interval_spin.setSuffix(" 秒")
+            change_interval_spin.setMinimumWidth(120)
+            change_interval_spin.setButtonSymbols(QSpinBox.ButtonSymbols.UpDownArrows)
+            change_interval_spin.setEnabled(point.is_changing)
             form.addRow("变化周期:", change_interval_spin)
+
+            is_changing_combo.currentIndexChanged.connect(
+                lambda idx: change_interval_spin.setEnabled(idx == 1)
+            )
 
             # 状态
             state_combo = QComboBox()
             state_combo.addItems(["OFF (分)", "ON (合)"])
             state_combo.setCurrentIndex(1 if point.value else 0)
             form.addRow("状态:", state_combo)
+
+        elif point_type == "yc":
+            # 类型
+            yc_type_combo = QComboBox()
+            yc_type_combo.addItems(["归一化", "标度化", "短浮点"])
+            type_map = {"normalized": 0, "scaled": 1, "short_float": 2}
+            yc_type_combo.setCurrentIndex(type_map.get(point.data_type, 2))
+            form.addRow("类型:", yc_type_combo)
+
+            # 是否变化
+            is_changing_combo = QComboBox()
+            is_changing_combo.addItems(["否", "是"])
+            is_changing_combo.setCurrentIndex(1 if point.is_changing else 0)
+            form.addRow("是否变化:", is_changing_combo)
+
+            # 变化周期
+            change_interval_spin = QDoubleSpinBox()
+            change_interval_spin.setRange(0.1, 3600)
+            change_interval_spin.setValue(point.change_interval)
+            change_interval_spin.setSuffix(" 秒")
+            change_interval_spin.setDecimals(1)
+            change_interval_spin.setMinimumWidth(120)
+            change_interval_spin.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.UpDownArrows)
+            change_interval_spin.setEnabled(point.is_changing)
+            form.addRow("变化周期:", change_interval_spin)
+
+            is_changing_combo.currentIndexChanged.connect(
+                lambda idx: change_interval_spin.setEnabled(idx == 1)
+            )
+
+        # 品质（所有类型）
+        quality_combo = QComboBox()
+        quality_combo.addItems(["正常", "无效", "闭锁", "取代"])
+        quality_map = {0: 0, 0x40: 1, 0x10: 2, 0x04: 3}
+        current_quality = point.quality.raw if hasattr(point, 'quality') else 0
+        quality_combo.setCurrentIndex(quality_map.get(current_quality, 0))
+        form.addRow("品质:", quality_combo)
 
         layout.addLayout(form)
 
@@ -412,6 +460,17 @@ class BaseView(QWidget):
                 point.is_changing = is_changing_combo.currentIndex() == 1
                 point.change_interval = float(change_interval_spin.value())
                 point.value = state_combo.currentIndex() == 1
+
+            elif point_type == "yc":
+                types = ["normalized", "scaled", "short_float"]
+                point.data_type = types[yc_type_combo.currentIndex()]
+                point.is_changing = is_changing_combo.currentIndex() == 1
+                point.change_interval = float(change_interval_spin.value())
+
+            # 更新品质
+            quality_values = [0, 0x40, 0x10, 0x04]
+            if hasattr(point, 'quality'):
+                point.quality.raw = quality_values[quality_combo.currentIndex()]
 
             model.dataChanged.emit(model.index(row, 0), model.index(row, len(model._points[0].__dataclass_fields__) - 1))
             show_success(self, f"已修改 IOA={point.ioa}")
@@ -441,13 +500,20 @@ class BaseView(QWidget):
                             point.change_interval = result["change_interval"]
                         if "state" in result:
                             point.value = result["state"]
-                    elif point_type == "yc" and "data_type" in result:
-                        pass  # YC type change not implemented yet
+                    elif point_type == "yc":
+                        if "data_type" in result:
+                            point.data_type = result["data_type"]
+                        if "is_changing" in result:
+                            point.is_changing = result["is_changing"]
+                        if "change_interval" in result:
+                            point.change_interval = result["change_interval"]
                     elif point_type == "yk" and "command_type" in result:
                         pass  # YK type change not implemented yet
 
                     if "quality" in result:
-                        pass  # Quality change not implemented yet
+                        if hasattr(point, 'quality'):
+                            quality_values = [0, 0x40, 0x10, 0x04]
+                            point.quality.raw = quality_values[result["quality"]]
 
                     updated += 1
 
@@ -455,8 +521,9 @@ class BaseView(QWidget):
             show_success(self, f"已修改 {updated} 个点")
 
     def _on_delete_point(self) -> None:
-        """删除选中的点。"""
+        """删除选中的点（支持多选批量删除）。"""
         from core.data.point_table import PointType
+        from PySide6.QtWidgets import QMessageBox
 
         current_tab = self._data_tabs.currentIndex()
         point_types = ["yx", "yc", "yk", "ym"]
@@ -466,29 +533,49 @@ class BaseView(QWidget):
         panel = panels[current_tab] if current_tab < len(panels) else None
 
         if panel:
-            selected = panel.table.currentIndex()
-            if selected.isValid():
-                row = selected.row()
-                model = panel.model
+            proxy = panel.proxy
+            model = panel.model
+            selected_indexes = panel.table.selectedIndexes()
+
+            if not selected_indexes:
+                show_info(self, "请先选择一个或多个点")
+                return
+
+            # 获取去重后的源模型行号
+            source_rows = set()
+            for idx in selected_indexes:
+                source_rows.add(proxy.mapToSource(idx).row())
+
+            # 收集要删除的点
+            points_to_delete = []
+            for row in source_rows:
                 if row < len(model._points):
-                    point = model._points[row]
-                    # 确认删除
-                    from PySide6.QtWidgets import QMessageBox
-                    reply = QMessageBox.question(
-                        self, "确认删除",
-                        f"确定要删除{point_type.upper()}点 IOA={point.ioa} 吗？",
-                        QMessageBox.Yes | QMessageBox.No,
-                        QMessageBox.No
-                    )
-                    if reply == QMessageBox.Yes:
-                        pt_type = PointType(point_type)
-                        if self._point_table.remove_point(pt_type, point.ioa):
-                            self._refresh_all_data()
-                            show_success(self, f"已删除{point_type.upper()}点: IOA={point.ioa}")
-                        else:
-                            show_error(self, "删除失败")
-            else:
-                show_info(self, "请先选择一个点")
+                    points_to_delete.append(model._points[row])
+
+            if not points_to_delete:
+                return
+
+            # 确认删除
+            count = len(points_to_delete)
+            reply = QMessageBox.question(
+                self, "确认删除",
+                f"确定要删除 {count} 个{point_type.upper()}点吗？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+
+            if reply == QMessageBox.Yes:
+                pt_type = PointType(point_type)
+                deleted = 0
+                for point in points_to_delete:
+                    if self._point_table.remove_point(pt_type, point.ioa):
+                        deleted += 1
+
+                if deleted > 0:
+                    self._refresh_all_data()
+                    show_success(self, f"已删除 {deleted} 个{point_type.upper()}点")
+                else:
+                    show_error(self, "删除失败")
 
     def _on_import_yaml(self) -> None:
         """导入点表YAML文件。"""

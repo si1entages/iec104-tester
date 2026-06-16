@@ -64,6 +64,11 @@ class YcData:
     unit: str = ""
     min_val: float = float('inf')
     max_val: float = float('-inf')
+    group: int = 1
+    data_type: str = "short_float"
+    is_changing: bool = False
+    change_interval: float = 1.0
+    last_change_time: float = 0.0
 
     def update_min_max(self):
         if self.value < self.min_val:
@@ -169,6 +174,12 @@ class RealtimeDB:
                     timestamp=time.monotonic(),
                     name=p.name,
                     unit=p.unit,
+                    min_val=p.min_value,
+                    max_val=p.max_value,
+                    group=p.group,
+                    data_type=p.data_type.value,
+                    is_changing=p.is_changing,
+                    change_interval=p.change_interval,
                 )
 
             for p in point_table.get_all_yk():
@@ -218,6 +229,7 @@ class RealtimeDB:
 
             if changed:
                 point.change_count += 1
+                point.last_change_time = time.time()
                 self._total_changes += 1
                 self._changed_yx.add(ioa)
                 self._fire_event(DataChangeEvent(
@@ -271,6 +283,7 @@ class RealtimeDB:
 
             if changed:
                 point.change_count += 1
+                point.last_change_time = time.time()
                 self._total_changes += 1
                 self._changed_yc.add(ioa)
                 self._fire_event(DataChangeEvent(

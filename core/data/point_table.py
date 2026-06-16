@@ -69,6 +69,8 @@ class YcPointDef(PointDef):
     scale: float = 1.0              # 比例系数
     offset: float = 0.0             # 偏移量
     decimal_places: int = 2         # 显示小数位数
+    is_changing: bool = False
+    change_interval: float = 1.0
 
 
 @dataclass

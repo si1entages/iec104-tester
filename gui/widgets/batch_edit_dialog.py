@@ -5,7 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QLabel,
-    QSpinBox, QComboBox, QPushButton, QHBoxLayout,
+    QSpinBox, QDoubleSpinBox, QComboBox, QPushButton, QHBoxLayout,
 )
 
 
@@ -35,6 +35,8 @@ class BatchEditDialog(QDialog):
         self._group = QSpinBox()
         self._group.setRange(1, 16)
         self._group.setValue(1)
+        self._group.setMinimumWidth(120)
+        self._group.setButtonSymbols(QSpinBox.ButtonSymbols.UpDownArrows)
         form.addRow("组号:", self._group)
 
         # 类型
@@ -61,7 +63,30 @@ class BatchEditDialog(QDialog):
             self._change_interval.setRange(1, 3600)
             self._change_interval.setValue(1)
             self._change_interval.setSuffix(" 秒")
+            self._change_interval.setMinimumWidth(120)
+            self._change_interval.setButtonSymbols(QSpinBox.ButtonSymbols.UpDownArrows)
+            self._change_interval.setEnabled(False)
             form.addRow("变化周期:", self._change_interval)
+
+            self._is_changing.currentIndexChanged.connect(self._on_changing_changed)
+
+        # 是否变化（仅YC）
+        if point_type == "yc":
+            self._yc_is_changing = QComboBox()
+            self._yc_is_changing.addItems(["不修改", "是", "否"])
+            form.addRow("是否变化:", self._yc_is_changing)
+
+            self._yc_change_interval = QDoubleSpinBox()
+            self._yc_change_interval.setRange(0.1, 3600)
+            self._yc_change_interval.setValue(1.0)
+            self._yc_change_interval.setSuffix(" 秒")
+            self._yc_change_interval.setDecimals(1)
+            self._yc_change_interval.setMinimumWidth(120)
+            self._yc_change_interval.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.UpDownArrows)
+            self._yc_change_interval.setEnabled(False)
+            form.addRow("变化周期:", self._yc_change_interval)
+
+            self._yc_is_changing.currentIndexChanged.connect(self._on_yc_changing_changed)
 
         # 状态（仅YX）
         if point_type == "yx":
@@ -89,6 +114,16 @@ class BatchEditDialog(QDialog):
 
         layout.addLayout(btn_layout)
 
+    def _on_changing_changed(self, index: int) -> None:
+        """是否变化选项改变时，启用/禁用变化周期输入框."""
+        if hasattr(self, '_change_interval'):
+            self._change_interval.setEnabled(index == 1)
+
+    def _on_yc_changing_changed(self, index: int) -> None:
+        """YC是否变化选项改变时，启用/禁用变化周期输入框."""
+        if hasattr(self, '_yc_change_interval'):
+            self._yc_change_interval.setEnabled(index == 1)
+
     def _on_accept(self) -> None:
         """确定按钮。"""
         self._result = {"group": self._group.value()}
@@ -100,7 +135,8 @@ class BatchEditDialog(QDialog):
             if self._is_changing.currentIndex() > 0:
                 self._result["is_changing"] = self._is_changing.currentIndex() == 1
 
-            self._result["change_interval"] = self._change_interval.value()
+            if self._change_interval.isEnabled():
+                self._result["change_interval"] = self._change_interval.value()
 
             if self._state.currentIndex() > 0:
                 self._result["state"] = self._state.currentIndex() == 2  # True=ON, False=OFF
@@ -109,6 +145,12 @@ class BatchEditDialog(QDialog):
             if self._yc_type.currentIndex() > 0:
                 types = ["", "normalized", "scaled", "short_float"]
                 self._result["data_type"] = types[self._yc_type.currentIndex()]
+
+            if self._yc_is_changing.currentIndex() > 0:
+                self._result["is_changing"] = self._yc_is_changing.currentIndex() == 1
+
+            if self._yc_change_interval.isEnabled():
+                self._result["change_interval"] = self._yc_change_interval.value()
 
         elif self._point_type == "yk":
             if self._cmd_type.currentIndex() > 0:
