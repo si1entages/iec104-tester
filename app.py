@@ -72,6 +72,10 @@ def main():
         "--test", type=str, default=None,
         help="运行自动化测试脚本 (YAML 文件或目录)"
     )
+    parser.add_argument(
+        "--legacy-ui", action="store_true",
+        help="使用旧版一体化 GUI（默认为主站/子站双应用界面）"
+    )
 
     args = parser.parse_args()
 
@@ -185,9 +189,17 @@ def main():
             QSSReloader(app, style_qss_path)
             logger.info(f"QSS hot-reload enabled: {style_qss_path}")
 
-    # 创建主窗口
-    from gui.main_window import MainWindow
-    window = MainWindow(config)
+    # 创建主窗口 — 默认使用主站/子站双应用界面
+    # 旧版一体化界面: python app.py --legacy-ui --mode master|slave
+    if getattr(args, "legacy_ui", False):
+        from gui.main_window import MainWindow
+        window = MainWindow(config)
+    elif config.mode == "slave":
+        from gui.slave_app import SlaveMainWindow
+        window = SlaveMainWindow(config)
+    else:
+        from gui.master_app import MasterMainWindow
+        window = MasterMainWindow(config)
 
     # 设置窗口图标
     from PySide6.QtGui import QIcon

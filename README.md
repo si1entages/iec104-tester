@@ -100,10 +100,26 @@
 pip install PySide6 PyYAML
 
 # 终端 1 — 启动子站（服务端）
-python app.py --mode slave --port 2404
+python apps/slave_main.py --port 2404
 
-# 终端 2 — 启动主站（客户端）
+# 终端 2 — 启动主站（客户端），点「连本地」或连接 127.0.0.1:2404
+python apps/master_main.py --host 127.0.0.1 --port 2404
+```
+
+也可用兼容入口：
+
+```bash
+python app.py --mode slave --port 2404
 python app.py --mode master --host 127.0.0.1 --port 2404
+# 旧版一体化界面:
+python app.py --legacy-ui --mode master
+```
+
+打包可执行文件（需 `pip install pyinstaller`）：
+
+```bash
+python build/build_all.py
+# 产出 dist/iec104-master 与 dist/iec104-slave
 ```
 
 ### 多站模式

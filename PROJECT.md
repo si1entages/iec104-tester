@@ -76,9 +76,22 @@ GUI层: gui/ （PySide6）
 - [x] 修复 SlaveView.get_point_editor 空引用、点表批量添加列表处理
 - [x] 引擎层 _spawn 安全任务调度（保留引用 + 异常日志）
 - [x] README 双语链接修复、补充 requirements.txt
-- [x] 响应配置面板 config_changed 应用到 SlaveEngine（ResponseBehavior：延迟/丢帧/损坏/不响应/品质/拒 STARTDT）
+- [x] 响应配置面板 config_changed 应用到 SlaveEngine（ResponseBehavior）
 - [x] master↔slave 真连接端到端联调（tests/test_e2e_master_slave.py）
-- [x] MultiStationManager 共享事件循环稳定性验证（tests/test_multi_station_stability.py）
+- [x] MultiStationManager 共享事件循环稳定性验证
 - [x] 修复 slave/master/transport stop 时 wait_closed 挂起（加超时）
+- [x] 双应用界面：gui/master_app + gui/slave_app，入口 apps/master_main.py、apps/slave_main.py
+- [x] app.py 默认新界面；--legacy-ui 保留旧一体化 GUI
+- [x] PyInstaller 脚本 build/build_all.py（iec104-master / iec104-slave）
 - [ ] wrong_cot 注入尚未完全落到 ASDU 构建（预留字段）
 - [ ] GUI 关闭时多站管理器资源清理
+- [ ] 主站定义表双击值直接发命令（需选中行后用右侧命令面板）
+
+## 双应用入口
+
+| 产品 | 源码入口 | 可执行名 |
+|------|----------|----------|
+| IEC104 主站 | `python apps/master_main.py` | iec104-master |
+| IEC104 子站 | `python apps/slave_main.py` | iec104-slave |
+
+共享：`core/` 引擎、`gui/common/` 主题与连接栏。可同时打开两窗口联调。

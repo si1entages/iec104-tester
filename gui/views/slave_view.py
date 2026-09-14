@@ -165,17 +165,29 @@ class SlaveView(BaseView):
     # ── 数据模拟 ──────────────────────────────────────────────────
 
     def _on_sim_yx_change(self, ioa: int, value: bool) -> None:
-        """手动遥信变化."""
+        """手动遥信变化 — 在 asyncio 线程发送."""
         if self._engine and self._engine.is_running:
-            self._engine.simulate_yx_change(ioa, value)
+            if self._async_thread:
+                async def _apply():
+                    self._engine.data_store.update_yx(ioa, value)
+                    await self._engine.send_spontaneous_yx(ioa, value)
+                self._async_thread.run_coroutine(_apply())
+            else:
+                self._engine.simulate_yx_change(ioa, value)
             show_success(self, f"遥信 IOA={ioa} → {'ON' if value else 'OFF'}")
         else:
             show_error(self, "子站未启动，无法模拟数据")
 
     def _on_sim_yc_change(self, ioa: int, value: float) -> None:
-        """手动遥测变化."""
+        """手动遥测变化 — 在 asyncio 线程发送."""
         if self._engine and self._engine.is_running:
-            self._engine.simulate_yc_change(ioa, value)
+            if self._async_thread:
+                async def _apply():
+                    self._engine.data_store.update_yc(ioa, value)
+                    await self._engine.send_spontaneous_yc(ioa, value)
+                self._async_thread.run_coroutine(_apply())
+            else:
+                self._engine.simulate_yc_change(ioa, value)
             show_success(self, f"遥测 IOA={ioa} → {value}")
         else:
             show_error(self, "子站未启动，无法模拟数据")
