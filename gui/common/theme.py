@@ -77,8 +77,9 @@ QHeaderView::section {
 
 
 def get_theme(name: str = "dark") -> str:
-    return _base_get_theme(name) + "\n" + APP_STYLES
+    # 仅深色主题（用户反馈浅色效果差）
+    return _base_get_theme("dark") + "\n" + APP_STYLES
 
 
 def apply_theme(app, name: str = "dark") -> None:
-    app.setStyleSheet(get_theme(name))
+    app.setStyleSheet(get_theme("dark"))

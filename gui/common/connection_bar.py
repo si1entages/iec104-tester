@@ -1,16 +1,16 @@
-"""顶部连接/监听工具栏."""
+"""顶部连接/监听工具栏 — 两行布局，避免窄屏显示不全."""
 
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox,
-    QCheckBox, QDoubleSpinBox,
+    QFrame, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox,
+    QCheckBox, QDoubleSpinBox, QSizePolicy,
 )
 
 
 class ConnectionBar(QFrame):
-    """主站连接栏."""
+    """主站连接栏（两行：连接参数 | 轮询命令）."""
 
     connect_clicked = Signal()
     disconnect_clicked = Signal()
@@ -20,76 +20,82 @@ class ConnectionBar(QFrame):
                  common_addr: int = 1, parent=None):
         super().__init__(parent)
         self.setObjectName("topBar")
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(8)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(8, 4, 8, 4)
+        outer.setSpacing(4)
 
+        row1 = QHBoxLayout()
+        row1.setSpacing(6)
         self._dot = QLabel("●")
         self._dot.setObjectName("statusDot")
-        self.setProperty("connected", False)
         self._dot.setProperty("connected", False)
-        layout.addWidget(self._dot)
+        row1.addWidget(self._dot)
 
-        layout.addWidget(QLabel("主机:"))
+        row1.addWidget(QLabel("主机"))
         self.host_edit = QLineEdit(host)
-        self.host_edit.setMaximumWidth(160)
-        layout.addWidget(self.host_edit)
+        self.host_edit.setMaximumWidth(140)
+        self.host_edit.setMinimumWidth(100)
+        row1.addWidget(self.host_edit)
 
-        layout.addWidget(QLabel("端口:"))
+        row1.addWidget(QLabel("端口"))
         self.port_spin = QSpinBox()
         self.port_spin.setRange(1, 65535)
         self.port_spin.setValue(port)
-        self.port_spin.setMaximumWidth(90)
-        layout.addWidget(self.port_spin)
+        self.port_spin.setMaximumWidth(80)
+        row1.addWidget(self.port_spin)
 
-        layout.addWidget(QLabel("公共地址:"))
+        row1.addWidget(QLabel("地址"))
         self.addr_spin = QSpinBox()
         self.addr_spin.setRange(0, 65534)
         self.addr_spin.setValue(common_addr)
-        self.addr_spin.setMaximumWidth(90)
-        layout.addWidget(self.addr_spin)
+        self.addr_spin.setMaximumWidth(70)
+        row1.addWidget(self.addr_spin)
 
         self.reconnect_check = QCheckBox("自动重连")
         self.reconnect_check.setChecked(True)
-        layout.addWidget(self.reconnect_check)
+        row1.addWidget(self.reconnect_check)
 
         self.connect_btn = QPushButton("连接")
         self.connect_btn.setObjectName("primaryButton")
         self.connect_btn.clicked.connect(self.connect_clicked.emit)
-        layout.addWidget(self.connect_btn)
+        row1.addWidget(self.connect_btn)
 
         self.disconnect_btn = QPushButton("断开")
         self.disconnect_btn.setObjectName("dangerButton")
         self.disconnect_btn.setEnabled(False)
         self.disconnect_btn.clicked.connect(self.disconnect_clicked.emit)
-        layout.addWidget(self.disconnect_btn)
+        row1.addWidget(self.disconnect_btn)
 
-        self.local_btn = QPushButton("连本地子站")
+        self.local_btn = QPushButton("连本地")
+        self.local_btn.setToolTip("填入 127.0.0.1 并连接（需已启动子站）")
         self.local_btn.clicked.connect(self.local_clicked.emit)
-        layout.addWidget(self.local_btn)
+        row1.addWidget(self.local_btn)
+        row1.addStretch(1)
+        outer.addLayout(row1)
 
-        layout.addStretch()
-
-        # 轮询
-        layout.addWidget(QLabel("GI 周期(s):"))
+        row2 = QHBoxLayout()
+        row2.setSpacing(6)
+        row2.addWidget(QLabel("GI 周期(s)"))
         self.gi_interval = QDoubleSpinBox()
         self.gi_interval.setRange(0, 3600)
         self.gi_interval.setValue(0)
         self.gi_interval.setSpecialValueText("关闭")
-        self.gi_interval.setMaximumWidth(100)
-        layout.addWidget(self.gi_interval)
+        self.gi_interval.setMaximumWidth(90)
+        row2.addWidget(self.gi_interval)
 
         self.gi_now_btn = QPushButton("立即总召")
         self.gi_now_btn.setEnabled(False)
-        layout.addWidget(self.gi_now_btn)
+        row2.addWidget(self.gi_now_btn)
 
         self.ci_btn = QPushButton("累计量召")
         self.ci_btn.setEnabled(False)
-        layout.addWidget(self.ci_btn)
+        row2.addWidget(self.ci_btn)
 
         self.clock_btn = QPushButton("时钟同步")
         self.clock_btn.setEnabled(False)
-        layout.addWidget(self.clock_btn)
+        row2.addWidget(self.clock_btn)
+        row2.addStretch(1)
+        outer.addLayout(row2)
 
     def set_connected(self, connected: bool) -> None:
         self._dot.setProperty("connected", connected)
@@ -114,7 +120,7 @@ class ConnectionBar(QFrame):
 
 
 class ListenBar(QFrame):
-    """Slave 子站监听栏."""
+    """子站监听栏（两行：监听参数 | 状态）."""
 
     start_clicked = Signal()
     stop_clicked = Signal()
@@ -123,52 +129,55 @@ class ListenBar(QFrame):
                  common_addr: int = 1, parent=None):
         super().__init__(parent)
         self.setObjectName("topBar")
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(8)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(8, 4, 8, 4)
+        outer.setSpacing(4)
 
+        row1 = QHBoxLayout()
+        row1.setSpacing(6)
         self._dot = QLabel("●")
         self._dot.setObjectName("statusDot")
         self._dot.setProperty("connected", False)
-        layout.addWidget(self._dot)
+        row1.addWidget(self._dot)
 
-        layout.addWidget(QLabel("绑定:"))
+        row1.addWidget(QLabel("绑定"))
         self.host_edit = QLineEdit(host)
-        self.host_edit.setMaximumWidth(140)
-        layout.addWidget(self.host_edit)
+        self.host_edit.setMaximumWidth(120)
+        row1.addWidget(self.host_edit)
 
-        layout.addWidget(QLabel("端口:"))
+        row1.addWidget(QLabel("端口"))
         self.port_spin = QSpinBox()
         self.port_spin.setRange(1, 65535)
         self.port_spin.setValue(port)
-        self.port_spin.setMaximumWidth(90)
-        layout.addWidget(self.port_spin)
+        self.port_spin.setMaximumWidth(80)
+        row1.addWidget(self.port_spin)
 
-        layout.addWidget(QLabel("公共地址:"))
+        row1.addWidget(QLabel("地址"))
         self.addr_spin = QSpinBox()
         self.addr_spin.setRange(0, 65534)
         self.addr_spin.setValue(common_addr)
-        self.addr_spin.setMaximumWidth(90)
-        layout.addWidget(self.addr_spin)
+        self.addr_spin.setMaximumWidth(70)
+        row1.addWidget(self.addr_spin)
 
         self.spont_check = QCheckBox("变化上送")
         self.spont_check.setChecked(True)
-        layout.addWidget(self.spont_check)
+        row1.addWidget(self.spont_check)
 
         self.start_btn = QPushButton("启动监听")
         self.start_btn.setObjectName("successButton")
         self.start_btn.clicked.connect(self.start_clicked.emit)
-        layout.addWidget(self.start_btn)
+        row1.addWidget(self.start_btn)
 
         self.stop_btn = QPushButton("停止")
         self.stop_btn.setObjectName("dangerButton")
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self.stop_clicked.emit)
-        layout.addWidget(self.stop_btn)
+        row1.addWidget(self.stop_btn)
 
-        layout.addStretch()
+        row1.addStretch(1)
         self.client_label = QLabel("客户端: 0")
-        layout.addWidget(self.client_label)
+        row1.addWidget(self.client_label)
+        outer.addLayout(row1)
 
     def set_running(self, running: bool, client_count: int = 0) -> None:
         self._dot.setProperty("connected", running)

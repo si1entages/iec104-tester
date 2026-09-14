@@ -4,6 +4,7 @@ from .async_thread import AsyncThread
 from .theme import get_theme, apply_theme, APP_STYLES
 from .connection_bar import ConnectionBar, ListenBar
 from .status_strip import StatusStrip
+from .point_workspace import PointWorkspace
 
 __all__ = [
     "AsyncThread",
@@ -13,4 +14,5 @@ __all__ = [
     "ConnectionBar",
     "ListenBar",
     "StatusStrip",
+    "PointWorkspace",
 ]

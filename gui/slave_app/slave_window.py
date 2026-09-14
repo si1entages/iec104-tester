@@ -13,13 +13,13 @@ from PySide6.QtWidgets import (
     QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QPushButton, QLabel, QMessageBox, QFormLayout, QDoubleSpinBox, QComboBox,
     QSpinBox, QCheckBox, QGroupBox, QFileDialog, QTextEdit, QListWidget,
-    QApplication, QDialog, QDialogButtonBox, QLineEdit,
+    QApplication, QDialog, QDialogButtonBox, QLineEdit, QScrollArea,
 )
 
 from core.config import AppConfig
 from core.data.point_table import PointTable
 from core.engine.slave import SlaveEngine, SlaveEvent
-from gui.common import AsyncThread, apply_theme, ListenBar, StatusStrip
+from gui.common import AsyncThread, apply_theme, ListenBar, StatusStrip, PointWorkspace
 from gui.widgets.hex_viewer import HexViewer
 from gui.widgets.toast import show_success, show_error, show_info
 from gui.slave.response_cfg import ResponseConfigPanel
@@ -43,113 +43,6 @@ class EventLog(QTextEdit):
             cursor.movePosition(cursor.Start)
             cursor.movePosition(cursor.Down, cursor.KeepAnchor, 200)
             cursor.removeSelectedText()
-
-
-class SlavePointTable(QTableWidget):
-    """可编辑点表 — 点击 YX 切换，双击 YC 改值."""
-
-    COLS = ["IOA", "类型", "名称", "组", "值", "品质", "启用"]
-    value_edited = Signal(str, int, object)  # type, ioa, value
-    TYPE_COLORS = {
-        "YX": QColor("#89b4fa"),
-        "YC": QColor("#a6e3a1"),
-        "YK": QColor("#f9e2af"),
-        "YM": QColor("#cba6f7"),
-    }
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setColumnCount(len(self.COLS))
-        self.setHorizontalHeaderLabels(self.COLS)
-        self.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.setAlternatingRowColors(True)
-        self.verticalHeader().setVisible(False)
-        header = self.horizontalHeader()
-        header.setSectionResizeMode(2, QHeaderView.Stretch)
-        for i in (0, 1, 3, 4, 5, 6):
-            header.setSectionResizeMode(i, QHeaderView.ResizeToContents)
-        self.itemDoubleClicked.connect(self._on_double_click)
-
-    def load_from_point_table(self, pt: PointTable, store=None) -> None:
-        rows = []
-        for p in pt.get_all_yx():
-            val = "OFF"
-            if store:
-                d = store.get_yx(p.ioa)
-                if d:
-                    val = "ON" if d.value else "OFF"
-            rows.append((p.ioa, "YX", p.name, p.group, val, "", p.enabled))
-        for p in pt.get_all_yc():
-            val = "0"
-            if store:
-                d = store.get_yc(p.ioa)
-                if d:
-                    val = f"{d.value:.4g}"
-            rows.append((p.ioa, "YC", p.name, p.group, val, "", p.enabled))
-        for p in pt.get_all_yk():
-            rows.append((p.ioa, "YK", p.name, p.group, "—", "", p.enabled))
-        for p in pt.get_all_ym():
-            val = "0"
-            if store:
-                d = store.get_ym(p.ioa)
-                if d:
-                    val = str(d.value)
-            rows.append((p.ioa, "YM", p.name, p.group, val, "", p.enabled))
-
-        self.setRowCount(len(rows))
-        for r, row in enumerate(rows):
-            for c, v in enumerate(row):
-                item = QTableWidgetItem(str(v))
-                if c == 1:
-                    item.setForeground(self.TYPE_COLORS.get(row[1], QColor("#cdd6f4")))
-                    item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-                if c == 0:
-                    item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-                if c == 4 and row[1] == "YX":
-                    item.setFlags((item.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable)
-                self.setItem(r, c, item)
-
-    def update_from_store(self, store) -> None:
-        for r in range(self.rowCount()):
-            try:
-                ptype = self.item(r, 1).text()
-                ioa = int(self.item(r, 0).text())
-            except Exception:
-                continue
-            if ptype == "YX":
-                d = store.get_yx(ioa)
-                if d:
-                    self.item(r, 4).setText("ON" if d.value else "OFF")
-                    self.item(r, 5).setText(str(d.quality))
-            elif ptype == "YC":
-                d = store.get_yc(ioa)
-                if d:
-                    self.item(r, 4).setText(f"{d.value:.4g}")
-                    self.item(r, 5).setText(str(d.quality))
-            elif ptype == "YM":
-                d = store.get_ym(ioa)
-                if d:
-                    self.item(r, 4).setText(str(d.value))
-
-    def _on_double_click(self, item: QTableWidgetItem) -> None:
-        r, c = item.row(), item.column()
-        if c != 4 or r < 0:
-            return
-        ptype = self.item(r, 1).text()
-        ioa = int(self.item(r, 0).text())
-        if ptype == "YX":
-            new_val = "OFF" if item.text() == "ON" else "ON"
-            item.setText(new_val)
-            self.value_edited.emit("YX", ioa, new_val == "ON")
-        elif ptype == "YC":
-            from PySide6.QtWidgets import QInputDialog
-            text, ok = QInputDialog.getDouble(
-                self, f"修改遥测 IOA={ioa}", "值:",
-                float(item.text() or 0), -1e9, 1e9, 4,
-            )
-            if ok:
-                item.setText(f"{text:.4g}")
-                self.value_edited.emit("YC", ioa, float(text))
 
 
 class ClientListPanel(QWidget):
@@ -196,12 +89,38 @@ class SlaveMainWindow(QMainWindow):
         self._init_ui()
         self._connect_signals()
         self._restore_layout()
-        self._table.load_from_point_table(self._point_table)
+        self._load_points_into_workspace()
+
+    def _load_points_into_workspace(self, store=None) -> None:
+        self._table.clear_all()
+        for p in self._point_table.get_all_yx():
+            val = "OFF"
+            if store:
+                d = store.get_yx(p.ioa)
+                if d:
+                    val = "ON" if d.value else "OFF"
+            self._table.add_point(p.ioa, "YX", p.name, p.group, p.enabled, val)
+        for p in self._point_table.get_all_yc():
+            val = "0"
+            if store:
+                d = store.get_yc(p.ioa)
+                if d:
+                    val = f"{d.value:.4g}"
+            self._table.add_point(p.ioa, "YC", p.name, p.group, p.enabled, val)
+        for p in self._point_table.get_all_yk():
+            self._table.add_point(p.ioa, "YK", p.name, p.group, p.enabled, "—")
+        for p in self._point_table.get_all_ym():
+            val = "0"
+            if store:
+                d = store.get_ym(p.ioa)
+                if d:
+                    val = str(d.value)
+            self._table.add_point(p.ioa, "YM", p.name, p.group, p.enabled, val)
 
     def _init_ui(self) -> None:
         self.setWindowTitle("IEC104 子站测试工具")
-        self.setMinimumSize(1100, 750)
-        self.resize(1360, 860)
+        self.setMinimumSize(1100, 720)
+        self.resize(1400, 900)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -217,21 +136,33 @@ class SlaveMainWindow(QMainWindow):
         root.addWidget(self._listen_bar)
 
         main_split = QSplitter(Qt.Horizontal)
-        self._table = SlavePointTable()
+        main_split.setOpaqueResize(True)
+        main_split.setChildrenCollapsible(False)
+        main_split.setHandleWidth(8)
+        self._table = PointWorkspace(editable_values=True)
+        self._table.setMinimumWidth(480)
         main_split.addWidget(self._table)
 
         side = QWidget()
+        side.setMinimumWidth(300)
+        side.setMaximumWidth(520)
         side_l = QVBoxLayout(side)
         side_l.setContentsMargins(4, 4, 4, 4)
+        side_l.setSpacing(4)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        side_inner = QWidget()
+        side_inner_l = QVBoxLayout(side_inner)
+        side_inner_l.setContentsMargins(0, 0, 0, 0)
+        side_inner_l.setSpacing(6)
         self._clients = ClientListPanel()
-        side_l.addWidget(self._clients, 1)
-
+        self._clients.setMinimumHeight(120)
+        side_inner_l.addWidget(self._clients)
         self._response_cfg = ResponseConfigPanel()
-        side_l.addWidget(self._response_cfg, 2)
-
+        side_inner_l.addWidget(self._response_cfg)
         self._sim = SimPanel()
-        side_l.addWidget(self._sim, 2)
-
+        side_inner_l.addWidget(self._sim)
         ops = QHBoxLayout()
         demo_btn = QPushButton("生成演示点")
         demo_btn.clicked.connect(self._gen_demo)
@@ -241,21 +172,29 @@ class SlaveMainWindow(QMainWindow):
         exp_btn.clicked.connect(self._export_yaml)
         for b in (demo_btn, imp_btn, exp_btn):
             ops.addWidget(b)
-        ops.addStretch()
-        side_l.addLayout(ops)
+        side_inner_l.addLayout(ops)
+        side_inner_l.addStretch()
+        scroll.setWidget(side_inner)
+        side_l.addWidget(scroll)
         main_split.addWidget(side)
+        main_split.setSizes([900, 380])
         main_split.setStretchFactor(0, 3)
         main_split.setStretchFactor(1, 1)
 
         bottom = QTabWidget()
+        bottom.setMinimumHeight(180)
         self._hex = HexViewer()
         bottom.addTab(self._hex, "报文监视")
         self._log = EventLog()
         bottom.addTab(self._log, "事件日志")
 
         vsplit = QSplitter(Qt.Vertical)
+        vsplit.setOpaqueResize(True)
+        vsplit.setChildrenCollapsible(False)
+        vsplit.setHandleWidth(8)
         vsplit.addWidget(main_split)
         vsplit.addWidget(bottom)
+        vsplit.setSizes([520, 280])
         vsplit.setStretchFactor(0, 3)
         vsplit.setStretchFactor(1, 2)
         root.addWidget(vsplit, 1)
@@ -283,12 +222,10 @@ class SlaveMainWindow(QMainWindow):
         file_menu.addAction(quit_act)
 
         view_menu = menubar.addMenu("视图(&V)")
+        # 仅深色主题
         dark = QAction("深色主题", self)
         dark.triggered.connect(lambda: self._set_theme("dark"))
-        light = QAction("浅色主题", self)
-        light.triggered.connect(lambda: self._set_theme("light"))
         view_menu.addAction(dark)
-        view_menu.addAction(light)
 
         help_menu = menubar.addMenu("帮助(&H)")
         about = QAction("关于", self)

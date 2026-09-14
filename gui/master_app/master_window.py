@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 from core.config import AppConfig
 from core.data.point_table import PointTable
 from core.engine.master import MasterEngine, MasterEvent
-from gui.common import AsyncThread, apply_theme, ConnectionBar, StatusStrip
+from gui.common import AsyncThread, apply_theme, ConnectionBar, StatusStrip, PointWorkspace
 from gui.widgets.hex_viewer import HexViewer
 from gui.widgets.toast import show_success, show_error, show_info
 from gui.widgets.trend_chart import TrendChartPanel
@@ -208,10 +208,12 @@ class CommandPanel(QWidget):
     def load_from_point(self, point: Optional[dict]) -> None:
         if not point:
             return
-        if point["type"] == "YK":
-            self.yk_ioa.setValue(point["ioa"])
-        elif point["type"] == "YC":
-            self.sp_ioa.setValue(point["ioa"])
+        ptype = point.get("type") or point.get("类型") or ""
+        ioa = point.get("ioa", 0)
+        if ptype == "YK":
+            self.yk_ioa.setValue(int(ioa))
+        elif ptype == "YC":
+            self.sp_ioa.setValue(int(ioa))
 
     def _send_yk(self) -> None:
         cmd = "single" if self.yk_type.currentIndex() == 0 else "double"
@@ -260,18 +262,22 @@ class MasterMainWindow(QMainWindow):
 
         if self._point_table.yx_count == 0:
             self._point_table.generate_demo_points(yx_count=20, yc_count=10, yk_count=5, ym_count=5)
-            for p in self._point_table.get_all_yx():
-                self._def_table.add_point(p.ioa, "YX", p.name, p.group)
-            for p in self._point_table.get_all_yc():
-                self._def_table.add_point(p.ioa, "YC", p.name, p.group)
-            for p in self._point_table.get_all_yk():
-                self._def_table.add_point(p.ioa, "YK", p.name, p.group)
-            for p in self._point_table.get_all_ym():
-                self._def_table.add_point(p.ioa, "YM", p.name, p.group)
+        self._load_points_into_workspace()
+
+    def _load_points_into_workspace(self) -> None:
+        self._def_table.clear_all()
+        for p in self._point_table.get_all_yx():
+            self._def_table.add_point(p.ioa, "YX", p.name, p.group, p.enabled)
+        for p in self._point_table.get_all_yc():
+            self._def_table.add_point(p.ioa, "YC", p.name, p.group, p.enabled)
+        for p in self._point_table.get_all_yk():
+            self._def_table.add_point(p.ioa, "YK", p.name, p.group, p.enabled)
+        for p in self._point_table.get_all_ym():
+            self._def_table.add_point(p.ioa, "YM", p.name, p.group, p.enabled)
 
     def _init_ui(self) -> None:
         self.setWindowTitle("IEC104 主站测试工具")
-        self.setMinimumSize(1200, 800)
+        self.setMinimumSize(1100, 700)
         self.resize(1440, 900)
 
         central = QWidget()
@@ -288,34 +294,39 @@ class MasterMainWindow(QMainWindow):
         root.addWidget(self._conn_bar)
 
         main_split = QSplitter(Qt.Horizontal)
-        self._def_table = DefinitionTable()
+        main_split.setOpaqueResize(True)
+        main_split.setChildrenCollapsible(False)
+        main_split.setHandleWidth(8)
+        self._def_table = PointWorkspace(editable_values=False)
+        self._def_table.setMinimumWidth(480)
         main_split.addWidget(self._def_table)
 
         right = QWidget()
+        right.setMinimumWidth(260)
+        right.setMaximumWidth(400)
         right_l = QVBoxLayout(right)
-        right_l.setContentsMargins(0, 0, 0, 0)
+        right_l.setContentsMargins(4, 4, 4, 4)
+        right_l.setSpacing(4)
         self._cmd_panel = CommandPanel()
         right_l.addWidget(self._cmd_panel)
-        ops = QHBoxLayout()
+        ops = QVBoxLayout()
         add_btn = QPushButton("+ 添加点")
         add_btn.clicked.connect(self._add_point_dialog)
-        del_btn = QPushButton("删除选中")
-        del_btn.setObjectName("dangerButton")
-        del_btn.clicked.connect(self._remove_point)
         imp_btn = QPushButton("导入YAML")
         imp_btn.clicked.connect(self._import_yaml)
         exp_btn = QPushButton("导出YAML")
         exp_btn.clicked.connect(self._export_yaml)
-        for b in (add_btn, del_btn, imp_btn, exp_btn):
+        for b in (add_btn, imp_btn, exp_btn):
             ops.addWidget(b)
-        ops.addStretch()
         right_l.addLayout(ops)
         right_l.addStretch()
         main_split.addWidget(right)
+        main_split.setSizes([900, 320])
         main_split.setStretchFactor(0, 3)
         main_split.setStretchFactor(1, 1)
 
         bottom = QTabWidget()
+        bottom.setMinimumHeight(180)
         self._hex = HexViewer()
         bottom.addTab(self._hex, "报文监视")
         self._log = EventLog()
@@ -326,8 +337,12 @@ class MasterMainWindow(QMainWindow):
         bottom.addTab(self._capture, "录制回放")
 
         vsplit = QSplitter(Qt.Vertical)
+        vsplit.setOpaqueResize(True)
+        vsplit.setChildrenCollapsible(False)
+        vsplit.setHandleWidth(8)
         vsplit.addWidget(main_split)
         vsplit.addWidget(bottom)
+        vsplit.setSizes([520, 300])
         vsplit.setStretchFactor(0, 3)
         vsplit.setStretchFactor(1, 2)
         root.addWidget(vsplit, 1)
@@ -350,7 +365,10 @@ class MasterMainWindow(QMainWindow):
         self._conn_bar.ci_btn.clicked.connect(self._do_ci)
         self._conn_bar.clock_btn.clicked.connect(self._do_clock)
         self._cmd_panel.command_ready.connect(self._on_command)
-        self._def_table.itemSelectionChanged.connect(self._on_select_point)
+        self._def_table.tabs().currentChanged.connect(self._on_select_point)
+        for t in (self._def_table._tables["YX"], self._def_table._tables["YC"],
+                  self._def_table._tables["YK"], self._def_table._tables["YM"]):
+            t.itemSelectionChanged.connect(self._on_select_point)
 
         menubar = self.menuBar()
         file_menu = menubar.addMenu("文件(&F)")
@@ -358,14 +376,6 @@ class MasterMainWindow(QMainWindow):
         act_quit.setShortcut(QKeySequence.Quit)
         act_quit.triggered.connect(self.close)
         file_menu.addAction(act_quit)
-
-        view_menu = menubar.addMenu("视图(&V)")
-        act_dark = QAction("深色主题", self)
-        act_dark.triggered.connect(lambda: self._set_theme("dark"))
-        act_light = QAction("浅色主题", self)
-        act_light.triggered.connect(lambda: self._set_theme("light"))
-        view_menu.addAction(act_dark)
-        view_menu.addAction(act_light)
 
         help_menu = menubar.addMenu("帮助(&H)")
         act_about = QAction("关于", self)
@@ -497,7 +507,7 @@ class MasterMainWindow(QMainWindow):
             show_success(self, f"设点 IOA={params['ioa']} → {params['value']}")
 
     def _on_select_point(self) -> None:
-        self._cmd_panel.load_from_point(self._def_table.selected_point())
+        self._cmd_panel.load_from_point(self._def_table.current_point())
 
     def _add_point_dialog(self) -> None:
         dlg = QDialog(self)
@@ -523,26 +533,13 @@ class MasterMainWindow(QMainWindow):
         if dlg.exec():
             self._def_table.add_point(ioa.value(), ptype.currentText(), name.text().strip(), group.value())
 
-    def _remove_point(self) -> None:
-        removed = self._def_table.remove_selected()
-        if removed:
-            show_info(self, f"已删除 {len(removed)} 个点")
-
     def _import_yaml(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "导入点表", "", "YAML (*.yaml *.yml)")
         if not path:
             return
         try:
             self._point_table.load_yaml(path)
-            self._def_table.clear_points()
-            for p in self._point_table.get_all_yx():
-                self._def_table.add_point(p.ioa, "YX", p.name, p.group)
-            for p in self._point_table.get_all_yc():
-                self._def_table.add_point(p.ioa, "YC", p.name, p.group)
-            for p in self._point_table.get_all_yk():
-                self._def_table.add_point(p.ioa, "YK", p.name, p.group)
-            for p in self._point_table.get_all_ym():
-                self._def_table.add_point(p.ioa, "YM", p.name, p.group)
+            self._load_points_into_workspace()
             show_success(self, f"已导入 {path}")
         except Exception as e:
             show_error(self, f"导入失败: {e}")
@@ -560,13 +557,12 @@ class MasterMainWindow(QMainWindow):
         if not self._engine:
             return
         try:
-            self._def_table.update_values_from_store(self._engine.data_store)
+            self._def_table.update_from_store(self._engine.data_store)
             store = self._engine.data_store
-            for row in self._def_table.points()[:8]:
-                if row["type"] == "YC":
-                    d = store.get_yc(row["ioa"])
-                    if d:
-                        self._trend.update_yc_trend(row["ioa"], float(d.value))
+            for row in self._def_table.points("YC")[:8]:
+                d = store.get_yc(row["ioa"])
+                if d:
+                    self._trend.update_yc_trend(row["ioa"], float(d.value))
         except Exception:
             pass
 
