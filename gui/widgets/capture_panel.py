@@ -245,6 +245,16 @@ class CapturePanel(QWidget):
         self._rec_status_label.setText(f"录制中: {path}")
         self.recording_started.emit()
 
+    def feed_frame(self, data: bytes, direction: str = "rx", client_id: str = "") -> None:
+        """喂入一帧数据（仅在录制中生效）。"""
+        if not data:
+            return
+        metadata = {"client_id": client_id} if client_id else {}
+        self._recorder.record_frame(data, direction=direction, metadata=metadata)
+
+    def is_recording(self) -> bool:
+        return self._recorder.is_recording
+
     def _on_record_pause(self, checked):
         if checked:
             self._recorder.pause()

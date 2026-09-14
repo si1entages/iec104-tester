@@ -5,7 +5,7 @@
 <h1 align="center">IEC 60870-5-104 Tester</h1>
 
 <p align="center">
-  <a href="README.md">English</a> | <a href="README_zh.md">中文</a>
+  <a href="README_eng.md">English</a> | <a href="README.md">中文</a>
 </p>
 
 <p align="center">

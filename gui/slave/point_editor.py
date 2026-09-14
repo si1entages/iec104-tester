@@ -394,15 +394,17 @@ class PointEditorPanel(QWidget):
         ptype = self._current_point_type()
         dlg = PointEditorDialog(ptype, parent=self)
         if dlg.exec() == QDialog.Accepted and dlg.result:
-            point = dlg.result
-            if ptype == "yx":
-                self._point_table.add_yx(point)
-            elif ptype == "yc":
-                self._point_table.add_yc(point)
-            elif ptype == "yk":
-                self._point_table.add_yk(point)
-            elif ptype == "ym":
-                self._point_table.add_ym(point)
+            result = dlg.result
+            points = result if isinstance(result, list) else [result]
+            for point in points:
+                if ptype == "yx":
+                    self._point_table.add_yx(point)
+                elif ptype == "yc":
+                    self._point_table.add_yc(point)
+                elif ptype == "yk":
+                    self._point_table.add_yk(point)
+                elif ptype == "ym":
+                    self._point_table.add_ym(point)
             self.refresh()
             self.point_table_changed.emit()
 

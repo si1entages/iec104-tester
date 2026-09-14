@@ -21,6 +21,7 @@ from gui.widgets.point_table import (
 from gui.widgets.hex_viewer import HexViewer
 from gui.widgets.status_panel import StatusPanel, LogViewer
 from gui.widgets.sidebar import Sidebar
+from gui.widgets.capture_panel import CapturePanel
 from gui.widgets.toast import show_info, show_success, show_error
 
 
@@ -111,6 +112,9 @@ class BaseView(QWidget):
         # 报文查看器
         self._hex_viewer = HexViewer()
 
+        # 报文录制/回放
+        self._capture_panel = CapturePanel()
+
         # 功能面板（Tab切换）
         self._func_tabs = QTabWidget()
         self._log_viewer = LogViewer()
@@ -140,6 +144,7 @@ class BaseView(QWidget):
         bottom_tabs = QTabWidget()
         bottom_tabs.addTab(self._hex_viewer, "报文查看")
         bottom_tabs.addTab(self._func_tabs, "功能面板")
+        bottom_tabs.addTab(self._capture_panel, "录制回放")
         bottom_tabs.setMinimumHeight(200)
         splitter_v.addWidget(bottom_tabs)
         splitter_v.setStretchFactor(0, 2)
@@ -227,6 +232,8 @@ class BaseView(QWidget):
     def _on_raw_frame_ui(self, data: bytes, direction: str, client_id: str) -> None:
         """在Qt主线程中更新报文UI."""
         self._hex_viewer.add_frame(data, direction)
+        if hasattr(self, "_capture_panel") and self._capture_panel:
+            self._capture_panel.feed_frame(data, direction, client_id)
 
     def _on_event_ui(self, event_type: str, data: dict) -> None:
         """在Qt主线程中更新事件UI."""
@@ -275,6 +282,10 @@ class BaseView(QWidget):
     def get_func_tabs(self) -> QTabWidget:
         """获取功能面板Tab。"""
         return self._func_tabs
+
+    def get_capture_panel(self) -> CapturePanel:
+        """获取录制/回放面板。"""
+        return self._capture_panel
 
     # ── 点表操作 ──────────────────────────────────────────────
 

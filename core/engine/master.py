@@ -140,10 +140,32 @@ class MasterEngine:
         # 文件传输管理器
         self._file_transfer = FileTransferMaster(common_addr)
         self._file_transfer.set_callbacks(
-            on_send_asdu=lambda data: asyncio.create_task(self._send_i_frame_with_data(data)),
+            on_send_asdu=lambda data: self._spawn(self._send_i_frame_with_data(data)),
             on_file_received=self._on_file_received,
             on_error=self._on_file_transfer_error,
         )
+        # 后台任务引用，防止被 GC 回收
+        self._background_tasks: set[asyncio.Task] = set()
+
+    def _spawn(self, coro) -> Optional[asyncio.Task]:
+        """安全创建后台任务：保留引用并记录异常."""
+        try:
+            task = asyncio.create_task(coro)
+        except RuntimeError:
+            coro.close()
+            return None
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+
+        def _log_exc(t: asyncio.Task) -> None:
+            if t.cancelled():
+                return
+            exc = t.exception()
+            if exc is not None:
+                logger.error("Background task failed: %s", exc, exc_info=exc)
+
+        task.add_done_callback(_log_exc)
+        return task
 
     # ── 属性 ──────────────────────────────────────────────────────
 
@@ -198,7 +220,7 @@ class MasterEngine:
         self._seq.set_s_frame_callback(self._send_s_frame)
 
         # 启动定时器检查
-        self._timer_task = asyncio.create_task(self._timer_loop())
+        self._timer_task = self._spawn(self._timer_loop())
 
         # 启动定时任务调度器
         await self._scheduler.start()
@@ -216,15 +238,15 @@ class MasterEngine:
         if self._timer_task:
             self._timer_task.cancel()
             try:
-                await self._timer_task
-            except (asyncio.CancelledError, Exception):
+                await asyncio.wait_for(self._timer_task, timeout=2.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
                 pass
 
         # 刷新历史数据库
         if self._history_db:
             self._history_db.flush()
 
-        await self._client.stop()
+        await asyncio.wait_for(self._client.stop(), timeout=3.0)
         self._state_machine.on_disconnected()
         self._fire_event(MasterEvent.STOPPED)
 
@@ -857,7 +879,7 @@ class MasterEngine:
 
             # 自动总召唤
             if self._auto_gi:
-                asyncio.create_task(self._auto_general_interrogation())
+                self._spawn(self._auto_general_interrogation())
 
         elif apci.is_stopdt_con:
             self._state_machine.on_stopdt_con()
@@ -865,7 +887,7 @@ class MasterEngine:
 
         elif apci.is_testfr_act:
             # 回复 TESTFR CON
-            asyncio.create_task(self._send_frame(APCICodec.testfr_con()))
+            self._spawn(self._send_frame(APCICodec.testfr_con()))
             self._state_machine.on_testfr_act_received()
             logger.debug("TESTFR ACT received, CON sent")
 
@@ -1218,7 +1240,7 @@ class MasterEngine:
     def _send_s_frame(self, rx_seq: int) -> None:
         """S帧回调（从序列号管理器触发）."""
         frame = APCICodec.encode_s(rx_seq)
-        asyncio.create_task(self._send_frame(frame))
+        self._spawn(self._send_frame(frame))
         self._state_machine.on_s_frame_sent()
         logger.debug(f"S-Frame sent: rx_seq={rx_seq}")
 
@@ -1231,7 +1253,7 @@ class MasterEngine:
 
         # 自动发送 STARTDT
         if self._auto_start:
-            asyncio.create_task(self._auto_startdt())
+            self._spawn(self._auto_startdt())
 
     def _on_tcp_disconnected(self) -> None:
         """TCP 连接断开."""
@@ -1255,21 +1277,21 @@ class MasterEngine:
 
         if timer_type == TimerType.T0:
             # 连接超时
-            asyncio.create_task(self._client.stop())
+            self._spawn(self._client.stop())
         elif timer_type == TimerType.T1:
             # 发送超时 - 根据规范应断开连接
             logger.error("T1 timeout: no confirmation received, disconnecting")
-            asyncio.create_task(self._client.stop())  # 断连，reconnect机制会自动重连
+            self._spawn(self._client.stop())  # 断连，reconnect机制会自动重连
         elif timer_type == TimerType.T2:
             # 无数据确认超时 — 发送S帧确认已收到的I帧
             rx_seq = self._seq.get_recv_seq()
             frame = APCICodec.encode_s(rx_seq)
-            asyncio.create_task(self._send_frame(frame))
+            self._spawn(self._send_frame(frame))
             self._state_machine.on_s_frame_sent()
             logger.info(f"T2 expired: S-Frame sent (rx_seq={rx_seq})")
         elif timer_type == TimerType.T3:
             # 空闲超时，发送测试帧
-            asyncio.create_task(self._send_frame(APCICodec.testfr_act()))
+            self._spawn(self._send_frame(APCICodec.testfr_act()))
 
     # ── 定时器循环 ─────────────────────────────────────────────────
 

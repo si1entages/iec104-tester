@@ -9,13 +9,14 @@ from core.config import AppConfig
 from core.engine.master import MasterEngine, MasterEvent
 from gui.master.control_panel import ControlPanel
 from gui.master.monitor import MonitorPanel
+from gui.widgets.trend_chart import TrendChartPanel
 from gui.widgets.toast import show_info
 
 from .base_view import BaseView
 
 
 class MasterView(BaseView):
-    """主站视图 — 包含控制面板、监控面板."""
+    """主站视图 — 包含控制面板、监控面板、趋势图."""
 
     # 信号
     gi_requested = Signal()
@@ -29,6 +30,7 @@ class MasterView(BaseView):
 
     def __init__(self, config: AppConfig, parent=None):
         super().__init__(config, parent)
+        self._async_thread = None
         self._init_engine()
 
     def _init_ui(self) -> None:
@@ -42,6 +44,9 @@ class MasterView(BaseView):
 
         self._monitor_panel = MonitorPanel()
         self._func_tabs.insertTab(1, self._monitor_panel, "监控")
+
+        self._trend_panel = TrendChartPanel()
+        self._func_tabs.insertTab(2, self._trend_panel, "趋势")
 
         # 连接侧边栏信号
         self._connect_sidebar_signals()
@@ -129,6 +134,18 @@ class MasterView(BaseView):
             s['yx_count'], s['yc_count'], s['yk_count'], s['ym_count']
         )
 
+        # 更新趋势图（抽样少量遥测点，避免界面卡顿）
+        if connected and hasattr(self, "_trend_panel"):
+            try:
+                yc_list = store.get_all_yc()
+                for point in yc_list[:5]:
+                    ioa = getattr(point, "ioa", None)
+                    value = getattr(point, "value", None)
+                    if ioa is not None and value is not None:
+                        self._trend_panel.update_yc_trend(int(ioa), float(value))
+            except Exception:
+                pass
+
     def _on_command(self, cmd_type: str, params: dict) -> None:
         """遥控命令."""
         if not self._engine or not self._engine.is_running:
@@ -140,6 +157,7 @@ class MasterView(BaseView):
 
     def start_engine(self, async_thread) -> None:
         """启动引擎."""
+        self._async_thread = async_thread
         if self._engine:
             async_thread.run_coroutine(self._engine.start())
 
@@ -217,3 +235,7 @@ class MasterView(BaseView):
     def get_monitor_panel(self) -> MonitorPanel:
         """获取监控面板."""
         return self._monitor_panel
+
+    def get_trend_panel(self) -> TrendChartPanel:
+        """获取趋势面板."""
+        return self._trend_panel

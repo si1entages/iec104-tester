@@ -62,6 +62,7 @@ GUI层: gui/ （PySide6）
 - 协议层: 纯同步 struct.pack/unpack，无 async，无 GUI 依赖
 - 引擎层: asyncio，通过 core/transport 管理 TCP 连接
 - GUI 层: PySide6 信号槽通信，不直接调用 protocol 层
+- 后台任务: 引擎层统一用 `_spawn()` 创建，保留任务引用并记录异常
 
 ### 测试
 - 单元测试: tests/test_*.py（协议各层）
@@ -71,4 +72,13 @@ GUI层: gui/ （PySide6）
 
 ## 当前开发重点
 <!-- 每次开工前更新这里，AI 就知道上下文 -->
-- [ ] （填写你当前在做的事）
+- [x] 接入未使用的 GUI 面板：SimPanel、PointEditor、CapturePanel、TrendChart、MultiStationPanel
+- [x] 修复 SlaveView.get_point_editor 空引用、点表批量添加列表处理
+- [x] 引擎层 _spawn 安全任务调度（保留引用 + 异常日志）
+- [x] README 双语链接修复、补充 requirements.txt
+- [x] 响应配置面板 config_changed 应用到 SlaveEngine（ResponseBehavior：延迟/丢帧/损坏/不响应/品质/拒 STARTDT）
+- [x] master↔slave 真连接端到端联调（tests/test_e2e_master_slave.py）
+- [x] MultiStationManager 共享事件循环稳定性验证（tests/test_multi_station_stability.py）
+- [x] 修复 slave/master/transport stop 时 wait_closed 挂起（加超时）
+- [ ] wrong_cot 注入尚未完全落到 ASDU 构建（预留字段）
+- [ ] GUI 关闭时多站管理器资源清理

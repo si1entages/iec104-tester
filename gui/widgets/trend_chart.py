@@ -336,8 +336,14 @@ class TrendChartPanel(QWidget):
 
     def update_yc_trend(self, ioa: int, value: float):
         """更新遥测趋势."""
-        self._yc_trend.add_data_point(f"IOA-{ioa}", value)
+        series = f"IOA-{ioa}"
+        if series not in getattr(self._yc_trend, "_data_series", {}):
+            self._yc_trend.add_series(series)
+        self._yc_trend.add_data_point(series, value)
 
     def update_yx_trend(self, ioa: int, change_count: int):
         """更新遥信变化统计."""
-        self._yx_trend.add_data_point(f"IOA-{ioa}", float(change_count))
+        series = f"IOA-{ioa}"
+        if series not in getattr(self._yx_trend, "_data_series", {}):
+            self._yx_trend.add_series(series)
+        self._yx_trend.add_data_point(series, float(change_count))

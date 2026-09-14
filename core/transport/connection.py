@@ -97,13 +97,13 @@ class TCPConnection:
         if self._read_task and not self._read_task.done():
             self._read_task.cancel()
             try:
-                await self._read_task
-            except (asyncio.CancelledError, Exception):
+                await asyncio.wait_for(self._read_task, timeout=1.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
                 pass
 
         try:
             self._writer.close()
-            await self._writer.wait_closed()
+            await asyncio.wait_for(self._writer.wait_closed(), timeout=1.0)
         except Exception:
             pass
 
@@ -267,12 +267,18 @@ class TCPServer:
 
         # 关闭所有连接
         for conn in list(self._connections.values()):
-            await conn.stop()
+            try:
+                await asyncio.wait_for(conn.stop(), timeout=2.0)
+            except Exception as e:
+                logger.warning(f"Connection stop error: {e}")
         self._connections.clear()
 
         if self._server:
             self._server.close()
-            await self._server.wait_closed()
+            try:
+                await asyncio.wait_for(self._server.wait_closed(), timeout=2.0)
+            except Exception as e:
+                logger.warning(f"Server wait_closed timeout: {e}")
 
         logger.info("Server stopped")
 

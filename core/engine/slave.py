@@ -16,6 +16,7 @@ import asyncio
 import logging
 import random
 import time
+from dataclasses import dataclass, field
 from typing import Optional, Callable, Any
 from enum import Enum
 
@@ -58,6 +59,76 @@ class SlaveEvent(Enum):
 
 
 EventCallback = Callable[[SlaveEvent, dict[str, Any]], None]
+
+
+@dataclass
+class ResponseBehavior:
+    """子站响应行为配置（GUI 响应配置面板可写入）。"""
+
+    # 延迟（秒）
+    gi_delay: float = 0.0
+    command_delay: float = 0.0
+    data_delay: float = 0.0
+
+    # 错误注入
+    drop_frames: bool = False
+    drop_rate: float = 0.0
+    corrupt: bool = False
+    no_response: bool = False
+    wrong_cot: bool = False
+
+    # 品质注入
+    force_invalid: bool = False
+    force_blocked: bool = False
+    force_not_topical: bool = False
+    force_overflow: bool = False
+
+    # 连接行为
+    reject_startdt: bool = False
+    auto_stopdt: bool = False
+    send_testfr: bool = False
+    testfr_interval: float = 20.0
+
+    @classmethod
+    def from_dict(cls, config: dict) -> "ResponseBehavior":
+        delays = config.get("delays", {}) or {}
+        errors = config.get("errors", {}) or {}
+        quality = config.get("quality", {}) or {}
+        conn = config.get("connection", {}) or {}
+        return cls(
+            gi_delay=float(delays.get("gi", 0) or 0),
+            command_delay=float(delays.get("command", 0) or 0),
+            data_delay=float(delays.get("data", 0) or 0),
+            drop_frames=bool(errors.get("drop_frames", False)),
+            drop_rate=float(errors.get("drop_rate", 0) or 0),
+            corrupt=bool(errors.get("corrupt", False)),
+            no_response=bool(errors.get("no_response", False)),
+            wrong_cot=bool(errors.get("wrong_cot", False)),
+            force_invalid=bool(quality.get("invalid", False)),
+            force_blocked=bool(quality.get("blocked", False)),
+            force_not_topical=bool(quality.get("not_topical", False)),
+            force_overflow=bool(quality.get("overflow", False)),
+            reject_startdt=bool(conn.get("reject_startdt", False)),
+            auto_stopdt=bool(conn.get("auto_stopdt", False)),
+            send_testfr=bool(conn.get("send_testfr", False)),
+            testfr_interval=float(conn.get("testfr_interval", 20) or 20),
+        )
+
+    def quality_mask(self) -> int:
+        """合并品质描述词位（IV=0x80, NT=0x40, SB=0x10, OV=0x04）。"""
+        mask = 0
+        if self.force_invalid:
+            mask |= 0x80
+        if self.force_not_topical:
+            mask |= 0x40
+        if self.force_blocked:
+            mask |= 0x10
+        if self.force_overflow:
+            mask |= 0x04
+        return mask
+
+    def has_delay(self) -> bool:
+        return self.gi_delay > 0 or self.command_delay > 0 or self.data_delay > 0
 
 
 class SlaveEngine:
@@ -123,6 +194,11 @@ class SlaveEngine:
         self._t2 = t2
         self._t3 = t3
 
+        # 响应行为配置
+        self._response_behavior = ResponseBehavior()
+        self._auto_stopdt_timer = 0.0
+        self._testfr_timer = 0.0
+
         # 回调
         self._event_callback: Optional[EventCallback] = None
         self._raw_frame_callback: Optional[Callable[[bytes, str, str], None]] = None
@@ -152,8 +228,31 @@ class SlaveEngine:
         # 文件传输管理器
         self._file_transfer = FileTransferSlave(common_addr)
         self._file_transfer.set_callbacks(
-            on_send_asdu=lambda data: asyncio.create_task(self._broadcast_i_frame(data)),
+            on_send_asdu=lambda data: self._spawn(self._broadcast_i_frame(data)),
         )
+        # 后台任务引用，防止被 GC 回收
+        self._background_tasks: set[asyncio.Task] = set()
+
+    def _spawn(self, coro) -> Optional[asyncio.Task]:
+        """安全创建后台任务：保留引用并记录异常."""
+        try:
+            task = asyncio.create_task(coro)
+        except RuntimeError:
+            # 无运行中的事件循环（如同步测试环境）
+            coro.close()
+            return None
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+
+        def _log_exc(t: asyncio.Task) -> None:
+            if t.cancelled():
+                return
+            exc = t.exception()
+            if exc is not None:
+                logger.error("Background task failed: %s", exc, exc_info=exc)
+
+        task.add_done_callback(_log_exc)
+        return task
 
     # ── 属性 ──────────────────────────────────────────────────────
 
@@ -207,6 +306,49 @@ class SlaveEngine:
         """设置原始帧回调 (data, direction, client_id)."""
         self._raw_frame_callback = callback
 
+    def set_response_behavior(self, config: dict | ResponseBehavior) -> None:
+        """应用响应行为配置（来自 GUI 响应配置面板）。"""
+        if isinstance(config, ResponseBehavior):
+            self._response_behavior = config
+        else:
+            self._response_behavior = ResponseBehavior.from_dict(config)
+        logger.info(
+            "Response behavior updated: gi_delay=%.2f cmd_delay=%.2f "
+            "drop=%s rate=%.2f no_response=%s reject_startdt=%s",
+            self._response_behavior.gi_delay,
+            self._response_behavior.command_delay,
+            self._response_behavior.drop_frames,
+            self._response_behavior.drop_rate,
+            self._response_behavior.no_response,
+            self._response_behavior.reject_startdt,
+        )
+
+    @property
+    def response_behavior(self) -> ResponseBehavior:
+        return self._response_behavior
+
+    def _apply_quality(self, quality: int) -> int:
+        """按配置强制注入品质位。"""
+        mask = self._response_behavior.quality_mask()
+        if mask:
+            return quality | mask
+        return quality
+
+    def _maybe_drop_frame(self) -> bool:
+        """按配置决定是否丢弃当前发送帧。"""
+        rb = self._response_behavior
+        if not rb.drop_frames:
+            return False
+        rate = max(0.0, min(1.0, rb.drop_rate))
+        if rate <= 0:
+            return True
+        return random.random() < rate
+
+    async def _apply_command_delay(self) -> None:
+        delay = self._response_behavior.command_delay
+        if delay > 0:
+            await asyncio.sleep(delay)
+
     def set_packet_recorder(self, recorder) -> None:
         """设置报文录制器."""
         self._recorder = recorder
@@ -221,11 +363,11 @@ class SlaveEngine:
         await self._server.start()
 
         # 启动命令超时检查任务
-        self._timeout_check_task = asyncio.create_task(self._timeout_check_loop())
+        self._timeout_check_task = self._spawn(self._timeout_check_loop())
 
         # 启动逐点自动变化任务
         self._auto_change_running = True
-        self._auto_change_task = asyncio.create_task(self._auto_change_loop())
+        self._auto_change_task = self._spawn(self._auto_change_loop())
 
         logger.info(
             f"Slave engine started on {self._host}:{self._port} "
@@ -242,16 +384,16 @@ class SlaveEngine:
         if self._auto_change_task:
             self._auto_change_task.cancel()
             try:
-                await self._auto_change_task
-            except (asyncio.CancelledError, Exception):
+                await asyncio.wait_for(self._auto_change_task, timeout=2.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
                 pass
 
         # 停止超时检查任务
         if hasattr(self, '_timeout_check_task') and self._timeout_check_task:
             self._timeout_check_task.cancel()
             try:
-                await self._timeout_check_task
-            except (asyncio.CancelledError, Exception):
+                await asyncio.wait_for(self._timeout_check_task, timeout=2.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
                 pass
 
         if self._history_db:
@@ -349,7 +491,7 @@ class SlaveEngine:
         seq_ok = state.seq.process_rx_i_frame(apci.tx_seq)
         if not seq_ok:
             logger.error(f"Sequence mismatch from {state.conn.name}, disconnecting")
-            asyncio.create_task(state.conn.stop())
+            self._spawn(state.conn.stop())
             return
 
         # I帧的rx_seq是隐式确认，等效于S帧
@@ -384,8 +526,18 @@ class SlaveEngine:
     def _handle_u_frame(self, state: _ClientState, apci: APCI) -> None:
         """处理 U 帧."""
         if apci.is_startdt_act:
+            if self._response_behavior.reject_startdt:
+                logger.warning(
+                    f"STARTDT ACT rejected by response config from {state.conn.name}"
+                )
+                self._fire_event(SlaveEvent.ERROR, {
+                    "client_id": state.conn.name,
+                    "error": "startdt_rejected",
+                })
+                return
+
             # 回复 STARTDT CON
-            asyncio.create_task(
+            self._spawn(
                 self._send_to_client(state, APCICodec.startdt_con())
             )
             state.state_machine.on_startdt_con()
@@ -398,10 +550,14 @@ class SlaveEngine:
             })
 
             # 发送初始化结束报文 M_EI_NA_1
-            asyncio.create_task(self._send_initialization_end(state))
+            self._spawn(self._send_initialization_end(state))
+
+            # 可选：自动 STOPDT
+            if self._response_behavior.auto_stopdt:
+                self._spawn(self._auto_stopdt_after_start(state))
 
         elif apci.is_stopdt_act:
-            asyncio.create_task(
+            self._spawn(
                 self._send_to_client(state, APCICodec.stopdt_con())
             )
             state.state_machine.on_stopdt_con()
@@ -412,7 +568,7 @@ class SlaveEngine:
             })
 
         elif apci.is_testfr_act:
-            asyncio.create_task(
+            self._spawn(
                 self._send_to_client(state, APCICodec.testfr_con())
             )
             state.state_machine.on_testfr_act_received()
@@ -442,74 +598,103 @@ class SlaveEngine:
             )
             return
 
+        rb = self._response_behavior
         type_id = asdu.type_id
         cot = asdu.cot
 
+        # 故意不响应命令（测试异常场景）
+        if rb.no_response and type_id not in (
+            TypeID.F_FR_NA_1, TypeID.F_SR_NA_1, TypeID.F_SC_NA_1,
+            TypeID.F_LS_NA_1, TypeID.F_AF_NA_1, TypeID.F_SG_NA_1,
+            TypeID.F_DR_TA_1,
+        ):
+            logger.warning(
+                f"Response suppressed by config: type={type_id} cot={cot}"
+            )
+            return
+
         # 总召唤
         if type_id == TypeID.C_IC_NA_1 and cot == COT.ACT:
-            asyncio.create_task(self._handle_interrogation(state, asdu))
+            self._spawn(self._handle_interrogation(state, asdu))
 
         # 累计量召唤
         elif type_id == TypeID.C_CI_NA_1 and cot == COT.ACT:
-            asyncio.create_task(self._handle_counter_interrogation(state, asdu))
+            self._spawn(self._handle_counter_interrogation(state, asdu))
 
         # 时钟同步
         elif type_id == TypeID.C_CS_NA_1 and cot == COT.ACT:
-            asyncio.create_task(self._handle_clock_sync(state, asdu))
+            self._spawn(self._handle_clock_sync(state, asdu))
 
         # 读命令
         elif type_id == TypeID.C_RD_NA_1 and cot == COT.REQ:
-            asyncio.create_task(self._handle_read_command(state, asdu))
+            self._spawn(self._handle_read_command(state, asdu))
 
         # 复位进程
         elif type_id == TypeID.C_RP_NA_1 and cot == COT.ACT:
-            asyncio.create_task(self._handle_reset_process(state, asdu))
+            self._spawn(self._handle_reset_process(state, asdu))
 
         # 测试命令
         elif type_id in (TypeID.C_TS_NA_1, TypeID.C_TS_TA_1, TypeID.C_TS_NB_1) and cot == COT.ACT:
-            asyncio.create_task(self._handle_test_command(state, asdu))
+            self._spawn(self._handle_test_command(state, asdu))
 
         # 单命令
         elif type_id == TypeID.C_SC_NA_1:
-            asyncio.create_task(self._handle_single_command(state, asdu))
+            self._spawn(self._handle_single_command(state, asdu))
 
         # 双命令
         elif type_id == TypeID.C_DC_NA_1:
-            asyncio.create_task(self._handle_double_command(state, asdu))
+            self._spawn(self._handle_double_command(state, asdu))
 
         # 升降命令
         elif type_id == TypeID.C_RC_NA_1:
-            asyncio.create_task(self._handle_regulating_command(state, asdu))
+            self._spawn(self._handle_regulating_command(state, asdu))
 
         # 设点命令
         elif type_id in (TypeID.C_SE_NA_1, TypeID.C_SE_NB_1, TypeID.C_SE_NC_1):
-            asyncio.create_task(self._handle_setpoint_command(state, asdu))
+            self._spawn(self._handle_setpoint_command(state, asdu))
 
         # 比特串命令
         elif type_id == TypeID.C_BO_NA_1:
-            asyncio.create_task(self._handle_bitstring_command(state, asdu))
+            self._spawn(self._handle_bitstring_command(state, asdu))
 
         # 延时获得
         elif type_id == TypeID.C_CD_NA_1:
-            asyncio.create_task(self._handle_delay_command(state, asdu))
+            self._spawn(self._handle_delay_command(state, asdu))
 
         # 参数命令
         elif type_id in (TypeID.P_ME_NA_1, TypeID.P_ME_NB_1, TypeID.P_ME_NC_1,
                           TypeID.P_ME_ND_1, TypeID.P_AC_NA_1):
-            asyncio.create_task(self._handle_parameter_command(state, asdu))
+            self._spawn(self._handle_parameter_command(state, asdu))
 
         # 文件传输
         elif type_id in (TypeID.F_FR_NA_1, TypeID.F_SR_NA_1, TypeID.F_SC_NA_1,
                           TypeID.F_LS_NA_1, TypeID.F_AF_NA_1, TypeID.F_SG_NA_1,
                           TypeID.F_DR_TA_1, TypeID.F_SC_NB_1,
                           TypeID.F_FR_NB_1, TypeID.F_SR_NB_1):
-            asyncio.create_task(self._handle_file_transfer(state, asdu))
+            self._spawn(self._handle_file_transfer(state, asdu))
 
         else:
             logger.warning(f"Unhandled ASDU: type={type_id}, cot={cot}")
 
+    async def _auto_stopdt_after_start(self, state: _ClientState) -> None:
+        """STARTDT 后按配置自动发送 STOPDT."""
+        await asyncio.sleep(0.2)
+        try:
+            await self._send_to_client(state, APCICodec.stopdt_act())
+            state.state_machine.on_stopdt_con()
+            state.data_transfer_enabled = False
+            logger.info(f"Auto STOPDT sent to {state.conn.name}")
+            self._fire_event(SlaveEvent.STOPDT_RECEIVED, {
+                "client_id": state.conn.name
+            })
+        except Exception as e:
+            logger.error(f"Auto STOPDT failed: {e}")
+
     async def _handle_interrogation(self, state: _ClientState, asdu: ASDU) -> None:
         """处理总召唤."""
+        if self._response_behavior.gi_delay > 0:
+            await asyncio.sleep(self._response_behavior.gi_delay)
+
         qoi = 20
         if asdu.objects:
             qoi = asdu.objects[0].data[0] if isinstance(asdu.objects[0].data, bytes) else 20
@@ -553,7 +738,7 @@ class SlaveEngine:
                 continue
             yx_data = self._data_store.get_yx(p.ioa)
             if yx_data:
-                yx_batch.append((p.ioa, yx_data.value, yx_data.quality.to_int()))
+                yx_batch.append((p.ioa, yx_data.value, self._apply_quality(yx_data.quality.to_int())))
 
         for i in range(0, len(yx_batch), MAX_SP_PER_FRAME):
             chunk = yx_batch[i:i + MAX_SP_PER_FRAME]
@@ -597,7 +782,7 @@ class SlaveEngine:
                 continue
             yc_data = self._data_store.get_yc(p.ioa)
             if yc_data:
-                yc_batch.append((p.ioa, yc_data.value, yc_data.quality.to_int()))
+                yc_batch.append((p.ioa, yc_data.value, self._apply_quality(yc_data.quality.to_int())))
 
         for i in range(0, len(yc_batch), MAX_MV_PER_FRAME):
             chunk = yc_batch[i:i + MAX_MV_PER_FRAME]
@@ -635,7 +820,7 @@ class SlaveEngine:
                 continue
             yx_data = self._data_store.get_yx(p.ioa)
             if yx_data and yx_data.change_count > 0:
-                soe_batch.append((p.ioa, yx_data.value, yx_data.quality.to_int()))
+                soe_batch.append((p.ioa, yx_data.value, self._apply_quality(yx_data.quality.to_int())))
 
         for i in range(0, len(soe_batch), MAX_SP_TB_PER_FRAME):
             chunk = soe_batch[i:i + MAX_SP_TB_PER_FRAME]
@@ -692,6 +877,7 @@ class SlaveEngine:
 
     async def _handle_clock_sync(self, state: _ClientState, asdu: ASDU) -> None:
         """处理时钟同步."""
+        await self._apply_command_delay()
         logger.info(f"Clock Sync from {state.conn.name}")
 
         # 回复确认（使用收到的时间）
@@ -710,6 +896,7 @@ class SlaveEngine:
 
     async def _handle_read_command(self, state: _ClientState, asdu: ASDU) -> None:
         """处理读命令."""
+        await self._apply_command_delay()
         if not asdu.objects:
             return
         ioa = asdu.objects[0].ioa
@@ -767,6 +954,7 @@ class SlaveEngine:
 
     async def _handle_single_command(self, state: _ClientState, asdu: ASDU) -> None:
         """处理单命令."""
+        await self._apply_command_delay()
         if not asdu.objects:
             return
         obj = asdu.objects[0]
@@ -1261,12 +1449,12 @@ class SlaveEngine:
     def simulate_yx_change(self, ioa: int, value: bool) -> None:
         """模拟遥信变化."""
         self._data_store.update_yx(ioa, value)
-        asyncio.create_task(self.send_spontaneous_yx(ioa, value))
+        self._spawn(self.send_spontaneous_yx(ioa, value))
 
     def simulate_yc_change(self, ioa: int, value: float) -> None:
         """模拟遥测变化."""
         self._data_store.update_yc(ioa, value)
-        asyncio.create_task(self.send_spontaneous_yc(ioa, value))
+        self._spawn(self.send_spontaneous_yc(ioa, value))
 
     async def start_simulation(
         self,
@@ -1280,7 +1468,7 @@ class SlaveEngine:
             return
 
         self._simulation_running = True
-        self._simulation_task = asyncio.create_task(
+        self._simulation_task = self._spawn(
             self._simulation_loop(yx_interval, yc_interval, yx_change_rate, yc_change_range)
         )
         logger.info("Simulation started")
@@ -1390,24 +1578,35 @@ class SlaveEngine:
                             # T2超时发送S帧确认
                             rx_seq = state.seq.get_recv_seq()
                             frame = APCICodec.encode_s(rx_seq)
-                            asyncio.create_task(self._send_to_client(state, frame))
+                            self._spawn(self._send_to_client(state, frame))
                             state.state_machine.on_s_frame_sent()
                             logger.info(f"T2 expired: S-Frame sent to {conn_id}")
                         elif expired == TimerType.T3:
                             # T3空闲超时发送TESTFR ACT
-                            asyncio.create_task(self._send_to_client(state, APCICodec.testfr_act()))
+                            self._spawn(self._send_to_client(state, APCICodec.testfr_act()))
                             logger.info(f"T3 expired: TESTFR ACT sent to {conn_id}")
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Timeout check error: {e}")
 
+            # 响应行为：主动 TESTFR
+            if self._response_behavior.send_testfr and self._client_states:
+                self._testfr_timer += 1.0
+                interval = max(5.0, self._response_behavior.testfr_interval)
+                if self._testfr_timer >= interval:
+                    self._testfr_timer = 0.0
+                    for conn_id, state in list(self._client_states.items()):
+                        if state.data_transfer_enabled:
+                            self._spawn(self._send_to_client(state, APCICodec.testfr_act()))
+                            logger.info(f"Config TESTFR ACT sent to {conn_id}")
+
     # ── S帧回调 ───────────────────────────────────────────────────
 
     def _on_s_frame_needed(self, state: _ClientState, rx_seq: int) -> None:
         """当收到w个未确认的I帧时，由SequenceManager回调发送S帧."""
         frame = APCICodec.encode_s(rx_seq)
-        asyncio.create_task(self._send_to_client(state, frame))
+        self._spawn(self._send_to_client(state, frame))
         state.state_machine.on_s_frame_sent()
         logger.debug(f"S-Frame sent to {state.conn.name}: rx_seq={rx_seq}")
         # 通知等待窗口空间的协程
@@ -1437,6 +1636,19 @@ class SlaveEngine:
 
     async def _send_to_client(self, state: _ClientState, frame: bytes) -> None:
         """发送帧到指定客户端。"""
+        # 错误注入：丢帧
+        if self._maybe_drop_frame():
+            logger.warning(f"Frame dropped by response config (len={len(frame)})")
+            self._errors += 1
+            return
+
+        # 错误注入：损坏帧（翻转最后一字节）
+        if self._response_behavior.corrupt and len(frame) > 0:
+            frame = bytearray(frame)
+            frame[-1] ^= 0xFF
+            frame = bytes(frame)
+            logger.warning("Frame corrupted by response config")
+
         try:
             await state.conn.send_frame(frame)
 

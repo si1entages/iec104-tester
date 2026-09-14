@@ -257,8 +257,13 @@ class MainWindow(QMainWindow):
         if path:
             try:
                 self._view.get_point_table().load_yaml(path)
+                engine = self._view.get_engine()
+                if engine:
+                    engine.data_store.init_from_point_table(self._view.get_point_table())
                 if hasattr(self._view, 'get_point_editor'):
                     self._view.get_point_editor().refresh()
+                if hasattr(self._view, '_refresh_all_data'):
+                    self._view._refresh_all_data()
                 show_success(self, f"点表已加载: {path}")
             except Exception as e:
                 show_error(self, f"加载失败: {e}")
