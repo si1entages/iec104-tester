@@ -16,7 +16,6 @@ STATIC = Path(__file__).parent / "static"
 
 def create_app(bridge: EngineBridge) -> web.Application:
     app = web.Application()
-    app["bridge"] = bridge
 
     async def index(request: web.Request) -> web.Response:
         page = "master.html" if bridge.role == "master" else "slave.html"
@@ -60,6 +59,33 @@ def create_app(bridge: EngineBridge) -> web.Application:
     async def api_sp(request: web.Request) -> web.Response:
         body = await request.json()
         return web.json_response(await bridge.send_setpoint(int(body["ioa"]), float(body["value"])))
+
+    async def api_clock(request: web.Request) -> web.Response:
+        return web.json_response(await bridge.clock_sync())
+
+    async def api_ci(request: web.Request) -> web.Response:
+        return web.json_response(await bridge.counter_interrogation())
+
+    async def api_points_batch(request: web.Request) -> web.Response:
+        body = await request.json()
+        r = bridge.batch_points(
+            body.get("type", ""),
+            body.get("ioas") or [],
+            body.get("action", ""),
+            body.get("group"),
+        )
+        return web.json_response(r)
+
+    async def api_slave_response(request: web.Request) -> web.Response:
+        body = await request.json()
+        return web.json_response(await bridge.set_response(body))
+
+    async def api_slave_sim(request: web.Request) -> web.Response:
+        body = await request.json()
+        return web.json_response(await bridge.set_simulation(
+            bool(body.get("enabled")),
+            **{k: body[k] for k in ("yx_interval", "yc_interval", "yx_change_rate", "yc_change_range") if k in body},
+        ))
 
     async def api_slave_start(request: web.Request) -> web.Response:
         body = await request.json()
@@ -129,10 +155,15 @@ def create_app(bridge: EngineBridge) -> web.Application:
     app.router.add_post("/api/master/gi", api_gi)
     app.router.add_post("/api/master/yk", api_yk)
     app.router.add_post("/api/master/setpoint", api_sp)
+    app.router.add_post("/api/master/clock", api_clock)
+    app.router.add_post("/api/master/ci", api_ci)
+    app.router.add_post("/api/points/batch", api_points_batch)
     app.router.add_post("/api/slave/start", api_slave_start)
     app.router.add_post("/api/slave/stop", api_slave_stop)
     app.router.add_post("/api/slave/yx", api_slave_yx)
     app.router.add_post("/api/slave/yc", api_slave_yc)
+    app.router.add_post("/api/slave/response", api_slave_response)
+    app.router.add_post("/api/slave/sim", api_slave_sim)
     app.router.add_get("/ws", ws_feed)
     app.router.add_static("/static/", STATIC, show_index=False)
     return app

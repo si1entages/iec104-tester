@@ -31,6 +31,9 @@ class EngineBridge:
         self._frames: list[dict] = []
         self._events: list[dict] = []
         self._status: dict[str, Any] = {"role": role, "running": False}
+        self._dropped = 0
+        self._point_count = 0
+        self._pending_response: dict = {}
 
     # ── 事件总线 ──────────────────────────────────────────────────
 
@@ -56,7 +59,16 @@ class EngineBridge:
             try:
                 q.put_nowait(msg)
             except asyncio.QueueFull:
-                pass
+                # 背压：丢最旧再塞，保证 UI 能跟上
+                self._dropped += 1
+                try:
+                    q.get_nowait()
+                except Exception:
+                    pass
+                try:
+                    q.put_nowait(msg)
+                except Exception:
+                    self._dropped += 1
 
     def recent(self, kind: str, limit: int = 100) -> list[dict]:
         src = self._frames if kind == "frame" else self._events
@@ -92,6 +104,12 @@ class EngineBridge:
             )
             self.point_table.common_addr = self.config.connection.common_addr
             self.point_table.station_name = "WebDemo"
+        self._point_count = (
+            len(self.point_table.get_all_yx())
+            + len(self.point_table.get_all_yc())
+            + len(self.point_table.get_all_yk())
+            + len(self.point_table.get_all_ym())
+        )
 
     def snapshot_points(self) -> list[dict]:
         out = []
@@ -146,7 +164,9 @@ class EngineBridge:
                 st["vs"] = seq.send_seq
                 st["vr"] = seq.recv_seq
                 st["window"] = f"{seq.unconfirmed_count}/{seq.k}"
-        st["points"] = len(self.snapshot_points())
+        # 热路径避免全表 snapshot_points
+        st["points"] = self._point_count
+        st["dropped"] = self._dropped
         return st
 
     async def start_master(self, host: str, port: int, addr: int, reconnect: bool = True) -> dict:
@@ -192,6 +212,9 @@ class EngineBridge:
         eng.data_store.init_from_point_table(self.point_table)
         eng.set_event_callback(self._on_slave_event)
         eng.set_raw_frame_callback(self._on_raw_frame)
+        pending = getattr(self, "_pending_response", None)
+        if pending:
+            eng.set_response_behavior(pending)
         self.engine = eng
         await eng.start()
         self._status.update({"running": True, "host": host, "port": port})
@@ -231,6 +254,74 @@ class EngineBridge:
             return {"ok": False, "error": "not connected"}
         await self.engine.setpoint_shortfloat(ioa, float(value), False)
         return {"ok": True}
+
+    async def clock_sync(self) -> dict:
+        if self.role != "master" or not self.engine:
+            return {"ok": False, "error": "not connected"}
+        await self.engine.clock_sync()
+        return {"ok": True}
+
+    async def counter_interrogation(self) -> dict:
+        if self.role != "master" or not self.engine:
+            return {"ok": False, "error": "not connected"}
+        await self.engine.counter_interrogation()
+        return {"ok": True}
+
+    async def set_response(self, cfg: dict) -> dict:
+        """子站 ResponseBehavior（可未启动时暂存，启动后应用）."""
+        if self.role != "slave":
+            return {"ok": False, "error": "not slave"}
+        self._pending_response = dict(cfg or {})
+        if self.engine:
+            self.engine.set_response_behavior(self._pending_response)
+        return {"ok": True}
+
+    async def set_simulation(self, enabled: bool, **kwargs) -> dict:
+        if self.role != "slave" or not self.engine:
+            return {"ok": False, "error": "not listening"}
+        if enabled:
+            await self.engine.start_simulation(
+                yx_interval=float(kwargs.get("yx_interval", 5.0)),
+                yc_interval=float(kwargs.get("yc_interval", 2.0)),
+                yx_change_rate=float(kwargs.get("yx_change_rate", 0.1)),
+                yc_change_range=float(kwargs.get("yc_change_range", 0.05)),
+            )
+        else:
+            await self.engine.stop_simulation()
+        self._status["simulation"] = bool(enabled)
+        return {"ok": True}
+
+    def batch_points(self, ptype: str, ioas: list[int], action: str, group: int | None = None) -> dict:
+        """批量启用/禁用/改组（只改点表定义，引擎点表同步）."""
+        ptype = (ptype or "").upper()
+        if ptype not in ("YX", "YC", "YK", "YM"):
+            return {"ok": False, "error": "bad type"}
+        action = (action or "").lower()
+        if action not in ("enable", "disable", "group"):
+            return {"ok": False, "error": "bad action"}
+        if action == "group" and group is None:
+            return {"ok": False, "error": "group required"}
+        want = set(int(x) for x in (ioas or []))
+        if not want:
+            return {"ok": False, "error": "empty ioas"}
+        getters = {
+            "YX": self.point_table.get_all_yx,
+            "YC": self.point_table.get_all_yc,
+            "YK": self.point_table.get_all_yk,
+            "YM": self.point_table.get_all_ym,
+        }
+        changed = 0
+        for p in getters[ptype]():
+            if p.ioa not in want:
+                continue
+            if action == "enable":
+                p.enabled = True
+            elif action == "disable":
+                p.enabled = False
+            else:
+                p.group = int(group)
+            changed += 1
+        return {"ok": True, "changed": changed}
 
     async def slave_set_yx(self, ioa: int, value: bool) -> dict:
         if self.role != "slave" or not self.engine:

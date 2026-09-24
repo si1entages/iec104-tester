@@ -18,6 +18,8 @@
     <button class="btn danger" id="btn-disc" disabled>断开</button>
     <button class="btn" id="btn-local">连本地</button>
     <button class="btn" id="btn-gi" disabled>立即总召</button>
+    <button class="btn" id="btn-ci" disabled>累计量召</button>
+    <button class="btn" id="btn-clock" disabled>时钟同步</button>
   </header>
 
   <main class="main">
@@ -95,6 +97,8 @@ $("#btn-conn").onclick = async () => {
     $("#btn-conn").disabled = true;
     $("#btn-disc").disabled = false;
     $("#btn-gi").disabled = false;
+    $("#btn-ci").disabled = false;
+    $("#btn-clock").disabled = false;
   }
 };
 $("#btn-disc").onclick = async () => {
@@ -102,12 +106,22 @@ $("#btn-disc").onclick = async () => {
   $("#btn-conn").disabled = false;
   $("#btn-disc").disabled = true;
   $("#btn-gi").disabled = true;
+  $("#btn-ci").disabled = true;
+  $("#btn-clock").disabled = true;
   toast("已断开");
 };
 $("#btn-local").onclick = () => { $("#host").value = "127.0.0.1"; $("#btn-conn").click(); };
 $("#btn-gi").onclick = async () => {
   const r = await api("/api/master/gi");
   toast(r.ok ? "总召唤已发" : r.error || "失败");
+};
+$("#btn-ci").onclick = async () => {
+  const r = await api("/api/master/ci");
+  toast(r.ok ? "累计量召唤已发" : r.error || "失败");
+};
+$("#btn-clock").onclick = async () => {
+  const r = await api("/api/master/clock");
+  toast(r.ok ? "时钟同步已发" : r.error || "失败");
 };
 $("#yk-on").onclick = () => {
   const ioa = +$("#cmd-ioa").value;
