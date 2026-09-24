@@ -229,6 +229,43 @@ async def test_publish_queue_backpressure_dropped(slave_client):
 
 
 @pytest.mark.asyncio
+async def test_csv_includes_live_values_and_set_response_guard(slave_client, master_client):
+    sc, sbridge = slave_client
+    mc, mbridge = master_client
+    port = _free_port()
+    await sc.post("/api/slave/start", json={"host": "127.0.0.1", "port": port, "addr": 1})
+    try:
+        pts = (await (await sc.get("/api/points")).json())["points"]
+        yc_ioa = next(p["ioa"] for p in pts if p["type"] == "YC")
+        await sc.post("/api/slave/yc", json={"ioa": yc_ioa, "value": 7.5})
+        csv = await (await sc.get("/api/export/points.csv")).text()
+        assert "7.5" in csv or "7.50" in csv
+    finally:
+        await sc.post("/api/slave/stop")
+
+    r = await mc.post("/api/slave/response", json={"delays": {"gi": 1}})
+    body = await r.json()
+    assert body["ok"] is False and body["error"] == "not slave"
+
+
+@pytest.mark.asyncio
+async def test_batch_does_not_reset_live_values(slave_client):
+    client, bridge = slave_client
+    port = _free_port()
+    await client.post("/api/slave/start", json={"host": "127.0.0.1", "port": port, "addr": 1})
+    try:
+        pts = (await (await client.get("/api/points")).json())["points"]
+        yc_ioa = next(p["ioa"] for p in pts if p["type"] == "YC")
+        await client.post("/api/slave/yc", json={"ioa": yc_ioa, "value": 9.25})
+        yx = [p["ioa"] for p in pts if p["type"] == "YX"][:1]
+        await client.post("/api/points/batch", json={"type": "YX", "ioas": yx, "action": "group", "group": 3})
+        d = bridge.engine.data_store.get_yc(yc_ioa)
+        assert d is not None and abs(float(d.value) - 9.25) < 1e-6
+    finally:
+        await client.post("/api/slave/stop")
+
+
+@pytest.mark.asyncio
 async def test_master_extra_commands_and_exports(master_client):
     client, bridge = master_client
     # 未连接时命令失败
