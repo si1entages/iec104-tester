@@ -89,9 +89,11 @@ GUI层: gui/ （PySide6）
 
 ## 双应用入口
 
-| 产品 | 源码入口 | 可执行名 |
-|------|----------|----------|
-| IEC104 主站 | `python apps/master_main.py` | iec104-master |
-| IEC104 子站 | `python apps/slave_main.py` | iec104-slave |
+| 产品 | Web UI（推荐） | PySide6 桌面 | 可执行名 |
+|------|----------------|--------------|----------|
+| IEC104 主站 | `python apps/web_master.py` | `python apps/master_main.py` | iec104-master |
+| IEC104 子站 | `python apps/web_slave.py` | `python apps/slave_main.py` | iec104-slave |
+| 联调双窗 | `python apps/web_lab.py` | 分别启动两个桌面进程 | — |
 
-共享：`core/` 引擎、`gui/common/` 主题与连接栏。可同时打开两窗口联调。
+Web 架构：`webui/bridge.py` 引擎桥 + `webui/server.py` aiohttp REST/WS + `webui/static` 工业深色页。
+共享：`core/` 引擎。旧 `app.py` 仍可用。

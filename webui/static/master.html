@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IEC104 主站测试工具</title>
+  <link rel="stylesheet" href="/static/css/app.css" />
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">IEC104 <span>主站</span></div>
+    <div class="dot" id="st-dot"></div>
+    <div class="field"><label>主机</label><input id="host" value="127.0.0.1" /></div>
+    <div class="field"><label>端口</label><input id="port" type="number" value="2404" /></div>
+    <div class="field"><label>地址</label><input id="addr" type="number" value="1" /></div>
+    <button class="btn primary" id="btn-conn">连接</button>
+    <button class="btn danger" id="btn-disc" disabled>断开</button>
+    <button class="btn" id="btn-local">连本地</button>
+    <button class="btn" id="btn-gi" disabled>立即总召</button>
+  </header>
+
+  <main class="main">
+    <section class="panel">
+      <div class="panel-h">
+        <h3>定义表</h3>
+        <div class="tabs">
+          <div class="tab active" data-t="ALL">全部</div>
+          <div class="tab" data-t="YX">遥信</div>
+          <div class="tab" data-t="YC">遥测</div>
+          <div class="tab" data-t="YK">遥控</div>
+          <div class="tab" data-t="YM">遥脉</div>
+        </div>
+      </div>
+      <div class="scroll">
+        <table class="grid">
+          <thead><tr>
+            <th>IOA</th><th>类型</th><th>名称</th><th>组</th><th>值</th><th>品质</th><th>操作</th>
+          </tr></thead>
+          <tbody id="grid-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <aside class="panel side">
+      <div class="card">
+        <h4>遥控 / 设点</h4>
+        <div class="row">
+          <span class="muted">IOA</span><input id="cmd-ioa" type="number" value="1" class="grow" />
+        </div>
+        <div class="row">
+          <button class="btn" id="yk-off">遥控分</button>
+          <button class="btn primary" id="yk-on">遥控合</button>
+        </div>
+        <div class="row">
+          <input id="sp-val" type="number" step="0.01" value="0" class="grow" />
+          <button class="btn primary" id="sp-send">设点</button>
+        </div>
+      </div>
+      <div class="card">
+        <h4>提示</h4>
+        <div class="muted">可另开「IEC104 子站」窗口联调；也可连第三方子站。分栏可上下拖动调整报文区高度。</div>
+      </div>
+    </aside>
+  </main>
+
+  <section class="bottom" id="bottom">
+    <div class="bottom-tabs"><span class="muted">报文 / 事件</span></div>
+    <div class="bottom-body">
+      <div class="feed" id="feed-frames"></div>
+      <div class="feed" id="feed-events"></div>
+    </div>
+  </section>
+
+  <footer class="statusbar">
+    <span id="st-conn">未连接</span>
+    <span id="st-traffic">TX 0 / RX 0</span>
+    <span id="st-seq">VS/VR -/-</span>
+    <span id="st-points">点 0</span>
+  </footer>
+</div>
+<script src="/static/js/app.js"></script>
+<script>
+IEC104.state.role = "master";
+IEC104.bindTabs();
+IEC104.connectWs();
+
+const { api, toast } = IEC104;
+$("#btn-conn").onclick = async () => {
+  const r = await api("/api/master/start", {
+    host: $("#host").value, port: +$("#port").value, addr: +$("#addr").value,
+  });
+  toast(r.ok ? "正在连接…" : r.error || "失败");
+  if (r.ok) {
+    $("#btn-conn").disabled = true;
+    $("#btn-disc").disabled = false;
+    $("#btn-gi").disabled = false;
+  }
+};
+$("#btn-disc").onclick = async () => {
+  await api("/api/master/stop");
+  $("#btn-conn").disabled = false;
+  $("#btn-disc").disabled = true;
+  $("#btn-gi").disabled = true;
+  toast("已断开");
+};
+$("#btn-local").onclick = () => { $("#host").value = "127.0.0.1"; $("#btn-conn").click(); };
+$("#btn-gi").onclick = async () => {
+  const r = await api("/api/master/gi");
+  toast(r.ok ? "总召唤已发" : r.error || "失败");
+};
+$("#yk-on").onclick = () => {
+  const ioa = +$("#cmd-ioa").value;
+  api("/api/master/yk", { ioa, state: 1 }).then((r) => toast(r.ok ? "合命令已发" : r.error));
+};
+$("#yk-off").onclick = () => {
+  const ioa = +$("#cmd-ioa").value;
+  api("/api/master/yk", { ioa, state: 0 }).then((r) => toast(r.ok ? "分命令已发" : r.error));
+};
+$("#sp-send").onclick = () => {
+  const ioa = +$("#cmd-ioa").value, value = +$("#sp-val").value;
+  api("/api/master/setpoint", { ioa, value }).then((r) => toast(r.ok ? "设点已发" : r.error));
+};
+</script>
+</body>
+</html>

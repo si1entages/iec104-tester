@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IEC104 子站测试工具</title>
+  <link rel="stylesheet" href="/static/css/app.css" />
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">IEC104 <span>子站</span></div>
+    <div class="dot" id="st-dot"></div>
+    <div class="field"><label>绑定</label><input id="host" value="0.0.0.0" /></div>
+    <div class="field"><label>端口</label><input id="port" type="number" value="2404" /></div>
+    <div class="field"><label>地址</label><input id="addr" type="number" value="1" /></div>
+    <button class="btn success" id="btn-start">启动监听</button>
+    <button class="btn danger" id="btn-stop" disabled>停止</button>
+  </header>
+
+  <main class="main">
+    <section class="panel">
+      <div class="panel-h">
+        <h3>点表</h3>
+        <div class="tabs">
+          <div class="tab active" data-t="ALL">全部</div>
+          <div class="tab" data-t="YX">遥信</div>
+          <div class="tab" data-t="YC">遥测</div>
+          <div class="tab" data-t="YK">遥控</div>
+          <div class="tab" data-t="YM">遥脉</div>
+        </div>
+      </div>
+      <div class="scroll">
+        <table class="grid">
+          <thead><tr>
+            <th>IOA</th><th>类型</th><th>名称</th><th>组</th><th>值</th><th>品质</th><th>操作</th>
+          </tr></thead>
+          <tbody id="grid-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <aside class="panel side">
+      <div class="card">
+        <h4>客户端</h4>
+        <div id="st-clients" class="muted">客户端 0</div>
+      </div>
+      <div class="card">
+        <h4>联调提示</h4>
+        <div class="muted">启动监听后，打开「IEC104 主站」点「连本地」。双击/按钮改 YX、YC 会立刻自发上送。</div>
+      </div>
+    </aside>
+  </main>
+
+  <section class="bottom" id="bottom">
+    <div class="bottom-tabs"><span class="muted">报文 / 事件</span></div>
+    <div class="bottom-body">
+      <div class="feed" id="feed-frames"></div>
+      <div class="feed" id="feed-events"></div>
+    </div>
+  </section>
+
+  <footer class="statusbar">
+    <span id="st-conn">未连接</span>
+    <span id="st-traffic">TX 0 / RX 0</span>
+    <span id="st-seq">VS/VR -/-</span>
+    <span id="st-points">点 0</span>
+    <span id="st-clients"></span>
+  </footer>
+</div>
+<script src="/static/js/app.js"></script>
+<script>
+IEC104.state.role = "slave";
+IEC104.bindTabs();
+IEC104.connectWs();
+const { api, toast } = IEC104;
+$("#btn-start").onclick = async () => {
+  const r = await api("/api/slave/start", {
+    host: $("#host").value, port: +$("#port").value, addr: +$("#addr").value,
+  });
+  toast(r.ok ? "监听已启动" : r.error || "失败");
+  if (r.ok) {
+    $("#btn-start").disabled = true;
+    $("#btn-stop").disabled = false;
+  }
+};
+$("#btn-stop").onclick = async () => {
+  await api("/api/slave/stop");
+  $("#btn-start").disabled = false;
+  $("#btn-stop").disabled = true;
+  toast("已停止");
+};
+</script>
+</body>
+</html>

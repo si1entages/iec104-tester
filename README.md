@@ -97,12 +97,16 @@
 ## 🚀 快速开始
 
 ```bash
-pip install PySide6 PyYAML
+pip install -r requirements.txt
 
-# 终端 1 — 启动子站（服务端）
+# 推荐：Web UI（新界面，工业深色主题，可同时开主站/子站）
+python apps/web_slave.py --http-port 8766
+python apps/web_master.py --http-port 8765
+# 或一键双窗口:
+python apps/web_lab.py
+
+# 兼容：PySide6 桌面界面
 python apps/slave_main.py --port 2404
-
-# 终端 2 — 启动主站（客户端），点「连本地」或连接 127.0.0.1:2404
 python apps/master_main.py --host 127.0.0.1 --port 2404
 ```
 

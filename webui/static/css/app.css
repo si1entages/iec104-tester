@@ -1,0 +1,187 @@
+/* IEC104 工业深色主题 — flex/grid，AI 易改 */
+:root {
+  --bg: #0f1419;
+  --bg2: #151b23;
+  --bg3: #1c2430;
+  --line: #2a3544;
+  --text: #d7e0ea;
+  --muted: #7d8fa3;
+  --accent: #3d9cf0;
+  --accent2: #2bb673;
+  --danger: #e85d5d;
+  --warn: #e0b34c;
+  --yx: #5eb1f7;
+  --yc: #4cc38a;
+  --yk: #e6c35c;
+  --ym: #b18ae0;
+  --mono: "Cascadia Code", "Consolas", "Segoe UI", monospace;
+  --sans: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  --radius: 8px;
+  --gap: 10px;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; height: 100%;
+  background: var(--bg); color: var(--text);
+  font: 13px/1.45 var(--sans);
+}
+#app {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100%;
+  min-height: 0;
+}
+
+/* ── 顶栏 ── */
+.topbar {
+  display: flex; flex-wrap: wrap; gap: 8px 12px;
+  align-items: center;
+  padding: 10px 14px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--line);
+}
+.brand { font-weight: 700; letter-spacing: .02em; margin-right: 8px; }
+.brand span { color: var(--accent); }
+.field { display: inline-flex; align-items: center; gap: 6px; }
+.field label { color: var(--muted); font-size: 12px; }
+.dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--danger); box-shadow: 0 0 0 2px rgba(232,93,93,.2);
+}
+.dot.on { background: var(--accent2); box-shadow: 0 0 0 2px rgba(43,182,115,.25); }
+
+input, select {
+  background: var(--bg3); color: var(--text);
+  border: 1px solid var(--line); border-radius: 6px;
+  padding: 6px 8px; min-width: 0; font: inherit;
+}
+input[type="number"] { width: 72px; }
+input:focus, select:focus { outline: 1px solid var(--accent); }
+
+.btn {
+  border: 1px solid var(--line); background: var(--bg3); color: var(--text);
+  border-radius: 6px; padding: 6px 12px; cursor: pointer; font: inherit;
+}
+.btn:hover { border-color: var(--accent); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #061018; font-weight: 600; }
+.btn.success { background: var(--accent2); border-color: var(--accent2); color: #061018; font-weight: 600; }
+.btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; font-weight: 600; }
+
+/* ── 主体 ── */
+.main {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+@media (max-width: 980px) {
+  .main { grid-template-columns: 1fr; grid-template-rows: 1fr 280px; }
+}
+
+.panel {
+  display: flex; flex-direction: column;
+  min-height: 0; min-width: 0;
+  border-right: 1px solid var(--line);
+  background: var(--bg);
+}
+.panel:last-child { border-right: none; border-left: 1px solid var(--line); }
+.panel-h {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; border-bottom: 1px solid var(--line);
+  background: var(--bg2); flex-wrap: wrap;
+}
+.panel-h h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.tab {
+  padding: 4px 10px; border-radius: 999px; cursor: pointer;
+  color: var(--muted); border: 1px solid transparent;
+}
+.tab.active { color: var(--text); background: var(--bg3); border-color: var(--line); }
+.tab[data-t="YX"].active { color: var(--yx); }
+.tab[data-t="YC"].active { color: var(--yc); }
+.tab[data-t="YK"].active { color: var(--yk); }
+.tab[data-t="YM"].active { color: var(--ym); }
+
+.scroll { overflow: auto; flex: 1; min-height: 0; }
+table.grid {
+  width: 100%; border-collapse: collapse; font-size: 12px;
+}
+table.grid th, table.grid td {
+  padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left;
+  white-space: nowrap;
+}
+table.grid th {
+  position: sticky; top: 0; background: var(--bg2); color: var(--muted);
+  font-weight: 600; z-index: 1;
+}
+table.grid tr:hover td { background: rgba(61,156,240,.06); }
+table.grid tr.sel td { background: rgba(61,156,240,.12); }
+.num { font-family: var(--mono); text-align: right !important; }
+.tag {
+  display: inline-block; padding: 1px 6px; border-radius: 4px;
+  font-family: var(--mono); font-size: 11px;
+}
+.tag.YX { color: var(--yx); background: rgba(94,177,247,.12); }
+.tag.YC { color: var(--yc); background: rgba(76,195,138,.12); }
+.tag.YK { color: var(--yk); background: rgba(230,195,92,.12); }
+.tag.YM { color: var(--ym); background: rgba(177,138,224,.12); }
+
+.side { display: flex; flex-direction: column; min-height: 0; }
+.card {
+  padding: 12px; border-bottom: 1px solid var(--line);
+}
+.card h4 {
+  margin: 0 0 8px; font-size: 12px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 6px 0; }
+.grow { flex: 1; min-width: 0; }
+
+/* ── 底栏：数据与报文可拖 ── */
+.bottom {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  border-top: 1px solid var(--line);
+  min-height: 160px;
+  height: 240px;
+  resize: vertical;
+  overflow: hidden;
+}
+.bottom-tabs {
+  display: flex; gap: 4px; padding: 6px 10px; background: var(--bg2);
+  border-bottom: 1px solid var(--line);
+}
+.bottom-body {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  min-height: 0; flex: 1; overflow: hidden;
+}
+@media (max-width: 900px) {
+  .bottom-body { grid-template-columns: 1fr; }
+}
+.feed {
+  overflow: auto; font-family: var(--mono); font-size: 11px;
+  padding: 6px 10px; border-right: 1px solid var(--line);
+}
+.feed .tx { color: var(--accent2); }
+.feed .rx { color: var(--accent); }
+.feed .ev { color: var(--warn); }
+.feed div { padding: 1px 0; border-bottom: 1px dashed rgba(42,53,68,.5); }
+
+.statusbar {
+  display: flex; flex-wrap: wrap; gap: 14px;
+  padding: 6px 14px; background: var(--bg2); border-top: 1px solid var(--line);
+  color: var(--muted); font-family: var(--mono); font-size: 11px;
+}
+.toast {
+  position: fixed; right: 16px; bottom: 36px;
+  background: var(--bg3); border: 1px solid var(--line);
+  padding: 10px 14px; border-radius: 8px; opacity: 0;
+  transition: opacity .25s; pointer-events: none; z-index: 99;
+}
+.toast.show { opacity: 1; }
+.mono { font-family: var(--mono); }
+.muted { color: var(--muted); }
