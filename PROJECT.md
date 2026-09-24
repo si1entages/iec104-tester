@@ -5,29 +5,23 @@ IEC 60870-5-104 协议测试工具，支持主站/子站模拟、报文录制回
 网络异常模拟、一致性测试。面向电力系统 SCADA 调试和测试场景。
 
 ## 技术栈
-Python 3.11+, PySide6, asyncio, struct（协议编解码）
+Python 3.11+, Web UI (aiohttp + HTML/CSS), pywebview, asyncio, struct（协议编解码）
 
 ## 架构分层
-入口层: app.py / run_tests.py / run_multi_station.py / capture_tool.py / sim_tool.py
+入口层: app.py / apps/web_*.py / run_tests.py / capture_tool.py / sim_tool.py
 ↓
-GUI层: gui/ （PySide6）
-  ├── main_window.py  # 纯UI容器（精简）
-  ├── views/          # 主站/子站视图分离
-  │   ├── base_view.py    # 共享基类
-  │   ├── master_view.py  # 主站视图
-  │   └── slave_view.py   # 子站视图
-  ├── dialogs/        # 对话框管理
-  ├── widgets/        # 通用组件
-  ├── master/         # 主站专用组件
-  └── slave/          # 子站专用组件
+Web UI层: webui/ （静态页 + REST/WebSocket）
+  ├── server.py
+  ├── bridge.py
+  └── static/
 ↓
 引擎层: core/engine/ （主站/子站/多站）
 ↓
-协议层: core/protocol/ （APCI/ASDU/类型/流控/状态机/文件传输）
+协议层: core/protocol/
 ↓
-传输层: core/transport/ （TCP async）
+传输层: core/transport/
 ↓
-数据层: core/data/ （点表、实时数据模型）
+数据层: core/data/
 
 
 ## 核心模块速查
@@ -61,7 +55,7 @@ GUI层: gui/ （PySide6）
 ### 编码风格
 - 协议层: 纯同步 struct.pack/unpack，无 async，无 GUI 依赖
 - 引擎层: asyncio，通过 core/transport 管理 TCP 连接
-- GUI 层: PySide6 信号槽通信，不直接调用 protocol 层
+- GUI 层已移除 PySide6；界面为 webui/（HTML/CSS + aiohttp）
 - 后台任务: 引擎层统一用 `_spawn()` 创建，保留任务引用并记录异常
 
 ### 测试
@@ -87,13 +81,13 @@ GUI层: gui/ （PySide6）
 - [ ] GUI 关闭时多站管理器资源清理
 - [ ] 主站定义表双击值直接发命令（需选中行后用右侧命令面板）
 
-## 双应用入口
+## 双应用入口（Web UI）
 
-| 产品 | Web UI（推荐） | PySide6 桌面 | 可执行名 |
-|------|----------------|--------------|----------|
-| IEC104 主站 | `python apps/web_master.py` | `python apps/master_main.py` | iec104-master |
-| IEC104 子站 | `python apps/web_slave.py` | `python apps/slave_main.py` | iec104-slave |
-| 联调双窗 | `python apps/web_lab.py` | 分别启动两个桌面进程 | — |
+| 产品 | 入口 | 端口默认 |
+|------|------|----------|
+| IEC104 主站 | `python apps/web_master.py` | 8765 |
+| IEC104 子站 | `python apps/web_slave.py` | 8766 |
+| 联调双窗 | `python apps/web_lab.py` | 8765+8766 |
 
-Web 架构：`webui/bridge.py` 引擎桥 + `webui/server.py` aiohttp REST/WS + `webui/static` 工业深色页。
-共享：`core/` 引擎。旧 `app.py` 仍可用。
+架构：`webui/bridge.py` 引擎桥 + `webui/server.py` aiohttp REST/WS + `webui/static` 工业深色页。
+共享：`core/` 引擎。旧 PySide6 `gui/` 已删除。

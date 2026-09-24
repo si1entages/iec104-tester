@@ -99,15 +99,15 @@
 ```bash
 pip install -r requirements.txt
 
-# 推荐：Web UI（新界面，工业深色主题，可同时开主站/子站）
+# 主站 / 子站 Web UI（工业深色，可同时开）
 python apps/web_slave.py --http-port 8766
 python apps/web_master.py --http-port 8765
 # 或一键双窗口:
 python apps/web_lab.py
 
-# 兼容：PySide6 桌面界面
-python apps/slave_main.py --port 2404
-python apps/master_main.py --host 127.0.0.1 --port 2404
+# 兼容入口（启动 Web 服务）
+python app.py --mode slave --port 2404
+python app.py --mode master
 ```
 
 也可用兼容入口：

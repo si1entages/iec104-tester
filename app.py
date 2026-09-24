@@ -72,10 +72,6 @@ def main():
         "--test", type=str, default=None,
         help="运行自动化测试脚本 (YAML 文件或目录)"
     )
-    parser.add_argument(
-        "--legacy-ui", action="store_true",
-        help="使用旧版一体化 GUI（默认为主站/子站双应用界面）"
-    )
 
     args = parser.parse_args()
 
@@ -150,77 +146,18 @@ def main():
         _run_cli(config, point_table, history_db, logger)
         return
 
-    # GUI 模式
+    # Web UI 模式（主站/子站）
+    role = "slave" if config.mode == "slave" else "master"
+    port = 8766 if role == "slave" else 8765
+    logger.info(f"Starting Web UI as {role} on http://127.0.0.1:{port}/")
+    from webui.server import run_server
     try:
-        from PySide6.QtWidgets import QApplication
-        from PySide6.QtCore import Qt
-    except ImportError:
-        logger.error(
-            "PySide6 not installed. Install with:\n"
-            "  pip install PySide6\n"
-            "Or use --no-gui for CLI mode."
-        )
-        sys.exit(1)
-
-    # 高DPI支持
-    os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
-
-    app = QApplication(sys.argv)
-    app.setApplicationName("IEC 104 Tester")
-    app.setApplicationVersion("1.0.0")
-
-    # 应用主题
-    from gui.themes import get_theme
-    base_theme = get_theme(config.display.theme)
-
-    # 加载补充样式
-    style_qss_path = os.path.join(os.path.dirname(__file__), "resources", "style.qss")
-    extra_style = ""
-    if os.path.exists(style_qss_path):
-        with open(style_qss_path, "r", encoding="utf-8") as f:
-            extra_style = f.read()
-
-    app.setStyleSheet(base_theme + "\n" + extra_style)
-
-    # QSS热重载（开发模式）
-    if args.qss_reload:
-        from gui.qss_reloader import QSSReloader
-        if os.path.exists(style_qss_path):
-            QSSReloader(app, style_qss_path)
-            logger.info(f"QSS hot-reload enabled: {style_qss_path}")
-
-    # 创建主窗口 — 默认使用主站/子站双应用界面
-    # 旧版一体化界面: python app.py --legacy-ui --mode master|slave
-    if getattr(args, "legacy_ui", False):
-        from gui.main_window import MainWindow
-        window = MainWindow(config)
-    elif config.mode == "slave":
-        from gui.slave_app import SlaveMainWindow
-        window = SlaveMainWindow(config)
-    else:
-        from gui.master_app import MasterMainWindow
-        window = MasterMainWindow(config)
-
-    # 设置窗口图标
-    from PySide6.QtGui import QIcon
-    icon_path = os.path.join(os.path.dirname(__file__), "resources", "icon.svg")
-    if os.path.exists(icon_path):
-        window.setWindowIcon(QIcon(icon_path))
-
-    window.show()
-
-    logger.info(
-        f"Application started in {config.mode} mode "
-        f"({config.connection.host}:{config.connection.port})"
-    )
-
-    exit_code = app.exec()
-
-    # 清理
+        run_server(role, "127.0.0.1", port)
+    except KeyboardInterrupt:
+        pass
     if history_db:
         history_db.close()
-
-    sys.exit(exit_code)
+    sys.exit(0)
 
 
 def _run_tests(script_path: str, logger):

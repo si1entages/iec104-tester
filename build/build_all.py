@@ -58,8 +58,8 @@ def main() -> int:
         return 1
 
     results = []
-    results.append(build_one(ROOT / "apps" / "master_main.py", "iec104-master", args.onefile))
-    results.append(build_one(ROOT / "apps" / "slave_main.py", "iec104-slave", args.onefile))
+    results.append(build_one(ROOT / "apps" / "web_master.py", "iec104-master", args.onefile))
+    results.append(build_one(ROOT / "apps" / "web_slave.py", "iec104-slave", args.onefile))
     print("全部完成:")
     for r in results:
         print(" -", r)

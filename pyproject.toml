@@ -10,14 +10,14 @@ authors = [
 ]
 
 dependencies = [
-    "PySide6>=6.6.0",
     "PyYAML>=6.0",
+    "aiohttp>=3.9",
+    "pywebview>=5.0",
 ]
 
 [project.optional-dependencies]
 build = [
     "pyinstaller>=6.0",
-    "nuitka>=1.8",
 ]
 dev = [
     "pytest>=7.0",
@@ -32,4 +32,4 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["core*", "gui*"]
+include = ["core*", "webui*"]
