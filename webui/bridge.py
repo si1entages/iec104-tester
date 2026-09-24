@@ -234,11 +234,113 @@ class EngineBridge:
         self._publish("event", {"type": "ui", "data": {"msg": "已停止监听"}})
         return {"ok": True}
 
-    async def general_interrogation(self) -> dict:
+    async def general_interrogation(self, qoi: int = 20) -> dict:
         if self.role != "master" or not self.engine:
             return {"ok": False, "error": "not connected"}
-        await self.engine.general_interrogation()
+        await self.engine.general_interrogation(int(qoi))
         return {"ok": True}
+
+    async def reset_process(self) -> dict:
+        if self.role != "master" or not self.engine:
+            return {"ok": False, "error": "not connected"}
+        await self.engine.reset_process()
+        return {"ok": True}
+
+    async def test_command(self) -> dict:
+        if self.role != "master" or not self.engine:
+            return {"ok": False, "error": "not connected"}
+        await self.engine.send_test_command()
+        return {"ok": True}
+
+    async def read_command(self, ioa: int) -> dict:
+        if self.role != "master" or not self.engine:
+            return {"ok": False, "error": "not connected"}
+        await self.engine.read_command(int(ioa))
+        return {"ok": True}
+
+    async def parameter_command(self, kind: str, ioa: int, value: float, qualifier: int = 1) -> dict:
+        if self.role != "master" or not self.engine:
+            return {"ok": False, "error": "not connected"}
+        eng = self.engine
+        kind = (kind or "").lower()
+        if kind in ("normalized", "na"):
+            await eng.parameter_normalized(int(ioa), float(value))
+        elif kind in ("scaled", "nb"):
+            await eng.parameter_scaled(int(ioa), int(value))
+        elif kind in ("float", "nc"):
+            await eng.parameter_float(int(ioa), float(value))
+        elif kind in ("activation", "act"):
+            await eng.parameter_activation(int(ioa), int(qualifier))
+        else:
+            return {"ok": False, "error": "bad kind"}
+        return {"ok": True}
+
+    async def file_action(self, action: str, ioa: int = 0, file_name: int = 0) -> dict:
+        if self.role != "master" or not self.engine:
+            return {"ok": False, "error": "not connected"}
+        eng = self.engine
+        action = (action or "").lower()
+        if action in ("directory", "dir"):
+            await eng.file_call_directory(int(ioa))
+        elif action == "select":
+            await eng.file_select(int(ioa), int(file_name))
+        elif action in ("request", "call"):
+            await eng.file_request(int(ioa), int(file_name))
+        else:
+            return {"ok": False, "error": "bad action"}
+        return {"ok": True}
+
+    def export_points_csv(self) -> str:
+        def esc(v: str) -> str:
+            s = "" if v is None else str(v)
+            if any(c in s for c in (',', '"', '\n', '\r')):
+                return '"' + s.replace('"', '""') + '"'
+            return s
+        lines = ["type,ioa,name,group,enabled,value,quality"]
+        for p in self.snapshot_points():
+            val = p.get("value", "")
+            if isinstance(val, float):
+                val = f"{val:.6g}"
+            lines.append(",".join(esc(x) for x in (
+                p["type"], p["ioa"], p.get("name", ""), p.get("group", ""),
+                int(bool(p.get("enabled", True))), val, p.get("quality", ""),
+            )))
+        return "\n".join(lines) + "\n"
+
+    def export_session_json(self) -> dict:
+        return {
+            "role": self.role,
+            "status": self.status(),
+            "frames": self.recent("frame", 500),
+            "events": self.recent("event", 500),
+        }
+
+    def export_points_yaml(self) -> str:
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "points.yaml"
+            self.point_table.save_yaml(str(path))
+            return path.read_text(encoding="utf-8")
+
+    def import_points_yaml(self, text: str) -> dict:
+        import tempfile
+        from pathlib import Path
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                path = Path(td) / "points.yaml"
+                path.write_text(text, encoding="utf-8")
+                self.point_table.load_yaml(str(path))
+            self.ensure_demo_points()  # 刷新计数（已有点表时 no-op 生成）
+            self._point_count = (
+                len(self.point_table.get_all_yx())
+                + len(self.point_table.get_all_yc())
+                + len(self.point_table.get_all_yk())
+                + len(self.point_table.get_all_ym())
+            )
+            return {"ok": True, "points": self._point_count}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
     async def send_yk(self, ioa: int, state: int | bool, select: bool = False, double: bool = False) -> dict:
         if self.role != "master" or not self.engine:

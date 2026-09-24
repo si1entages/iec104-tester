@@ -47,7 +47,13 @@ def create_app(bridge: EngineBridge) -> web.Application:
         return web.json_response(await bridge.stop_master())
 
     async def api_gi(request: web.Request) -> web.Response:
-        return web.json_response(await bridge.general_interrogation())
+        body = {}
+        if request.can_read_body:
+            try:
+                body = await request.json()
+            except Exception:
+                body = {}
+        return web.json_response(await bridge.general_interrogation(int(body.get("qoi", 20))))
 
     async def api_yk(request: web.Request) -> web.Response:
         body = await request.json()
@@ -65,6 +71,46 @@ def create_app(bridge: EngineBridge) -> web.Application:
 
     async def api_ci(request: web.Request) -> web.Response:
         return web.json_response(await bridge.counter_interrogation())
+
+    async def api_reset(request: web.Request) -> web.Response:
+        return web.json_response(await bridge.reset_process())
+
+    async def api_test(request: web.Request) -> web.Response:
+        return web.json_response(await bridge.test_command())
+
+    async def api_read(request: web.Request) -> web.Response:
+        body = await request.json()
+        return web.json_response(await bridge.read_command(int(body["ioa"])))
+
+    async def api_param(request: web.Request) -> web.Response:
+        body = await request.json()
+        return web.json_response(await bridge.parameter_command(
+            body.get("kind", "float"), int(body["ioa"]),
+            float(body.get("value", 0)), int(body.get("qualifier", 1)),
+        ))
+
+    async def api_file(request: web.Request) -> web.Response:
+        body = await request.json()
+        return web.json_response(await bridge.file_action(
+            body.get("action", ""), int(body.get("ioa", 0)), int(body.get("file_name", 0)),
+        ))
+
+    async def api_points_yaml_get(request: web.Request) -> web.Response:
+        try:
+            text = bridge.export_points_yaml()
+            return web.Response(text=text, content_type="text/yaml")
+        except Exception as e:
+            return web.json_response({"ok": False, "error": str(e)})
+
+    async def api_points_yaml_put(request: web.Request) -> web.Response:
+        text = await request.text()
+        return web.json_response(bridge.import_points_yaml(text))
+
+    async def api_export_csv(request: web.Request) -> web.Response:
+        return web.Response(text=bridge.export_points_csv(), content_type="text/csv")
+
+    async def api_export_session(request: web.Request) -> web.Response:
+        return web.json_response(bridge.export_session_json())
 
     async def api_points_batch(request: web.Request) -> web.Response:
         body = await request.json()
@@ -157,6 +203,15 @@ def create_app(bridge: EngineBridge) -> web.Application:
     app.router.add_post("/api/master/setpoint", api_sp)
     app.router.add_post("/api/master/clock", api_clock)
     app.router.add_post("/api/master/ci", api_ci)
+    app.router.add_post("/api/master/reset", api_reset)
+    app.router.add_post("/api/master/test", api_test)
+    app.router.add_post("/api/master/read", api_read)
+    app.router.add_post("/api/master/param", api_param)
+    app.router.add_post("/api/master/file", api_file)
+    app.router.add_get("/api/points/yaml", api_points_yaml_get)
+    app.router.add_post("/api/points/yaml", api_points_yaml_put)
+    app.router.add_get("/api/export/points.csv", api_export_csv)
+    app.router.add_get("/api/export/session.json", api_export_session)
     app.router.add_post("/api/points/batch", api_points_batch)
     app.router.add_post("/api/slave/start", api_slave_start)
     app.router.add_post("/api/slave/stop", api_slave_stop)

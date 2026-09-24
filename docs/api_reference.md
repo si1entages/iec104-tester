@@ -420,73 +420,28 @@ print(f"遥测数: {stats['yc_count']}")
 
 ---
 
-## 5. GUI 组件 API
+## 5. Web UI / 引擎桥 API
 
-### 5.1 主窗口
-
-```python
-from PySide6.QtWidgets import QApplication
-from gui.main_window import MainWindow
-from core.config import AppConfig
-
-app = QApplication([])
-config = AppConfig()
-window = MainWindow(config)
-window.show()
-app.exec()
-```
-
-### 5.2 视图组件
+> 旧 PySide6 `gui/` 已移除，界面为 `webui/`（aiohttp REST + WebSocket + 静态页）。
 
 ```python
-from gui.views.master_view import MasterView
-from gui.views.slave_view import SlaveView
+from webui.bridge import EngineBridge
+from webui.server import create_app, run_server
 
-# 主站视图
-master_view = MasterView(config)
-control_panel = master_view.get_control_panel()
-monitor_panel = master_view.get_monitor_panel()
-
-# 子站视图
-slave_view = SlaveView(config)
-sim_panel = slave_view.get_sim_panel()
-point_editor = slave_view.get_point_editor()
+bridge = EngineBridge(role="master")  # 或 "slave"
+app = create_app(bridge)
+# 桌面壳: apps/web_master.py / apps/web_slave.py
 ```
 
-### 5.3 通用组件
+### HTTP 摘要
 
-```python
-from gui.widgets.hex_viewer import HexViewer
-from gui.widgets.status_panel import StatusPanel, LogViewer
-from gui.widgets.point_table import PointTablePanel, YxTableModel
-from gui.widgets.sidebar import Sidebar
-from gui.widgets.tool_bar import MainToolBar
-
-# 报文查看器
-hex_viewer = HexViewer()
-hex_viewer.add_frame(data=b'\x68...', direction="rx")
-
-# 状态面板
-status_panel = StatusPanel()
-status_panel.update_state("RUNNING", connected=True)
-
-# 日志查看器
-log_viewer = LogViewer()
-log_viewer.add_event("data_received", {"type_id": "M_SP_NA_1"})
-
-# 数据表格
-model = YxTableModel()
-panel = PointTablePanel(model, "遥信 (YX)")
-
-# 侧边栏
-sidebar = Sidebar(mode="master")
-sidebar.set_connected(True, "192.168.1.100:2404")
-sidebar.update_stats(tx_frames=100, rx_frames=95)
-
-# 工具栏
-toolbar = MainToolBar(mode="master")
-toolbar.set_connected(True)
-```
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/master/start\|stop\|gi\|clock\|ci\|reset\|test\|read\|param\|file\|yk\|setpoint` | 主站操作 |
+| POST | `/api/slave/start\|stop\|yx\|yc\|response\|sim` | 子站操作 |
+| GET/POST | `/api/points`、`/api/points/yaml`、`/api/points/batch` | 点表 |
+| GET | `/api/export/points.csv`、`/api/export/session.json` | 导出 |
+| GET | `/ws` | 实时帧/事件推送 |
 
 ---
 

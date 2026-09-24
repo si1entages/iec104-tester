@@ -229,6 +229,75 @@ async def test_publish_queue_backpressure_dropped(slave_client):
 
 
 @pytest.mark.asyncio
+async def test_master_extra_commands_and_exports(master_client):
+    client, bridge = master_client
+    # 未连接时命令失败
+    for path in ("/api/master/reset", "/api/master/test"):
+        r = await client.post(path, json={})
+        assert (await r.json())["ok"] is False
+    r = await client.post("/api/master/read", json={"ioa": 1})
+    assert (await r.json())["ok"] is False
+    r = await client.post("/api/master/param", json={"kind": "float", "ioa": 1, "value": 1.0})
+    assert (await r.json())["ok"] is False
+    r = await client.post("/api/master/file", json={"action": "directory"})
+    assert (await r.json())["ok"] is False
+    r = await client.post("/api/master/file", json={"action": "nope"})
+    assert (await r.json())["ok"] is False
+    r = await client.post("/api/master/param", json={"kind": "nope", "ioa": 1, "value": 0})
+    assert (await r.json())["ok"] is False
+
+    # 导出不依赖连接
+    r = await client.get("/api/points/yaml")
+    assert r.status == 200
+    assert "ioa" in (await r.text()).lower() or "YX" in (await r.text()) or "yx" in (await r.text()).lower()
+    r = await client.get("/api/export/points.csv")
+    csv = await r.text()
+    assert csv.splitlines()[0].startswith("type,ioa")
+    r = await client.get("/api/export/session.json")
+    ses = await r.json()
+    assert "role" in ses and ses["role"] == "master"
+
+    # YAML 导入
+    r = await client.get("/api/points/yaml")
+    yaml_text = await r.text()
+    r = await client.post("/api/points/yaml", data=yaml_text)
+    body = await r.json()
+    assert body["ok"] is True and body["points"] > 0
+
+
+@pytest.mark.asyncio
+async def test_master_gi_qoi_against_slave(slave_client, master_client):
+    sc, sbridge = slave_client
+    mc, mbridge = master_client
+    port = _free_port()
+    await sc.post("/api/slave/start", json={"host": "127.0.0.1", "port": port, "addr": 1})
+    try:
+        await mc.post("/api/master/start", json={"host": "127.0.0.1", "port": port, "addr": 1})
+        for _ in range(80):
+            await asyncio.sleep(0.05)
+            if mbridge.engine and mbridge.engine.is_running:
+                break
+        assert mbridge.engine and mbridge.engine.is_running
+        r = await mc.post("/api/master/gi", json={"qoi": 20})
+        assert (await r.json())["ok"] is True
+        r = await mc.post("/api/master/gi", json={"qoi": 1})
+        assert (await r.json())["ok"] is True
+        r = await mc.post("/api/master/reset", json={})
+        assert (await r.json())["ok"] is True
+        r = await mc.post("/api/master/test", json={})
+        assert (await r.json())["ok"] is True
+        r = await mc.post("/api/master/read", json={"ioa": 1})
+        assert (await r.json())["ok"] is True
+        r = await mc.post("/api/master/param", json={"kind": "float", "ioa": 1, "value": 1.5})
+        assert (await r.json())["ok"] is True
+        r = await mc.post("/api/master/file", json={"action": "directory", "ioa": 0})
+        assert (await r.json())["ok"] is True
+        await mc.post("/api/master/stop")
+    finally:
+        await sc.post("/api/slave/stop")
+
+
+@pytest.mark.asyncio
 async def test_ws_snapshot(slave_client):
     client, bridge = slave_client
     async with client.ws_connect("/ws") as ws:

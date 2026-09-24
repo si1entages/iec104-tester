@@ -56,7 +56,7 @@ git clone https://github.com/yourname/iec104-tester.git
 cd iec104-tester
 
 # 安装依赖
-pip install PySide6 PyYAML
+pip install -r requirements.txt
 
 # 开发环境（可选）
 pip install pytest pytest-asyncio

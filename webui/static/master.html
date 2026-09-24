@@ -20,6 +20,8 @@
     <button class="btn" id="btn-gi" disabled>立即总召</button>
     <button class="btn" id="btn-ci" disabled>累计量召</button>
     <button class="btn" id="btn-clock" disabled>时钟同步</button>
+    <button class="btn" id="btn-reset" disabled>复位</button>
+    <button class="btn" id="btn-test" disabled>测试</button>
   </header>
 
   <main class="main">
@@ -46,6 +48,36 @@
 
     <aside class="panel side">
       <div class="card">
+        <h4>系统命令</h4>
+        <div class="row">
+          <span class="muted">QOI 1–23组 / 20总召</span>
+          <input id="qoi" type="number" min="1" max="23" value="20" />
+          <button class="btn" id="btn-gi-qoi">召唤</button>
+        </div>
+        <div class="row">
+          <button class="btn" id="btn-read">读命令</button>
+        </div>
+      </div>
+      <div class="card">
+        <h4>文件 / 参数</h4>
+        <div class="row">
+          <button class="btn" id="btn-file-dir">目录</button>
+          <input id="file-name" type="number" value="1" style="width:70px" />
+          <button class="btn" id="btn-file-sel">选择</button>
+          <button class="btn" id="btn-file-req">召唤</button>
+        </div>
+        <div class="row">
+          <select id="param-kind">
+            <option value="float">参数-短浮点</option>
+            <option value="normalized">参数-归一化</option>
+            <option value="scaled">参数-标度化</option>
+            <option value="activation">参数激活</option>
+          </select>
+          <input id="param-val" type="number" step="0.01" value="0" style="width:80px" />
+          <button class="btn" id="btn-param">下发</button>
+        </div>
+      </div>
+      <div class="card">
         <h4>遥控 / 设点</h4>
         <div class="row">
           <span class="muted">IOA</span><input id="cmd-ioa" type="number" value="1" class="grow" />
@@ -60,8 +92,19 @@
         </div>
       </div>
       <div class="card">
+        <h4>点表</h4>
+        <div class="row">
+          <button class="btn" id="btn-export-yaml">导出 YAML</button>
+          <button class="btn" id="btn-export-csv">导出 CSV</button>
+          <button class="btn" id="btn-export-ses">导出会话</button>
+        </div>
+        <div class="row">
+          <input type="file" id="import-yaml" accept=".yaml,.yml,text/yaml" class="grow" />
+        </div>
+      </div>
+      <div class="card">
         <h4>提示</h4>
-        <div class="muted">可另开「IEC104 子站」窗口联调；也可连第三方子站。分栏可上下拖动调整报文区高度。</div>
+        <div class="muted">可另开「IEC104 子站」窗口联调。报文行含 U/S/I 与 TypeID 摘要。</div>
       </div>
     </aside>
   </main>
@@ -96,24 +139,24 @@ $("#btn-conn").onclick = async () => {
   if (r.ok) {
     $("#btn-conn").disabled = true;
     $("#btn-disc").disabled = false;
-    $("#btn-gi").disabled = false;
-    $("#btn-ci").disabled = false;
-    $("#btn-clock").disabled = false;
+    for (const id of ["#btn-gi", "#btn-ci", "#btn-clock", "#btn-reset", "#btn-test"]) $(id).disabled = false;
   }
 };
 $("#btn-disc").onclick = async () => {
   await api("/api/master/stop");
   $("#btn-conn").disabled = false;
   $("#btn-disc").disabled = true;
-  $("#btn-gi").disabled = true;
-  $("#btn-ci").disabled = true;
-  $("#btn-clock").disabled = true;
+  for (const id of ["#btn-gi", "#btn-ci", "#btn-clock", "#btn-reset", "#btn-test"]) $(id).disabled = true;
   toast("已断开");
 };
 $("#btn-local").onclick = () => { $("#host").value = "127.0.0.1"; $("#btn-conn").click(); };
 $("#btn-gi").onclick = async () => {
-  const r = await api("/api/master/gi");
+  const r = await api("/api/master/gi", { qoi: 20 });
   toast(r.ok ? "总召唤已发" : r.error || "失败");
+};
+$("#btn-gi-qoi").onclick = async () => {
+  const r = await api("/api/master/gi", { qoi: +$("#qoi").value || 20 });
+  toast(r.ok ? "召唤已发" : r.error || "失败");
 };
 $("#btn-ci").onclick = async () => {
   const r = await api("/api/master/ci");
@@ -122,6 +165,50 @@ $("#btn-ci").onclick = async () => {
 $("#btn-clock").onclick = async () => {
   const r = await api("/api/master/clock");
   toast(r.ok ? "时钟同步已发" : r.error || "失败");
+};
+$("#btn-reset").onclick = async () => {
+  const r = await api("/api/master/reset");
+  toast(r.ok ? "复位已发" : r.error || "失败");
+};
+$("#btn-test").onclick = async () => {
+  const r = await api("/api/master/test");
+  toast(r.ok ? "测试命令已发" : r.error || "失败");
+};
+$("#btn-read").onclick = async () => {
+  const r = await api("/api/master/read", { ioa: +$("#cmd-ioa").value });
+  toast(r.ok ? "读命令已发" : r.error || "失败");
+};
+$("#btn-file-dir").onclick = async () => {
+  const r = await api("/api/master/file", { action: "directory", ioa: 0 });
+  toast(r.ok ? "文件目录请求已发" : r.error || "失败");
+};
+$("#btn-file-sel").onclick = async () => {
+  const r = await api("/api/master/file", { action: "select", ioa: 0, file_name: +$("#file-name").value || 1 });
+  toast(r.ok ? "文件选择已发" : r.error || "失败");
+};
+$("#btn-file-req").onclick = async () => {
+  const r = await api("/api/master/file", { action: "request", ioa: 0, file_name: +$("#file-name").value || 1 });
+  toast(r.ok ? "文件召唤已发" : r.error || "失败");
+};
+$("#btn-param").onclick = async () => {
+  const r = await api("/api/master/param", {
+    kind: $("#param-kind").value,
+    ioa: +$("#cmd-ioa").value,
+    value: +$("#param-val").value,
+  });
+  toast(r.ok ? "参数已发" : r.error || "失败");
+};
+$("#btn-export-yaml").onclick = () => { location.href = "/api/points/yaml"; };
+$("#btn-export-csv").onclick = () => { location.href = "/api/export/points.csv"; };
+$("#btn-export-ses").onclick = () => { location.href = "/api/export/session.json"; };
+$("#import-yaml").onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const text = await file.text();
+  const r = await fetch("/api/points/yaml", { method: "POST", body: text });
+  const body = await r.json();
+  toast(body.ok ? `已导入 ${body.points} 点` : body.error || "失败");
+  if (body.ok) IEC104.refreshPoints();
 };
 $("#yk-on").onclick = () => {
   const ioa = +$("#cmd-ioa").value;

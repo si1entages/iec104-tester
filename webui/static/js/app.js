@@ -137,12 +137,12 @@ function renderFeeds() {
   if (fr) {
     fr.innerHTML = state.frames
       .slice(-120)
-      .map(
-        (f) =>
-          `<div class="${f.data.direction === "tx" ? "tx" : "rx"}">[${
-            f.data.direction
-          }] ${f.data.len}B ${escapeHtml((f.data.hex || "").slice(0, 80))}</div>`
-      )
+      .map((f) => {
+        const hex = f.data.hex || "";
+        return `<div class="${f.data.direction === "tx" ? "tx" : "rx"}">[${
+          f.data.direction
+        }] ${f.data.len}B ${summarizeFrame(hex)} ${escapeHtml(hex.slice(0, 72))}</div>`;
+      })
       .join("");
     fr.scrollTop = fr.scrollHeight;
   }
@@ -153,6 +153,25 @@ function renderFeeds() {
       .join("");
     ev.scrollTop = ev.scrollHeight;
   }
+}
+
+/** 简短协议摘要：U/S/I + ASDU TypeID */
+function summarizeFrame(hex) {
+  if (!hex || hex.length < 12) return "";
+  const b0 = parseInt(hex.slice(0, 2), 16);
+  const ctrl = parseInt(hex.slice(4, 6), 16);
+  let apci = "?";
+  if ((ctrl & 0x03) === 0x03) {
+    const map = { 0x07: "START", 0x0B: "STARTCON", 0x13: "STOP", 0x23: "STOPCON", 0x43: "TEST", 0x83: "TESTCON" };
+    apci = "U:" + (map[ctrl & 0xF3] || ctrl.toString(16));
+  } else if ((ctrl & 0x01) === 0x01) {
+    apci = "S";
+  } else {
+    apci = "I";
+    const type = parseInt(hex.slice(12, 14), 16);
+    if (!isNaN(type)) apci += " T" + type;
+  }
+  return `<span class="muted">[${apci}]</span>`;
 }
 
 async function toggleYx(ioa, value) {
@@ -205,4 +224,4 @@ function bindTabs() {
   $$(".tabs .tab").forEach((el) => el.addEventListener("click", () => setFilter(el.dataset.t)));
 }
 
-window.IEC104 = { api, toast, bindTabs, connectWs, renderPoints, setFilter, refreshPoints, state };
+window.IEC104 = { api, toast, bindTabs, connectWs, renderPoints, setFilter, refreshPoints, state, summarizeFrame };

@@ -74,8 +74,8 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - [x] master↔slave 真连接端到端联调（tests/test_e2e_master_slave.py）
 - [x] MultiStationManager 共享事件循环稳定性验证
 - [x] 修复 slave/master/transport stop 时 wait_closed 挂起（加超时）
-- [x] 双应用界面：gui/master_app + gui/slave_app，入口 apps/master_main.py、apps/slave_main.py
-- [x] app.py 默认新界面；--legacy-ui 保留旧一体化 GUI
+- [x] Web UI 双窗口：apps/web_master + apps/web_slave，入口见上表
+- [x] Web API：组召唤/复位/测试/读/参数/文件 + 点表 YAML/CSV/会话导出
 - [x] PyInstaller 脚本 build/build_all.py（iec104-master / iec104-slave）
 - [ ] wrong_cot 注入尚未完全落到 ASDU 构建（预留字段）
 - [ ] GUI 关闭时多站管理器资源清理
@@ -90,4 +90,4 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 | 联调双窗 | `python apps/web_lab.py` | 8765+8766 |
 
 架构：`webui/bridge.py` 引擎桥 + `webui/server.py` aiohttp REST/WS + `webui/static` 工业深色页。
-共享：`core/` 引擎。旧 PySide6 `gui/` 已删除。
+共享：`core/` 引擎。README 与代码对齐：主站含组召唤/复位/测试/读/参数/文件与点表导出；子站含响应注入与模拟。多站/录制/网络模拟见 CLI。
