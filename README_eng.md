@@ -13,12 +13,12 @@
   <img src="https://img.shields.io/badge/WebUI-aiohttp-41CD52" alt="Web UI">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/IEC--104-Complete-brightgreen.svg" alt="IEC 104">
-  <img src="https://img.shields.io/badge/Tests-235+-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-371-brightgreen.svg" alt="Tests">
 </p>
 
 ---
 
-Industrial IEC 60870-5-104 testing tool: dual-window **Web UI** (master + slave), full protocol engine, multi-station, packet capture/replay, network fault injection, and YAML scripted tests.
+Industrial IEC 60870-5-104 testing tool: browser-based **Web UI** (master + slave, pure web — the browser is the only UI, open both in two tabs for interop testing), full protocol engine, multi-station, packet capture/replay, network fault injection, and YAML scripted tests.
 
 ## Features
 
@@ -48,25 +48,33 @@ Industrial IEC 60870-5-104 testing tool: dual-window **Web UI** (master + slave)
 
 ### Tests
 
-- `pytest tests/` (**235+** including Web API), conformance suite (42), YAML scripts
+- `pytest tests/` (**371** including Web API and protocol conformance), conformance suite (42), YAML scripts
 
 ## Quick start
 
 ```bash
 pip install -r requirements.txt
-python apps/web_slave.py --http-port 8766
-python apps/web_master.py --http-port 8765
-# or both:
-python apps/web_lab.py
+
+# Start master / slave web services (each opens the browser automatically)
+python app.py --mode master    # master, http://127.0.0.1:8765/
+python app.py --mode slave     # slave,  http://127.0.0.1:8766/
+
+# or the thin entry scripts (equivalent)
+python apps/web_master.py
+python apps/web_slave.py
+
+# headless/server: do not open a browser, just print the URL
+python app.py --mode master --no-browser --http-port 8765
 ```
 
-Open `http://127.0.0.1:8765/` (master) and `http://127.0.0.1:8766/` (slave), or use pywebview windows.
+The default browser opens automatically once the port is ready; pass `--no-browser` to disable it.
+Interop: start master and slave in two terminals → slave page "Start listening" → master page "Connect local" → "GI now".
 
 ## Install
 
 ```bash
 pip install -r requirements.txt
-# deps: PyYAML, aiohttp, pywebview (optional shell); dev: pytest, pytest-asyncio
+# deps: PyYAML, aiohttp; dev: pytest, pytest-asyncio
 ```
 
 ## CLI

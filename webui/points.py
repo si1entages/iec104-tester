@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from core.data.point_table import PointTable
 
@@ -12,7 +12,7 @@ from core.data.point_table import PointTable
 class PointService:
     """PointTable 的应用层封装；变更后调用 sync_to_engine."""
 
-    def __init__(self, table: Optional[PointTable] = None):
+    def __init__(self, table: PointTable | None = None):
         self.table = table or PointTable()
         self._count = 0
 

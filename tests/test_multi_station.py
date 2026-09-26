@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import asyncio
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
 
 from core.engine.multi_station import (
-    MultiStationManager, MultiStationConfig, StationConfig, StationStatus
+    MultiStationConfig,
+    MultiStationManager,
+    StationConfig,
+    StationStatus,
 )
-from core.engine.slave import SlaveEngine, SlaveEvent
+from core.engine.slave import SlaveEvent
 
 
 class TestStationConfig:

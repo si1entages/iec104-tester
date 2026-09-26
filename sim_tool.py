@@ -15,11 +15,10 @@
     python sim_tool.py --list-presets
 """
 
-import sys
-import os
-import asyncio
 import argparse
+import asyncio
 import logging
+import sys
 import time
 from pathlib import Path
 
@@ -89,8 +88,7 @@ async def main():
 
     setup_logging(args.log_level)
 
-    from core.simulation import SimulationManager, ConditionPreset
-    from core.config import AppConfig
+    from core.simulation import SimulationManager
 
     # 构建条件
     sim = SimulationManager()
@@ -120,8 +118,8 @@ async def main():
             auto_start=True, auto_gi=args.auto_gi,
         )
     else:
-        from core.engine.slave import SlaveEngine
         from core.data.point_table import PointTable
+        from core.engine.slave import SlaveEngine
         pt = PointTable()
         pt.generate_demo_points(yx_count=100, yc_count=50)
         engine = SlaveEngine(port=args.port, point_table=pt)
@@ -135,12 +133,12 @@ async def main():
 
     engine.set_event_callback(on_event)
 
-    print(f"🔧 Network Simulation Active")
+    print("🔧 Network Simulation Active")
     print(f"   {sim.condition.describe()}")
     print(f"   Mode: {args.mode} | {args.host}:{args.port}")
     if args.duration > 0:
         print(f"   Duration: {args.duration}s")
-    print(f"   Press Ctrl+C to stop\n")
+    print("   Press Ctrl+C to stop\n")
 
     await engine.start()
 

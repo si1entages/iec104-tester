@@ -12,11 +12,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
-from core.transport.connection import TCPClient, TCPServer, TCPConnection, ConnectionStats
-
+from core.transport.connection import ConnectionStats, TCPClient, TCPConnection, TCPServer
 
 # ── Fixtures ─────────────────────────────────────────────────────
 

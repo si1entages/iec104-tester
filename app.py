@@ -1,10 +1,27 @@
-"""IEC 60870-5-104 协议测试工具 — 应用入口."""
+"""IEC 60870-5-104 协议测试工具 — 应用入口.
 
-import sys
-import os
-import logging
+纯 Web 形态：浏览器作为唯一 UI，入口负责启动本地 Web 服务并按需打开浏览器。
+提供三类运行方式：
+  - Web UI（默认）：`python app.py --mode master|slave`
+  - headless 引擎 CLI：`python app.py --mode slave --no-gui`
+  - YAML 自动化测试：`python app.py --test tests/scripts/`
+"""
+
 import argparse
+import logging
+import socket
+import sys
+import threading
+import time
+import webbrowser
 from pathlib import Path
+
+# Web UI 默认 HTTP 端口（按角色区分，避免主站/子站同时启动时端口冲突）
+_DEFAULT_HTTP_PORT = {"slave": 8766, "master": 8765}
+
+# 打开浏览器前的端口探测参数
+_PROBE_INTERVAL_S = 0.05
+_PROBE_TIMEOUT_S = 5.0
 
 
 def setup_logging(level: str = "INFO", log_file: str = None) -> None:
@@ -24,12 +41,83 @@ def setup_logging(level: str = "INFO", log_file: str = None) -> None:
     )
 
 
-def main():
+def _open_browser_when_ready(
+    url: str,
+    port: int,
+    interval: float = _PROBE_INTERVAL_S,
+    timeout: float = _PROBE_TIMEOUT_S,
+) -> None:
+    """后台轮询端口就绪后再打开浏览器（避免固定 sleep 的竞态）.
+
+    在守护线程中以 ``connect_ex`` 探测本地端口，一旦连通立即
+    ``webbrowser.open(url)``；超过 ``timeout`` 仍未就绪则打印提示，不抛异常。
+
+    Args:
+        url: 要打开的完整 URL.
+        port: 本地监听端口.
+        interval: 每次探测的间隔秒数.
+        timeout: 最长等待秒数.
+    """
+
+    def _probe() -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(interval)
+                if sock.connect_ex(("127.0.0.1", port)) == 0:
+                    try:
+                        webbrowser.open(url)
+                    except Exception:  # pragma: no cover - 环境相关
+                        print(f"未能自动打开浏览器，请手动访问: {url}", flush=True)
+                    return
+            time.sleep(interval)
+        print(f"服务尚未就绪，请手动访问: {url}", flush=True)
+
+    threading.Thread(target=_probe, daemon=True).start()
+
+
+def run_web(role: str, http_port: int | None = None, open_browser: bool = True) -> None:
+    """启动 Web 服务（阻塞）并在就绪后打开浏览器.
+
+    Args:
+        role: 运行角色，"master"（主站）或 "slave"（子站）.
+        http_port: HTTP 端口；为 None 时按角色取默认端口（主站 8765 / 子站 8766）.
+        open_browser: True 时在端口就绪后自动打开默认浏览器；False 时仅打印地址.
+    """
+    from webui.server import run_server
+
+    port = http_port if http_port is not None else _DEFAULT_HTTP_PORT.get(
+        role, _DEFAULT_HTTP_PORT["master"]
+    )
+    url = f"http://127.0.0.1:{port}/"
+
+    print(f"Web UI: {url}", flush=True)
+    if open_browser:
+        _open_browser_when_ready(url, port)
+    else:
+        print("请用浏览器打开上述地址", flush=True)
+    print("关闭此窗口或按 Ctrl+C 停止服务", flush=True)
+
+    try:
+        run_server(role, "127.0.0.1", port)
+    except KeyboardInterrupt:
+        pass
+
+
+def cli(default_role: str | None = None) -> int:
+    """解析命令行参数并分派到对应的运行模式.
+
+    Args:
+        default_role: ``--mode`` 的默认值（供 apps/ 瘦入口注入角色）.
+
+    Returns:
+        进程退出码.
+    """
     parser = argparse.ArgumentParser(
         description="IEC 60870-5-104 协议测试工具"
     )
     parser.add_argument(
-        "--mode", choices=["master", "slave"], default=None,
+        "--mode", choices=["master", "slave"], default=default_role,
         help="运行模式: master(主站) 或 slave(子站)"
     )
     parser.add_argument(
@@ -61,16 +149,20 @@ def main():
         help="无GUI模式（仅CLI日志输出）"
     )
     parser.add_argument(
-        "--qss-reload", action="store_true",
-        help="启用QSS热重载（修改style.qss实时生效）"
-    )
-    parser.add_argument(
         "--history-db", type=str, default=None,
         help="历史数据库路径 (SQLite)"
     )
     parser.add_argument(
         "--test", type=str, default=None,
         help="运行自动化测试脚本 (YAML 文件或目录)"
+    )
+    parser.add_argument(
+        "--http-port", type=int, default=None,
+        help="Web UI HTTP 端口 (默认主站 8765 / 子站 8766)"
+    )
+    parser.add_argument(
+        "--no-browser", action="store_true",
+        help="启动 Web 服务时不自动打开浏览器"
     )
 
     args = parser.parse_args()
@@ -86,7 +178,7 @@ def main():
     logger.info("Starting IEC 60870-5-104 Tester...")
 
     # 配置
-    from core.config import load_config, AppConfig
+    from core.config import AppConfig, load_config
 
     config_path = args.config
     if config_path and Path(config_path).exists():
@@ -134,36 +226,33 @@ def main():
         history_db.open()
         logger.info(f"History DB: {args.history_db}")
 
-    # 自动化测试脚本模式
-    if args.test:
-        logger.info(f"Running test script: {args.test}")
-        _run_tests(args.test, logger)
-        return
-
-    # 无GUI模式
-    if args.no_gui:
-        logger.info("Running in CLI mode (no GUI)")
-        _run_cli(config, point_table, history_db, logger)
-        return
-
-    # Web UI 模式（主站/子站）
-    role = "slave" if config.mode == "slave" else "master"
-    port = 8766 if role == "slave" else 8765
-    logger.info(f"Starting Web UI as {role} on http://127.0.0.1:{port}/")
-    from webui.server import run_server
     try:
-        run_server(role, "127.0.0.1", port)
-    except KeyboardInterrupt:
-        pass
-    if history_db:
-        history_db.close()
-    sys.exit(0)
+        # 自动化测试脚本模式
+        if args.test:
+            logger.info(f"Running test script: {args.test}")
+            return _run_tests(args.test, logger)
+
+        # 无GUI模式
+        if args.no_gui:
+            logger.info("Running in CLI mode (no GUI)")
+            _run_cli(config, point_table, history_db, logger)
+            return 0
+
+        # Web UI 模式（主站/子站）
+        role = "slave" if config.mode == "slave" else "master"
+        run_web(role, args.http_port, open_browser=not args.no_browser)
+        return 0
+    finally:
+        # 保证异常路径也会关闭历史数据库
+        if history_db:
+            history_db.close()
 
 
-def _run_tests(script_path: str, logger):
-    """运行自动化测试脚本."""
+def _run_tests(script_path: str, logger) -> int:
+    """运行自动化测试脚本，返回进程退出码."""
     import asyncio
-    from core.testing import TestRunner, ReportGenerator
+
+    from core.testing import ReportGenerator, TestRunner
 
     async def run():
         runner = TestRunner(report_dir="test_reports")
@@ -189,8 +278,7 @@ def _run_tests(script_path: str, logger):
             icon = "✅" if test_result.status.value == "passed" else "❌"
             logger.info(f"{icon} {test_result.script_name}: {test_result.status.value.upper()} ({test_result.duration_s:.2f}s)")
 
-        runner._on_step_complete = on_step
-        runner._on_test_complete = on_test
+        runner.set_callbacks(on_step_complete=on_step, on_test_complete=on_test)
 
         results = []
         for script in scripts:
@@ -205,8 +293,7 @@ def _run_tests(script_path: str, logger):
         logger.info(f"\nSummary: {len(results)} scripts, {passed} passed, {failed} failed")
         return 0 if failed == 0 else 1
 
-    exit_code = asyncio.run(run())
-    sys.exit(exit_code)
+    return asyncio.run(run())
 
 
 def _run_cli(config, point_table, history_db, logger):
@@ -217,7 +304,7 @@ def _run_cli(config, point_table, history_db, logger):
         is_master = config.mode == "master"
 
         if is_master:
-            from core.engine.master import MasterEngine, MasterEvent
+            from core.engine.master import MasterEngine
 
             def on_event(event, data):
                 logger.info(f"[EVENT] {event.value}: {data}")
@@ -259,7 +346,7 @@ def _run_cli(config, point_table, history_db, logger):
                 await engine.stop()
 
         else:
-            from core.engine.slave import SlaveEngine, SlaveEvent
+            from core.engine.slave import SlaveEngine
 
             def on_event(event, data):
                 logger.info(f"[EVENT] {event.value}: {data}")
@@ -300,5 +387,10 @@ def _run_cli(config, point_table, history_db, logger):
         logger.info("Stopped by user")
 
 
+def main() -> int:
+    """控制台入口（pyproject [project.scripts] iec104-tester = app:main）."""
+    return cli()
+
+
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

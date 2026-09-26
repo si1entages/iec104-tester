@@ -1,4 +1,4 @@
-"""本地 Web 服务 — REST + WebSocket，供 pywebview/浏览器加载."""
+"""本地 Web 服务 — REST + WebSocket，供浏览器加载."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import asyncio
 import logging
 from pathlib import Path
 
-from aiohttp import web, WSMsgType
+from aiohttp import WSMsgType, web
 
 from .bridge import EngineBridge
 
@@ -34,11 +34,23 @@ def create_app(bridge: EngineBridge) -> web.Application:
         })
 
     async def api_master_start(request: web.Request) -> web.Response:
-        body = await request.json()
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        host = body.get("host", "127.0.0.1")
+        if not isinstance(host, str):
+            return web.json_response({"ok": False, "error": "invalid host"}, status=400)
+        port = body.get("port", 2404)
+        if not isinstance(port, int) or port < 0 or port > 65535:
+            return web.json_response({"ok": False, "error": "invalid port"}, status=400)
+        addr = body.get("addr", 1)
+        if not isinstance(addr, int) or addr < 0:
+            return web.json_response({"ok": False, "error": "invalid addr"}, status=400)
         r = await bridge.start_master(
-            body.get("host", "127.0.0.1"),
-            int(body.get("port", 2404)),
-            int(body.get("addr", 1)),
+            host,
+            port,
+            addr,
             bool(body.get("reconnect", True)),
         )
         return web.json_response(r)
@@ -56,15 +68,32 @@ def create_app(bridge: EngineBridge) -> web.Application:
         return web.json_response(await bridge.general_interrogation(int(body.get("qoi", 20))))
 
     async def api_yk(request: web.Request) -> web.Response:
-        body = await request.json()
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        ioa = body.get("ioa")
+        if not isinstance(ioa, int) or ioa < 0:
+            return web.json_response({"ok": False, "error": "invalid ioa"}, status=400)
         return web.json_response(await bridge.send_yk(
-            int(body["ioa"]), body.get("state", 0),
+            ioa, body.get("state", 0),
             bool(body.get("select", False)), bool(body.get("double", False)),
         ))
 
     async def api_sp(request: web.Request) -> web.Response:
-        body = await request.json()
-        return web.json_response(await bridge.send_setpoint(int(body["ioa"]), float(body["value"])))
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        ioa = body.get("ioa")
+        if not isinstance(ioa, int) or ioa < 0:
+            return web.json_response({"ok": False, "error": "invalid ioa"}, status=400)
+        value = body.get("value")
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return web.json_response({"ok": False, "error": "invalid value"}, status=400)
+        return web.json_response(await bridge.send_setpoint(ioa, value))
 
     async def api_clock(request: web.Request) -> web.Response:
         return web.json_response(await bridge.clock_sync())
@@ -79,21 +108,48 @@ def create_app(bridge: EngineBridge) -> web.Application:
         return web.json_response(await bridge.test_command())
 
     async def api_read(request: web.Request) -> web.Response:
-        body = await request.json()
-        return web.json_response(await bridge.read_command(int(body["ioa"])))
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        ioa = body.get("ioa")
+        if not isinstance(ioa, int) or ioa < 0:
+            return web.json_response({"ok": False, "error": "invalid ioa"}, status=400)
+        return web.json_response(await bridge.read_command(ioa))
 
     async def api_param(request: web.Request) -> web.Response:
-        body = await request.json()
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        ioa = body.get("ioa")
+        if not isinstance(ioa, int) or ioa < 0:
+            return web.json_response({"ok": False, "error": "invalid ioa"}, status=400)
+        value = body.get("value", 0)
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return web.json_response({"ok": False, "error": "invalid value"}, status=400)
         return web.json_response(await bridge.parameter_command(
-            body.get("kind", "float"), int(body["ioa"]),
-            float(body.get("value", 0)), int(body.get("qualifier", 1)),
+            body.get("kind", "float"), ioa,
+            value, int(body.get("qualifier", 1)),
         ))
 
     async def api_file(request: web.Request) -> web.Response:
-        body = await request.json()
-        return web.json_response(await bridge.file_action(
-            body.get("action", ""), int(body.get("ioa", 0)), int(body.get("file_name", 0)),
-        ))
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        action = body.get("action", "")
+        if not isinstance(action, str):
+            return web.json_response({"ok": False, "error": "invalid action"}, status=400)
+        ioa = body.get("ioa", 0)
+        if not isinstance(ioa, int) or ioa < 0:
+            return web.json_response({"ok": False, "error": "invalid ioa"}, status=400)
+        file_name = body.get("file_name", 0)
+        if not isinstance(file_name, int) or file_name < 0:
+            return web.json_response({"ok": False, "error": "invalid file_name"}, status=400)
+        return web.json_response(await bridge.file_action(action, ioa, file_name))
 
     async def api_points_yaml_get(request: web.Request) -> web.Response:
         try:
@@ -103,7 +159,10 @@ def create_app(bridge: EngineBridge) -> web.Application:
             return web.json_response({"ok": False, "error": str(e)})
 
     async def api_points_yaml_put(request: web.Request) -> web.Response:
-        text = await request.text()
+        try:
+            text = await request.text()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid body"}, status=400)
         return web.json_response(bridge.import_points_yaml(text))
 
     async def api_export_csv(request: web.Request) -> web.Response:
@@ -113,44 +172,92 @@ def create_app(bridge: EngineBridge) -> web.Application:
         return web.json_response(bridge.export_session_json())
 
     async def api_points_batch(request: web.Request) -> web.Response:
-        body = await request.json()
-        r = bridge.batch_points(
-            body.get("type", ""),
-            body.get("ioas") or [],
-            body.get("action", ""),
-            body.get("group"),
-        )
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        ptype = body.get("type", "")
+        if not isinstance(ptype, str):
+            return web.json_response({"ok": False, "error": "invalid type"}, status=400)
+        ioas = body.get("ioas") or []
+        if not isinstance(ioas, list) or not all(isinstance(i, int) for i in ioas):
+            return web.json_response({"ok": False, "error": "invalid ioas"}, status=400)
+        action = body.get("action", "")
+        if not isinstance(action, str):
+            return web.json_response({"ok": False, "error": "invalid action"}, status=400)
+        group = body.get("group")
+        if group is not None and not isinstance(group, int):
+            return web.json_response({"ok": False, "error": "invalid group"}, status=400)
+        r = bridge.batch_points(ptype, ioas, action, group)
         return web.json_response(r)
 
     async def api_slave_response(request: web.Request) -> web.Response:
-        body = await request.json()
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"ok": False, "error": "invalid body"}, status=400)
         return web.json_response(await bridge.set_response(body))
 
     async def api_slave_sim(request: web.Request) -> web.Response:
-        body = await request.json()
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"ok": False, "error": "invalid body"}, status=400)
         return web.json_response(await bridge.set_simulation(
             bool(body.get("enabled")),
             **{k: body[k] for k in ("yx_interval", "yc_interval", "yx_change_rate", "yc_change_range") if k in body},
         ))
 
     async def api_slave_start(request: web.Request) -> web.Response:
-        body = await request.json()
-        return web.json_response(await bridge.start_slave(
-            body.get("host", "0.0.0.0"),
-            int(body.get("port", 2404)),
-            int(body.get("addr", 1)),
-        ))
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        host = body.get("host", "0.0.0.0")
+        if not isinstance(host, str):
+            return web.json_response({"ok": False, "error": "invalid host"}, status=400)
+        port = body.get("port", 2404)
+        if not isinstance(port, int) or port < 0 or port > 65535:
+            return web.json_response({"ok": False, "error": "invalid port"}, status=400)
+        addr = body.get("addr", 1)
+        if not isinstance(addr, int) or addr < 0:
+            return web.json_response({"ok": False, "error": "invalid addr"}, status=400)
+        return web.json_response(await bridge.start_slave(host, port, addr))
 
     async def api_slave_stop(request: web.Request) -> web.Response:
         return web.json_response(await bridge.stop_slave())
 
     async def api_slave_yx(request: web.Request) -> web.Response:
-        body = await request.json()
-        return web.json_response(await bridge.slave_set_yx(int(body["ioa"]), bool(body["value"])))
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        ioa = body.get("ioa")
+        if not isinstance(ioa, int) or ioa < 0:
+            return web.json_response({"ok": False, "error": "invalid ioa"}, status=400)
+        value = body.get("value")
+        if not isinstance(value, bool):
+            return web.json_response({"ok": False, "error": "invalid value"}, status=400)
+        return web.json_response(await bridge.slave_set_yx(ioa, value))
 
     async def api_slave_yc(request: web.Request) -> web.Response:
-        body = await request.json()
-        return web.json_response(await bridge.slave_set_yc(int(body["ioa"]), float(body["value"])))
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        ioa = body.get("ioa")
+        if not isinstance(ioa, int) or ioa < 0:
+            return web.json_response({"ok": False, "error": "invalid ioa"}, status=400)
+        value = body.get("value")
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return web.json_response({"ok": False, "error": "invalid value"}, status=400)
+        return web.json_response(await bridge.slave_set_yc(ioa, value))
 
     async def ws_feed(request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse(heartbeat=20)

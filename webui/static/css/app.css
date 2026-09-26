@@ -59,6 +59,29 @@ input, select {
 input[type="number"] { width: 72px; }
 input:focus, select:focus { outline: 1px solid var(--accent); }
 
+/* 键盘可达性：焦点可见 */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+.btn:focus-visible { outline-offset: 2px; }
+
+/* ── 数值输入弹窗（原生 dialog） ── */
+dialog.ask {
+  background: var(--bg2); color: var(--text);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 16px; min-width: 260px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.5);
+}
+dialog.ask::backdrop { background: rgba(6, 12, 18, .55); }
+dialog.ask h4 {
+  margin: 0 0 10px; font-size: 12px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .04em;
+}
+dialog.ask input { width: 100%; margin-bottom: 12px; }
+dialog.ask .ask-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
 .btn {
   border: 1px solid var(--line); background: var(--bg3); color: var(--text);
   border-radius: 6px; padding: 6px 12px; cursor: pointer; font: inherit;

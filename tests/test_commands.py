@@ -1,14 +1,25 @@
 """命令类型测试."""
 
-import pytest
 from core.protocol.types import (
+    AckFileSection,
+    CallDirectory,
+    CounterInterrogationCommand,
+    FileReady,
+    FileSegment,
+    InterrogationCommand,
+    LastSection,
+    ParameterActivation,
+    ParameterCommandFloat,
+    ParameterCommandNormalized,
+    ParameterCommandNormalizedNoQuality,
     RegulatingStepCommand,
-    SetpointCommandN, SetpointCommandS, SetpointCommandScaled,
-    InterrogationCommand, CounterInterrogationCommand,
-    ParameterCommandNormalized, ParameterCommandScaled as ParamCmdScaled,
-    ParameterCommandFloat, ParameterCommandNormalizedNoQuality,
-    ParameterActivation, FileReady, SectionReady, CallDirectory,
-    LastSection, AckFileSection, FileSegment,
+    SectionReady,
+    SetpointCommandN,
+    SetpointCommandS,
+    SetpointCommandScaled,
+)
+from core.protocol.types import (
+    ParameterCommandScaled as ParamCmdScaled,
 )
 
 
@@ -74,11 +85,11 @@ def test_interrogation_command():
     assert ic2.qoi == 20
     assert ic2.qoi_str == "站召唤"
 
-    # 组召唤
-    ic = InterrogationCommand(ioa=0, qoi=5)
+    # 组召唤 (标准: QOI = 20 + 组号; 第5组 → QOI=25)
+    ic = InterrogationCommand(ioa=0, qoi=25)
     data = ic.to_bytes()
     ic2 = InterrogationCommand.from_bytes(data, ioa=0)
-    assert ic2.qoi == 5
+    assert ic2.qoi == 25
     assert ic2.qoi_str == "第5组召唤"
 
     print("  ✅ InterrogationCommand tests passed")

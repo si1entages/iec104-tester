@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from core.config import AppConfig
 from core.data.point_table import PointTable
@@ -181,5 +181,5 @@ class EngineBridge:
     async def _cmd(self, coro) -> dict:
         try:
             return await coro
-        except RuntimeError as e:
+        except (RuntimeError, ValueError, KeyError, TypeError, ConnectionError) as e:
             return {"ok": False, "error": str(e)}

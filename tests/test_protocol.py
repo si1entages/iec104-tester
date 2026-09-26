@@ -17,25 +17,38 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # 导入所有测试模块，保持向后兼容
-from tests.test_apci import test_apci_u_frame, test_apci_s_frame, test_apci_i_frame
-from tests.test_types import (
-    test_single_point, test_double_point, test_normalized_value,
-    test_short_float, test_scaled_value, test_step_position,
-    test_bitstring32, test_counter_value, test_cp56time2a, test_cp24time2a,
-)
+from tests.test_apci import test_apci_i_frame, test_apci_s_frame, test_apci_u_frame
 from tests.test_asdu import (
-    test_asdu_general_interrogation, test_asdu_single_point,
-    test_asdu_short_float, test_asdu_single_command,
-    test_asdu_clock_sync, test_asdu_with_parameter_commands,
+    test_asdu_clock_sync,
+    test_asdu_general_interrogation,
+    test_asdu_short_float,
+    test_asdu_single_command,
+    test_asdu_single_point,
+    test_asdu_with_parameter_commands,
 )
 from tests.test_commands import (
-    test_regulating_step_command, test_setpoint_commands,
-    test_interrogation_command, test_counter_interrogation_command,
-    test_parameter_commands, test_file_transfer_types,
+    test_counter_interrogation_command,
+    test_file_transfer_types,
+    test_interrogation_command,
+    test_parameter_commands,
+    test_regulating_step_command,
+    test_setpoint_commands,
 )
+from tests.test_integration import test_full_apdu_roundtrip
 from tests.test_sequence import test_sequence_manager
 from tests.test_state_machine import test_state_machine
-from tests.test_integration import test_full_apdu_roundtrip
+from tests.test_types import (
+    test_bitstring32,
+    test_counter_value,
+    test_cp24time2a,
+    test_cp56time2a,
+    test_double_point,
+    test_normalized_value,
+    test_scaled_value,
+    test_short_float,
+    test_single_point,
+    test_step_position,
+)
 
 
 def main():

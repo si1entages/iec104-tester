@@ -1,9 +1,8 @@
 """集成测试."""
 
-import pytest
 from core.protocol.apci import APCICodec
 from core.protocol.asdu import ASDU, ASDUBuilder
-from core.protocol.types import TypeID, COT
+from core.protocol.types import COT, TypeID
 
 
 def test_full_apdu_roundtrip():

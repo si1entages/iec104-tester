@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import socket
-from typing import Optional
 
 import pytest
 

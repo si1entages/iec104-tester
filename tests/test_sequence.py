@@ -1,6 +1,5 @@
 """序列号管理器测试."""
 
-import pytest
 from core.protocol.sequence import SequenceManager
 
 
@@ -25,7 +24,7 @@ def test_sequence_manager():
     assert seq.send_window_available == False
     try:
         seq.get_send_seq()
-        assert False, "Should raise"
+        raise AssertionError("Should raise")
     except RuntimeError:
         pass
 

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from core.config import AppConfig
 from core.engine.master import MasterEngine, MasterEvent
@@ -39,7 +40,7 @@ class EngineSession:
         assert role in ("master", "slave")
         self.role = role
         self.config = config
-        self.engine: Optional[MasterEngine | SlaveEngine] = None
+        self.engine: MasterEngine | SlaveEngine | None = None
         self.pending_response: dict = {}
         self.simulation = False
         self._on_event = on_event

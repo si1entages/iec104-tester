@@ -1,11 +1,10 @@
 """ASDU编解码测试."""
 
-import pytest
 from core.protocol.asdu import ASDU, ASDUBuilder
 from core.protocol.types import (
-    TypeID, COT, CP56Time2a,
-    ParameterCommandNormalized, ParameterCommandScaled as ParamCmdScaled,
-    ParameterCommandFloat, ParameterActivation,
+    COT,
+    CP56Time2a,
+    TypeID,
 )
 
 

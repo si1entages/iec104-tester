@@ -12,13 +12,8 @@ import argparse
 import asyncio
 import logging
 import signal
-import sys
-from pathlib import Path
 
-from core.engine.multi_station import (
-    MultiStationManager, MultiStationConfig, StationConfig
-)
-from core.config import load_config
+from core.engine.multi_station import MultiStationConfig, MultiStationManager, StationConfig
 
 logger = logging.getLogger("iec104.multi_station")
 
@@ -56,7 +51,7 @@ def load_multi_station_config(config_path: str) -> MultiStationConfig:
     """从YAML文件加载多站配置."""
     import yaml
 
-    with open(config_path, 'r', encoding='utf-8') as f:
+    with open(config_path, encoding='utf-8') as f:
         data = yaml.safe_load(f)
 
     config = MultiStationConfig()

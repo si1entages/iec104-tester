@@ -24,13 +24,16 @@
     python capture_tool.py show session.i104 --filter "frame_type=I direction=RX"
 """
 
-import sys
-import os
-import asyncio
 import argparse
+import asyncio
 import logging
+import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.capture import FrameFilter
 
 project_root = Path(__file__).parent
 if str(project_root) not in sys.path:
@@ -74,8 +77,8 @@ async def cmd_record(args):
             reconnect=True,
         )
     else:
-        from core.engine.slave import SlaveEngine
         from core.data.point_table import PointTable
+        from core.engine.slave import SlaveEngine
         pt = PointTable()
         pt.generate_demo_points(yx_count=100, yc_count=50)
         engine = SlaveEngine(
@@ -99,7 +102,7 @@ async def cmd_record(args):
 
     print(f"🔴 Recording: {output}")
     print(f"   Mode: {args.mode} | Host: {args.host}:{args.port}")
-    print(f"   Press Ctrl+C to stop\n")
+    print("   Press Ctrl+C to stop\n")
 
     recorder.start(output, description=f"{args.mode} session", format=format)
 
@@ -129,7 +132,7 @@ async def cmd_record(args):
 
 async def cmd_play(args):
     """回放报文."""
-    from core.capture import PacketPlayer, FrameFilter
+    from core.capture import PacketPlayer
 
     player = PacketPlayer()
     count = player.load(args.file)
@@ -164,13 +167,13 @@ async def cmd_play(args):
         return
 
     # 异步回放
-    print(f"\n▶ Playing...\n")
+    print("\n▶ Playing...\n")
 
     def on_frame(frame, index):
         _print_frame(frame, index)
 
     def on_complete():
-        print(f"\n✅ Playback complete")
+        print("\n✅ Playback complete")
 
     await player.play(on_frame=on_frame, on_complete=on_complete)
 
@@ -182,7 +185,8 @@ async def cmd_play(args):
 def cmd_analyze(args):
     """分析报文."""
     import json
-    from core.capture import CaptureFile, CaptureAnalyzer
+
+    from core.capture import CaptureAnalyzer, CaptureFile
 
     header, frames = CaptureFile.load(args.file)
     analyzer = CaptureAnalyzer()
@@ -224,7 +228,7 @@ def cmd_analyze(args):
         print(result.session_summary)
 
         if result.anomalies:
-            print(f"\n⚠️  Anomalies:")
+            print("\n⚠️  Anomalies:")
             for a in result.anomalies[:20]:
                 icon = "❌" if a.severity == "error" else "⚠️"
                 print(f"  {icon} [{a.timestamp:.3f}s] {a.description}")
@@ -232,7 +236,7 @@ def cmd_analyze(args):
                 print(f"  ... and {len(result.anomalies) - 20} more")
 
         if result.u_frame_details:
-            print(f"\n🔄 U-Frame Timeline:")
+            print("\n🔄 U-Frame Timeline:")
             for u in result.u_frame_details[:20]:
                 print(f"  {u['direction']} {u['function']} @ {u['timestamp']:.3f}s")
 
@@ -243,7 +247,7 @@ def cmd_analyze(args):
 
 def cmd_show(args):
     """显示录制内容."""
-    from core.capture import CaptureFile, FrameFilter
+    from core.capture import CaptureFile
 
     header, frames = CaptureFile.load(args.file)
     print(f"📂 File: {args.file}")

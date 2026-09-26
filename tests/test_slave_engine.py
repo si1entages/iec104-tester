@@ -14,20 +14,32 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import asyncio
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from core.engine.slave import SlaveEngine, SlaveEvent
-from core.protocol.apci import APCICodec, APCI
-from core.protocol.asdu import ASDU, ASDUBuilder, InformationObject
-from core.protocol.types import (
-    TypeID, COT, QualityDescriptor,
-    SinglePoint, DoublePoint, ShortFloat, CP56Time2a,
-    SingleCommand, DoubleCommand, RegulatingStepCommand,
-    InitializationEnd,
-)
-from core.data.point_table import PointTable, YxPointDef, YcPointDef
+import pytest
 
+from core.data.point_table import PointTable, YcPointDef, YxPointDef
+from core.engine.slave import SlaveEngine, SlaveEvent
+from core.protocol.apci import APCICodec
+from core.protocol.asdu import ASDU, InformationObject
+from core.protocol.types import (
+    COT,
+    CP56Time2a,
+    DoubleCommand,
+    ParameterActivation,
+    ParameterCommandNormalized,
+    RegulatingStepCommand,
+    SingleCommand,
+    TypeID,
+)
+
+
+def _param_normalized(value: float = 0.5, param_change: int = 1) -> ParameterCommandNormalized:
+    return ParameterCommandNormalized(ioa=100, value=value, param_change=param_change)
+
+
+def _param_activation(qualifier: int = 1) -> ParameterActivation:
+    return ParameterActivation(qualifier=qualifier)
 
 # ── Fixtures ─────────────────────────────────────────────────────
 
@@ -478,6 +490,84 @@ class TestSlaveEngineCommands:
         await slave_engine._handle_regulating_command(state, asdu)
 
         assert mock_connection.send_frame.call_count >= 2
+
+
+# ── 复位进程 / 参数命令过程测试 ─────────────────────────────────
+
+class TestSlaveEngineResetAndParameter:
+    """复位进程与参数命令的过程补全测试."""
+
+    @pytest.mark.asyncio
+    async def test_handle_reset_process_actcon_only(self, slave_engine, mock_connection):
+        """复位进程: 只回 ACTCON (标准无 ACTTERM)."""
+        await slave_engine.start()
+        slave_engine._on_client_connected(mock_connection)
+        state = slave_engine._client_states[mock_connection.name]
+        state.data_transfer_enabled = True
+
+        asdu = ASDU(
+            type_id=TypeID.C_RP_NA_1, sq=False, num=1,
+            cot=COT.ACT, common_addr=1,
+        )
+        asdu.objects.append(InformationObject(ioa=0, data=bytes([1])))
+
+        await slave_engine._handle_reset_process(state, asdu)
+
+        mock_connection.send_frame.assert_called_once()
+        frame = mock_connection.send_frame.call_args[0][0]
+        decoded = ASDU.decode(frame[6:])
+        assert decoded.cot == COT.ACTCON
+
+    @pytest.mark.asyncio
+    async def test_parameter_load_then_activate(self, slave_engine, mock_connection):
+        """参数装载 → ACTCON; 随后激活 → ACTCON + ACTTERM."""
+        await slave_engine.start()
+        slave_engine._on_client_connected(mock_connection)
+        state = slave_engine._client_states[mock_connection.name]
+        state.data_transfer_enabled = True
+
+        # 装载 P_ME_NA_1
+        load = ASDU(
+            type_id=TypeID.P_ME_NA_1, sq=False, num=1,
+            cot=COT.ACT, common_addr=1,
+        )
+        load.objects.append(InformationObject(ioa=100, data=_param_normalized()))
+        await slave_engine._handle_parameter_command(state, load)
+        assert 100 in state.loaded_parameters
+
+        mock_connection.send_frame.reset_mock()
+
+        # 激活 P_AC_NA_1
+        act = ASDU(
+            type_id=TypeID.P_AC_NA_1, sq=False, num=1,
+            cot=COT.ACT, common_addr=1,
+        )
+        act.objects.append(InformationObject(ioa=100, data=_param_activation(1)))
+        await slave_engine._handle_parameter_command(state, act)
+
+        cots = [ASDU.decode(c[0][0][6:]).cot for c in mock_connection.send_frame.call_args_list]
+        assert COT.ACTCON in cots
+        assert COT.ACTTERM in cots
+
+    @pytest.mark.asyncio
+    async def test_parameter_activate_without_load_is_nacked(self, slave_engine, mock_connection):
+        """未装载直接激活 → 否定确认 (COT bit6 P/N=1)."""
+        await slave_engine.start()
+        slave_engine._on_client_connected(mock_connection)
+        state = slave_engine._client_states[mock_connection.name]
+        state.data_transfer_enabled = True
+
+        act = ASDU(
+            type_id=TypeID.P_AC_NA_1, sq=False, num=1,
+            cot=COT.ACT, common_addr=1,
+        )
+        act.objects.append(InformationObject(ioa=200, data=_param_activation(1)))
+        await slave_engine._handle_parameter_command(state, act)
+
+        frame = mock_connection.send_frame.call_args[0][0]
+        decoded = ASDU.decode(frame[6:])
+        assert decoded.cot == COT.ACTCON
+        assert decoded.pn is True
 
 
 # ── 数据变化上送测试 ─────────────────────────────────────────────

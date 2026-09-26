@@ -1,6 +1,5 @@
 """状态机测试."""
 
-import pytest
 from core.protocol.state_machine import ConnectionStateMachine
 
 

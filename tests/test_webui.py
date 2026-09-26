@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import shutil
+import subprocess
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
@@ -10,6 +14,8 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from webui.bridge import EngineBridge
 from webui.server import create_app
+
+_MASTER_HTML = Path(__file__).parent.parent / "webui" / "static" / "master.html"
 
 
 @pytest_asyncio.fixture
@@ -351,3 +357,81 @@ async def test_sim_toggle_requires_listen(master_client):
     r = await client.post("/api/slave/sim", json={"enabled": True})
     body = await r.json()
     assert body["ok"] is False
+
+
+# ── Nit D: 前端 QOI 非法值校验 ───────────────────────────────────
+
+def test_master_html_qoi_guard_present():
+    """master.html 应对 QOI 做 1-16/20 校验，且校验先于发请求（非法值不发）."""
+    html = _MASTER_HTML.read_text(encoding="utf-8")
+    assert "function isValidQoi(" in html, "缺少 isValidQoi 校验函数"
+
+    handler = html.split('$("#btn-gi-qoi").onclick', 1)[1].split("};", 1)[0]
+    assert "isValidQoi(" in handler, "处理器未调用 isValidQoi"
+    guard_pos = handler.index("isValidQoi(")
+    api_pos = handler.index('api("/api/master/gi"')
+    assert guard_pos < api_pos, "校验必须早于发请求"
+    assert "return" in handler[:api_pos], "非法值应提前 return，不发请求"
+
+
+_QOI_BEHAVIOUR_JS = r"""
+const fs = require('fs');
+const html = fs.readFileSync(process.env.MASTER_HTML, 'utf8');
+
+const fn = html.match(/function isValidQoi\(v\)\s*\{[\s\S]*?\n\}/);
+const handlerSrc = html.match(/\$\("#btn-gi-qoi"\)\.onclick\s*=\s*async\s*\(\)\s*=>\s*\{[\s\S]*?\n\};/);
+if (!fn || !handlerSrc) { console.log('FAIL:extract'); process.exit(2); }
+eval(fn[0]);
+
+const el = {};
+global.$ = (s) => (el[s] ??= {});
+let calls = [];
+let toasts = [];
+global.api = async (u, p) => { calls.push([u, p]); return { ok: true }; };
+global.toast = (m) => toasts.push(m);
+eval(handlerSrc[0]);
+
+const truth = [[1,true],[16,true],[20,true],[17,false],[18,false],[19,false],
+               [0,false],[21,false],[1.5,false],['',false]];
+let bad = '';
+for (const [v, exp] of truth) {
+  if (isValidQoi(v) !== exp) bad += `isValidQoi(${JSON.stringify(v)})!=${exp};`;
+}
+
+(async () => {
+  const run = async (v) => {
+    el['#qoi'] = { value: v };
+    calls = []; toasts = [];
+    await el['#btn-gi-qoi'].onclick();
+    return { calls, toasts };
+  };
+  let r = await run('17');
+  if (r.calls.length !== 0) bad += '17-sent;';
+  if (!(r.toasts.length === 1 && r.toasts[0].includes('1-16'))) bad += '17-no-toast;';
+  r = await run('19');
+  if (r.calls.length !== 0) bad += '19-sent;';
+  r = await run('');
+  if (r.calls.length !== 0) bad += 'empty-sent;';
+  r = await run('1');
+  if (!(r.calls.length === 1 && r.calls[0][0] === '/api/master/gi' && r.calls[0][1].qoi === 1)) bad += '1-wrong;';
+  r = await run('20');
+  if (!(r.calls.length === 1 && r.calls[0][1].qoi === 20)) bad += '20-wrong;';
+  console.log(bad ? 'FAIL:' + bad : 'OK');
+  process.exit(bad ? 1 : 0);
+})();
+"""
+
+
+def test_master_html_qoi_behavioural():
+    """Nit D 行为级验证 (需 node): 输入 17 不发请求且出提示；1/16/20 正常发."""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node 不可用，跳过 JS 行为级验证")
+    env = {**os.environ, "MASTER_HTML": str(_MASTER_HTML)}
+    proc = subprocess.run(
+        [node, "-e", _QOI_BEHAVIOUR_JS],
+        capture_output=True, text=True, timeout=30, env=env,
+        cwd=str(_MASTER_HTML.parent.parent),
+    )
+    assert proc.returncode == 0, f"stdout={proc.stdout}\nstderr={proc.stderr}"
+    assert "OK" in proc.stdout

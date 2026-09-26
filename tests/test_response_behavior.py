@@ -1,7 +1,7 @@
 """响应行为配置单元测试."""
 
-from core.engine.slave import ResponseBehavior, SlaveEngine
 from core.data.point_table import PointTable
+from core.engine.slave import ResponseBehavior, SlaveEngine
 
 
 def test_response_behavior_from_dict():

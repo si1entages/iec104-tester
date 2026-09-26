@@ -13,12 +13,12 @@
   <img src="https://img.shields.io/badge/WebUI-aiohttp-41CD52" alt="Web UI">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/IEC--104-Complete-brightgreen.svg" alt="IEC 104">
-  <img src="https://img.shields.io/badge/Tests-235+-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-371-brightgreen.svg" alt="Tests">
 </p>
 
 ---
 
-工业级 IEC 60870-5-104 协议测试工具：主站/子站**双窗口 Web UI**（可同时打开联调），协议引擎完整，附多站并发、报文录制回放、网络异常模拟、YAML 自动化测试。
+工业级 IEC 60870-5-104 协议测试工具：主站/子站**浏览器 Web UI**（纯 web 形态，浏览器作为唯一界面，可同时开两个标签页联调），协议引擎完整，附多站并发、报文录制回放、网络异常模拟、YAML 自动化测试。
 
 ## ✨ 功能特性
 
@@ -51,7 +51,7 @@
 
 ### 测试
 
-- 单元 + 集成：`pytest tests/`（**235+**，含 Web API）
+- 单元 + 集成：`pytest tests/`（**371**，含 Web API 与协议符合性用例）
 - 一致性：`tests/conformance/test_conformance.py`（42 用例）
 - 脚本：`run_tests.py tests/scripts/`（YAML 动作 + 断言）
 
@@ -60,17 +60,20 @@
 ```bash
 pip install -r requirements.txt
 
-# 主站 / 子站 Web UI（可同时开）
-python apps/web_slave.py --http-port 8766
-python apps/web_master.py --http-port 8765
-# 或一键双窗口
-python apps/web_lab.py
+# 启动主站 / 子站 Web 服务（各自自动打开浏览器）
+python app.py --mode master    # 主站，默认 http://127.0.0.1:8765/
+python app.py --mode slave     # 子站，默认 http://127.0.0.1:8766/
 
-# 浏览器打开 http://127.0.0.1:8765/ 与 http://127.0.0.1:8766/
-# （已安装 pywebview 时自动弹出桌面窗口）
+# 或使用瘦入口脚本（等价）
+python apps/web_master.py
+python apps/web_slave.py
+
+# 无窗口/服务器场景：不自动开浏览器，仅打印地址
+python app.py --mode master --no-browser --http-port 8765
 ```
 
-联调：子站「启动监听」→ 主站「连本地」→「立即总召」。
+服务启动后会在默认浏览器自动打开对应页面；用 `--no-browser` 可关闭自动打开。
+联调：开两个终端分别启动主站与子站 → 子站页「启动监听」→ 主站页「连本地」→「立即总召」。
 
 ## 📦 安装
 
@@ -84,7 +87,7 @@ venv\Scripts\pip install -r requirements.txt
 pip install -r requirements.txt
 ```
 
-依赖：`PyYAML`、`aiohttp`、`pywebview`（可选，桌面壳）。开发测试另需 `pytest`、`pytest-asyncio`。
+依赖：`PyYAML`、`aiohttp`。开发测试另需 `pytest`、`pytest-asyncio`。
 
 ## 💻 命令行
 
@@ -125,7 +128,7 @@ python sim_tool.py --preset poor_wifi --mode master --host 127.0.0.1
 | `--test` | 测试脚本文件/目录 | — |
 | `--log-level` | DEBUG…ERROR | INFO |
 
-Web 入口另支持 `--http-port`（默认主站 8765、子站 8766）。
+Web UI 入口另支持 `--http-port`（默认主站 8765、子站 8766）与 `--no-browser`（不自动打开浏览器）。
 
 ## ⚙️ 配置
 
@@ -165,7 +168,7 @@ python run_multi_station.py --stations 5
 ```
 iec104-tester/
 ├── app.py                 # CLI/Web 兼容入口
-├── apps/                  # web_master / web_slave / web_lab
+├── apps/                  # 瘦入口 web_master / web_slave
 ├── webui/                 # aiohttp REST+WS + 静态工业深色 UI
 │   ├── bridge.py          # 引擎桥
 │   ├── server.py
@@ -190,7 +193,7 @@ MIT — 见 [LICENSE](LICENSE)。
 ## 🙏 致谢
 
 - [IEC 60870-5-104](https://webstore.iec.ch/en/publication/6270)
-- [aiohttp](https://docs.aiojs.org/) · [pywebview](https://pywebview.flowrl.com/)
+- [aiohttp](https://docs.aiojs.org/)
 
 ---
 

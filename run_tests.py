@@ -15,11 +15,11 @@
     python run_tests.py tests/scripts/ -v
 """
 
-import sys
-import os
-import asyncio
 import argparse
+import asyncio
 import logging
+import os
+import sys
 from pathlib import Path
 
 # 确保项目根目录在 sys.path
@@ -39,7 +39,7 @@ def setup_logging(level: str = "INFO") -> None:
 
 async def run_scripts(args) -> int:
     """执行测试脚本，返回退出码 (0=全部通过, 1=有失败)."""
-    from core.testing import TestRunner, ReportGenerator
+    from core.testing import ReportGenerator, TestRunner
 
     runner = TestRunner(report_dir=args.report_dir)
 
@@ -80,8 +80,7 @@ async def run_scripts(args) -> int:
               f"({test_result.duration_s:.2f}s, "
               f"{test_result.passed}/{test_result.total} passed)")
 
-    runner._on_step_complete = on_step
-    runner._on_test_complete = on_test
+    runner.set_callbacks(on_step_complete=on_step, on_test_complete=on_test)
 
     # 执行
     print(f"\n{'=' * 60}")

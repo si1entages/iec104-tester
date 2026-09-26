@@ -15,18 +15,24 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import asyncio
+from collections import deque
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
 from core.engine.master import MasterEngine, MasterEvent
-from core.protocol.apci import APCICodec, APCI
-from core.protocol.asdu import ASDU, ASDUBuilder, InformationObject
+from core.protocol.apci import APCICodec
+from core.protocol.asdu import ASDU, InformationObject
 from core.protocol.types import (
-    TypeID, COT, QualityDescriptor,
-    SinglePoint, DoublePoint, ShortFloat, CP56Time2a,
-    SingleCommand, DoubleCommand,
+    COT,
+    CP56Time2a,
+    DoublePoint,
+    QualityDescriptor,
+    ShortFloat,
+    SingleCommand,
+    SinglePoint,
+    TypeID,
 )
-
 
 # ── Fixtures ─────────────────────────────────────────────────────
 
@@ -101,8 +107,12 @@ class TestMasterEngineInit:
         assert master_engine._raw_frame_callback is None
         assert master_engine._recorder is None
         assert master_engine._timer_task is None
-        assert master_engine._rx_buffer == []
-        assert master_engine._tx_buffer == []
+        assert isinstance(master_engine._rx_buffer, deque)
+        assert master_engine._rx_buffer.maxlen == 1000
+        assert len(master_engine._rx_buffer) == 0
+        assert isinstance(master_engine._tx_buffer, deque)
+        assert master_engine._tx_buffer.maxlen == 1000
+        assert len(master_engine._tx_buffer) == 0
 
     def test_properties(self, master_engine):
         """测试属性访问."""
@@ -228,9 +238,15 @@ class TestMasterEngineInterrogation:
 
     @pytest.mark.asyncio
     async def test_general_interrogation_group(self, running_engine, mock_tcp_client):
-        """测试组召唤."""
+        """测试组召唤 — 帧上 QOI 采用标准值 (20+组号)."""
         await running_engine.general_interrogation(qoi=1)  # 第1组
         mock_tcp_client.send.assert_called_once()
+
+        frame = mock_tcp_client.send.call_args[0][0]
+        asdu = ASDU.decode(frame[6:])
+        assert asdu.type_id == TypeID.C_IC_NA_1
+        assert asdu.cot == COT.ACT
+        assert asdu.objects[0].data[0] == 21  # 第1组 → 标准 QOI = 20 + 1
 
     @pytest.mark.asyncio
     async def test_general_interrogation_fires_event(self, running_engine, mock_tcp_client):

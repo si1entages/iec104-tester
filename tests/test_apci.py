@@ -1,11 +1,15 @@
 """APCI帧编解码测试."""
 
-import pytest
-from core.protocol.constants import (
-    START_BYTE, U_STARTDT_ACT, U_STARTDT_CON, U_STOPDT_ACT,
-    U_STOPDT_CON, U_TESTFR_ACT, U_TESTFR_CON,
-)
 from core.protocol.apci import APCICodec
+from core.protocol.constants import (
+    START_BYTE,
+    U_STARTDT_ACT,
+    U_STARTDT_CON,
+    U_STOPDT_ACT,
+    U_STOPDT_CON,
+    U_TESTFR_ACT,
+    U_TESTFR_CON,
+)
 
 
 def test_apci_u_frame():

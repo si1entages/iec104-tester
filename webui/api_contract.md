@@ -9,7 +9,7 @@
 | GET | `/api/recent` | — | 最近 frames/events |
 | POST | `/api/master/start` | host,port,addr,reconnect? | |
 | POST | `/api/master/stop` | — | |
-| POST | `/api/master/gi` | qoi? (int 1–23\|20) | 默认 20 总召 |
+| POST | `/api/master/gi` | qoi? (int 1–16=组召唤 \| 20=站召唤) | 默认 20 站召唤；组召唤帧上 QOI=20+组号(21–36) |
 | POST | `/api/master/clock` / `ci` / `reset` / `test` | — | |
 | POST | `/api/master/read` | ioa:int | |
 | POST | `/api/master/yk` | ioa,state,select?,double? | |
@@ -29,4 +29,4 @@
 | GET | `/api/export/session.json` | — | frames+events+status |
 | WS | `/ws` | — | snapshot / frame / event |
 
-前端常量表：`static/js/api.js`。
+前端 API 封装：`static/js/app.js` 内的 `api()`（经 `window.IEC104` 暴露）。

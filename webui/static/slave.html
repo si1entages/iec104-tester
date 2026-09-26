@@ -94,8 +94,8 @@
   <section class="bottom" id="bottom">
     <div class="bottom-tabs"><span class="muted">报文 / 事件</span></div>
     <div class="bottom-body">
-      <div class="feed" id="feed-frames"></div>
-      <div class="feed" id="feed-events"></div>
+      <div class="feed" id="feed-frames" role="log" aria-label="报文流"></div>
+      <div class="feed" id="feed-events" role="log" aria-label="事件流"></div>
     </div>
   </section>
 
@@ -107,7 +107,6 @@
     <span id="st-clients"></span>
   </footer>
 </div>
-<script type="module" src="/static/js/api.js"></script>
 <script src="/static/js/app.js"></script>
 <script>
 IEC104.state.role = "slave";

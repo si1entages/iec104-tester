@@ -7,8 +7,8 @@ import socket
 
 import pytest
 
-from core.engine.multi_station import MultiStationManager, MultiStationConfig, StationConfig
 from core.engine.master import MasterEngine
+from core.engine.multi_station import MultiStationConfig, MultiStationManager, StationConfig
 
 
 def _free_port() -> int:

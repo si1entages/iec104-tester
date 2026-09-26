@@ -50,8 +50,9 @@
       <div class="card">
         <h4>系统命令</h4>
         <div class="row">
-          <span class="muted">QOI 1–23组 / 20总召</span>
-          <input id="qoi" type="number" min="1" max="23" value="20" />
+          <span class="muted">1–16=组召唤 / 20=站召唤</span>
+          <input id="qoi" type="number" min="1" max="20" value="20"
+                 title="合法取值：1-16（组召唤）或 20（站召唤）" />
           <button class="btn" id="btn-gi-qoi">召唤</button>
         </div>
         <div class="row">
@@ -112,8 +113,8 @@
   <section class="bottom" id="bottom">
     <div class="bottom-tabs"><span class="muted">报文 / 事件</span></div>
     <div class="bottom-body">
-      <div class="feed" id="feed-frames"></div>
-      <div class="feed" id="feed-events"></div>
+      <div class="feed" id="feed-frames" role="log" aria-label="报文流"></div>
+      <div class="feed" id="feed-events" role="log" aria-label="事件流"></div>
     </div>
   </section>
 
@@ -124,7 +125,6 @@
     <span id="st-points">点 0</span>
   </footer>
 </div>
-<script type="module" src="/static/js/api.js"></script>
 <script src="/static/js/app.js"></script>
 <script>
 IEC104.state.role = "master";
@@ -132,6 +132,14 @@ IEC104.bindTabs();
 IEC104.connectWs();
 
 const { api, toast } = IEC104;
+
+// QOI 合法取值：1-16（组召唤）或 20（站召唤）。
+// 17-19 等空缺值 / 非整数 / 空值均非法（后端 general_interrogation 会抛 ValueError）。
+function isValidQoi(v) {
+  const n = Number(v);
+  return Number.isInteger(n) && ((n >= 1 && n <= 16) || n === 20);
+}
+
 $("#btn-conn").onclick = async () => {
   const r = await api("/api/master/start", {
     host: $("#host").value, port: +$("#port").value, addr: +$("#addr").value,
@@ -156,7 +164,12 @@ $("#btn-gi").onclick = async () => {
   toast(r.ok ? "总召唤已发" : r.error || "失败");
 };
 $("#btn-gi-qoi").onclick = async () => {
-  const r = await api("/api/master/gi", { qoi: +$("#qoi").value || 20 });
+  const raw = $("#qoi").value;
+  if (!isValidQoi(raw)) {
+    toast("QOI 仅支持 1-16（组召唤）或 20（站召唤）");
+    return;
+  }
+  const r = await api("/api/master/gi", { qoi: Number(raw) });
   toast(r.ok ? "召唤已发" : r.error || "失败");
 };
 $("#btn-ci").onclick = async () => {

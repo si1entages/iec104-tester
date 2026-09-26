@@ -1,11 +1,17 @@
 """数据类型编解码测试."""
 
-import pytest
 from core.protocol.types import (
+    BitString32,
+    CounterValue,
+    CP24Time2a,
+    CP56Time2a,
+    DoublePoint,
+    NormalizedValue,
     QualityDescriptor,
-    SinglePoint, DoublePoint, NormalizedValue, ScaledValue, ShortFloat,
-    CounterValue, CP56Time2a, CP24Time2a,
-    BitString32, StepPosition,
+    ScaledValue,
+    ShortFloat,
+    SinglePoint,
+    StepPosition,
 )
 
 
