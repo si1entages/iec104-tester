@@ -15,9 +15,9 @@
     inject_conditions(engine, condition)
 """
 
-from .conditions import NetworkCondition, ConditionPreset
-from .proxy import NetworkProxy
+from .conditions import ConditionPreset, NetworkCondition
 from .manager import SimulationManager
+from .proxy import NetworkProxy
 
 __all__ = [
     "NetworkCondition",

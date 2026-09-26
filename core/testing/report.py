@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import json
-import time
 from pathlib import Path
-from typing import Optional
 
-from .context import TestResult, StepResult, TestStatus, StepStatus
+from .context import StepStatus, TestResult, TestStatus
 
 
 class ReportGenerator:
@@ -133,7 +131,6 @@ class ReportGenerator:
     @staticmethod
     def _to_html(result: TestResult) -> str:
         status_color = "#a6e3a1" if result.status == TestStatus.PASSED else "#f38ba8"
-        status_bg = "#1e1e2e"
 
         steps_html = ""
         for step in result.steps:
@@ -227,7 +224,7 @@ class ReportGenerator:
             if step.status == StepStatus.FAILED:
                 failure = ET.SubElement(testcase, "failure")
                 failure.set("message", step.message)
-                failure.set("type", "AssertionError")
+                failure.set("type", "AssertionFailed")
             elif step.status == StepStatus.ERROR:
                 error = ET.SubElement(testcase, "error")
                 error.set("message", step.message)

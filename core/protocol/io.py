@@ -6,29 +6,57 @@
 
 from __future__ import annotations
 
-import struct
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from .types import (
-    TypeID, COT, QualityDescriptor,
-    SinglePoint, DoublePoint, StepPosition,
-    NormalizedValue, ScaledValue, ShortFloat,
-    CounterValue, BitString32,
-    SingleCommand, DoubleCommand,
-    SetpointCommandN, SetpointCommandS, SetpointCommandScaled,
-    RegulatingStepCommand, BitString32Command,
-    InterrogationCommand, CounterInterrogationCommand,
-    ReadCommand, ClockSyncCommand,
-    TestCommand, TestCommandWithTime, TestCommandBitPattern,
-    ResetProcessCommand, DelayCommand,
-    InitializationEnd, ProtectionEvent, GroupSinglePointWithStatus,
-    ParameterCommandNormalized, ParameterCommandScaled as ParamCmdScaled,
-    ParameterCommandFloat, ParameterCommandNormalizedNoQuality,
+    AckFileSection,
+    BitString32,
+    BitString32Command,
+    CallDirectory,
+    ClockSyncCommand,
+    CounterInterrogationCommand,
+    CounterValue,
+    CP56Time2a,
+    DelayCommand,
+    DirectoryEntry,
+    DoubleCommand,
+    DoublePoint,
+    FileReady,
+    FileReadyAck,
+    FileSegment,
+    FileSelectCallGet,
+    GroupSinglePointWithStatus,
+    InitializationEnd,
+    InterrogationCommand,
+    LastSection,
+    NormalizedValue,
     ParameterActivation,
-    FileReady, SectionReady, CallDirectory, LastSection, AckFileSection,
-    FileSegment, DirectoryEntry, FileSelectCallGet, FileReadyAck, SectionReadyAck,
-    CP24Time2a, CP56Time2a,
+    ParameterCommandFloat,
+    ParameterCommandNormalized,
+    ParameterCommandNormalizedNoQuality,
+    ProtectionEvent,
+    QualityDescriptor,
+    ReadCommand,
+    RegulatingStepCommand,
+    ResetProcessCommand,
+    ScaledValue,
+    SectionReady,
+    SectionReadyAck,
+    SetpointCommandN,
+    SetpointCommandS,
+    SetpointCommandScaled,
+    ShortFloat,
+    SingleCommand,
+    SinglePoint,
+    StepPosition,
+    TestCommand,
+    TestCommandBitPattern,
+    TestCommandWithTime,
+    TypeID,
+)
+from .types import (
+    ParameterCommandScaled as ParamCmdScaled,
 )
 
 
@@ -41,7 +69,7 @@ class ParsedIO:
     value: Any = None               # 原始值对象
     display_value: str = ""         # 显示用字符串
     quality: QualityDescriptor = field(default_factory=QualityDescriptor)
-    time_tag: Optional[CP56Time2a] = None
+    time_tag: CP56Time2a | None = None
     raw_bytes: bytes = b""
 
     @property
@@ -186,7 +214,7 @@ def format_value_display(type_id: TypeID, value: Any) -> str:
         return f"原因={value.cause_str}"
     elif isinstance(value, ParameterCommandNormalized):
         return f"值={value.value:.6f} 变更={value.param_change}"
-    elif isinstance(value, ParameterCommandScaled):
+    elif isinstance(value, ParamCmdScaled):
         return f"值={value.value} 变更={value.param_change}"
     elif isinstance(value, ParameterCommandFloat):
         return f"值={value.value:.4f} 变更={value.param_change}"
@@ -235,7 +263,7 @@ def get_value_quality(value: Any) -> QualityDescriptor:
     return QualityDescriptor()
 
 
-def get_value_timestamp(value: Any) -> Optional[CP56Time2a]:
+def get_value_timestamp(value: Any) -> CP56Time2a | None:
     """从信息对象值中提取时标."""
     if hasattr(value, 'time_tag'):
         return value.time_tag

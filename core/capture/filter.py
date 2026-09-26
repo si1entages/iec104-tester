@@ -15,8 +15,12 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.capture.format import FrameEntry
 
 logger = logging.getLogger("iec104.capture.filter")
 
@@ -29,33 +33,33 @@ class FrameFilter:
     """
 
     # 方向过滤
-    direction: Optional[str] = None  # "rx" / "tx" / None(全部)
+    direction: str | None = None  # "rx" / "tx" / None(全部)
 
     # 帧类型过滤
-    frame_type: Optional[str] = None  # "I" / "S" / "U" / None(全部)
+    frame_type: str | None = None  # "I" / "S" / "U" / None(全部)
 
     # 时间范围（相对于录制开始的秒数）
-    time_start: Optional[float] = None
-    time_end: Optional[float] = None
+    time_start: float | None = None
+    time_end: float | None = None
 
     # ASDU 类型标识 (int)
-    asdu_type: Optional[int] = None
+    asdu_type: int | None = None
 
     # 传送原因 (int)
-    cot: Optional[int] = None
+    cot: int | None = None
 
     # 公共地址 (int)
-    common_addr: Optional[int] = None
+    common_addr: int | None = None
 
     # 信息对象地址 (int) — 检查帧中是否包含此 IOA
-    ioa: Optional[int] = None
+    ioa: int | None = None
 
     # 帧长度范围
-    min_length: Optional[int] = None
-    max_length: Optional[int] = None
+    min_length: int | None = None
+    max_length: int | None = None
 
     # 自定义过滤函数
-    custom: Optional[Callable[["FrameEntry"], bool]] = None
+    custom: Callable[[FrameEntry], bool] | None = None
 
     def apply(self, frames: list) -> list:
         """应用过滤器，返回匹配的帧列表."""
@@ -120,7 +124,6 @@ class FrameFilter:
 
             asdu = frame_data[6:]
             type_id = asdu[0]
-            vsq = asdu[1]
             cot = asdu[2] & 0x3F
             common_addr = asdu[4] | (asdu[5] << 8)
 

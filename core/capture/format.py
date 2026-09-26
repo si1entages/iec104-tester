@@ -34,7 +34,6 @@ import struct
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
 
 # 格式常量
 MAGIC = b"I104"
@@ -132,7 +131,7 @@ class FrameEntry:
         return header + meta_bytes + self.frame_data
 
     @classmethod
-    def decode_from(cls, data: bytes, offset: int = 0) -> tuple[Optional[FrameEntry], int]:
+    def decode_from(cls, data: bytes, offset: int = 0) -> tuple[FrameEntry | None, int]:
         """从二进制解码. 返回 (entry, new_offset) 或 (None, offset) 如果数据不足."""
         min_size = 14  # 8+1+1+2+2
         if len(data) - offset < min_size:
@@ -265,7 +264,7 @@ class CaptureFile:
     def load_json(path: str | Path) -> tuple[FileHeader, list[FrameEntry]]:
         """加载 JSON 格式."""
         path = Path(path)
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
 
         header_data = data.get("header", {})

@@ -12,7 +12,6 @@ from __future__ import annotations
 import logging
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Optional
 
 from .format import FrameEntry
 
@@ -168,14 +167,25 @@ class CaptureAnalyzer:
             30: "M_SP_TB_1", 31: "M_DP_TB_1", 36: "M_ME_TF_1", 37: "M_IT_TB_1",
             45: "C_SC_NA_1", 46: "C_DC_NA_1", 47: "C_RC_NA_1",
             48: "C_SE_NA_1", 49: "C_SE_NB_1", 50: "C_SE_NC_1",
+            58: "C_SC_TA_1", 59: "C_DC_TA_1", 60: "C_RC_TA_1",
+            61: "C_SE_TA_1", 62: "C_SE_TB_1", 63: "C_SE_TC_1", 64: "C_BO_TA_1",
             100: "C_IC_NA_1", 101: "C_CI_NA_1", 103: "C_CS_NA_1",
             104: "C_TS_NA_1", 105: "C_RP_NA_1",
         }
         cot_names = {
             0: "NOT_USED", 1: "PERIODIC", 2: "BACK", 3: "SPONT", 4: "INIT",
             5: "REQ", 6: "ACT", 7: "ACTCON", 8: "DEACT", 9: "DEACTCON",
-            10: "ACTTERM", 20: "INTROGEN",
+            10: "ACTTERM", 11: "RETREM", 12: "RETLOC", 13: "FILE",
+            20: "INTROGEN", 37: "COUNTER_REQ",
+            42: "UNKNOWN_TYPE", 43: "UNKNOWN_COT", 44: "UNKNOWN_CA",
+            45: "UNKNOWN_IOA",
         }
+        # 组召唤响应: COT 21-36 (第1-16组)
+        for _g in range(1, 17):
+            cot_names[20 + _g] = f"INTROGEN_GROUP_{_g}"
+        # 累计量分组响应: COT 38-41 (第1-4组)
+        for _g in range(1, 5):
+            cot_names[37 + _g] = f"COUNTER_GROUP_{_g}"
 
         stats.asdu_type_counts = {
             type_names.get(k, f"type_{k}"): v
@@ -213,7 +223,6 @@ class CaptureAnalyzer:
             # I帧序列号检查
             if (cf & 0x01) == 0:
                 tx_seq = (f.frame_data[2] >> 1) | (f.frame_data[3] << 7)
-                rx_seq = (f.frame_data[4] >> 1) | (f.frame_data[5] << 7)
 
                 if f.direction == 0:  # RX
                     if prev_rx_seq >= 0 and tx_seq != prev_rx_seq + 1:
@@ -298,7 +307,7 @@ class CaptureAnalyzer:
 
     # ── ASDU 解析 ─────────────────────────────────────────────────
 
-    def _parse_asdu_header(self, frame_data: bytes) -> Optional[dict]:
+    def _parse_asdu_header(self, frame_data: bytes) -> dict | None:
         """解析 ASDU 头部信息."""
         try:
             if len(frame_data) < 12:
@@ -323,7 +332,7 @@ class CaptureAnalyzer:
     def _build_summary(self, result: AnalysisResult) -> str:
         s = result.stats
         lines = [
-            f"📊 Capture Analysis",
+            "📊 Capture Analysis",
             f"   Frames: {s.total_frames} (I={s.i_frames}, S={s.s_frames}, U={s.u_frames})",
             f"   Direction: RX={s.rx_frames}, TX={s.tx_frames}",
             f"   Bytes: {s.total_bytes:,} (RX={s.rx_bytes:,}, TX={s.tx_bytes:,})",
@@ -339,6 +348,6 @@ class CaptureAnalyzer:
             errors = sum(1 for a in result.anomalies if a.severity == "error")
             lines.append(f"   ⚠️ Anomalies: {warnings} warnings, {errors} errors")
         else:
-            lines.append(f"   ✅ No anomalies detected")
+            lines.append("   ✅ No anomalies detected")
 
         return "\n".join(lines)

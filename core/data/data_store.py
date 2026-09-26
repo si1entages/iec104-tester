@@ -13,15 +13,13 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any
 
 from ..protocol.types import (
-    QualityDescriptor, SinglePoint, DoublePoint,
-    NormalizedValue, ScaledValue, ShortFloat,
-    CounterValue, CP56Time2a,
+    QualityDescriptor,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════
 #  实时数据点
@@ -150,7 +148,6 @@ class RealtimeDB:
 
     def init_from_point_table(self, point_table) -> None:
         """从点表初始化实时数据库."""
-        from .point_table import PointTable
         with self._lock:
             for p in point_table.get_all_yx():
                 self._yx[p.ioa] = YxData(
@@ -242,7 +239,7 @@ class RealtimeDB:
             self._total_updates += 1
             return changed
 
-    def get_yx(self, ioa: int) -> Optional[YxData]:
+    def get_yx(self, ioa: int) -> YxData | None:
         with self._lock:
             return self._yx.get(ioa)
 
@@ -296,7 +293,7 @@ class RealtimeDB:
             self._total_updates += 1
             return changed
 
-    def get_yc(self, ioa: int) -> Optional[YcData]:
+    def get_yc(self, ioa: int) -> YcData | None:
         with self._lock:
             return self._yc.get(ioa)
 
@@ -325,7 +322,7 @@ class RealtimeDB:
             elif command in ("execute", "cancel"):
                 point.select_pending = False
 
-    def get_yk(self, ioa: int) -> Optional[YkData]:
+    def get_yk(self, ioa: int) -> YkData | None:
         with self._lock:
             return self._yk.get(ioa)
 
@@ -371,7 +368,7 @@ class RealtimeDB:
             self._total_updates += 1
             return changed
 
-    def get_ym(self, ioa: int) -> Optional[YmData]:
+    def get_ym(self, ioa: int) -> YmData | None:
         with self._lock:
             return self._ym.get(ioa)
 

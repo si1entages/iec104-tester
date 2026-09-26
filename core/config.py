@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
@@ -145,7 +144,7 @@ def load_config(path: str | Path) -> AppConfig:
     if not Path(path).exists():
         return cfg
 
-    with open(path, 'r', encoding='utf-8') as f:
+    with open(path, encoding='utf-8') as f:
         data = yaml.safe_load(f) or {}
 
     cfg.mode = data.get('mode', cfg.mode)
@@ -185,6 +184,8 @@ def load_config(path: str | Path) -> AppConfig:
     cfg.display.theme = disp.get('theme', cfg.display.theme)
     cfg.display.language = disp.get('language', cfg.display.language)
     cfg.display.max_log_lines = disp.get('max_log_lines', cfg.display.max_log_lines)
+    cfg.display.hex_view_bytes_per_line = disp.get('hex_view_bytes_per_line', cfg.display.hex_view_bytes_per_line)
+    cfg.display.table_page_size = disp.get('table_page_size', cfg.display.table_page_size)
     cfg.display.refresh_interval_ms = disp.get('refresh_interval_ms', cfg.display.refresh_interval_ms)
 
     pt = data.get('point_table', {})

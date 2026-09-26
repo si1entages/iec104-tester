@@ -9,32 +9,56 @@ ASDU 结构:
 
 from __future__ import annotations
 
-import struct
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, ClassVar
 
 from .constants import (
-    VSQ_SQ_BIT, VSQ_NUM_MASK,
+    VSQ_NUM_MASK,
+    VSQ_SQ_BIT,
 )
 from .types import (
-    TypeID, COT, QualityDescriptor,
-    SinglePoint, DoublePoint, StepPosition,
-    NormalizedValue, ScaledValue, ShortFloat,
-    CounterValue, BitString32,
-    SingleCommand, DoubleCommand,
-    SetpointCommandN, SetpointCommandS,
-    CP24Time2a, CP56Time2a,
-    QualifierOfInterrogation, QualifierOfCounterInterrogation,
-    RegulatingStepCommand, BitString32Command,
-    SetpointCommandScaled,
-    ProtectionEvent, GroupSinglePointWithStatus,
-    InitializationEnd,
-    TestCommandBitPattern,
-    ParameterCommandNormalized, ParameterCommandScaled as ParamCmdScaled, ParameterCommandFloat,
-    ParameterCommandNormalizedNoQuality, ParameterActivation,
-    FileReady, SectionReady, CallDirectory, LastSection, AckFileSection,
-    FileSegment, DirectoryEntry, FileSelectCallGet, FileReadyAck, SectionReadyAck,
+    COT,
+    AckFileSection,
+    BitString32,
+    BitString32Command,
+    CallDirectory,
     ClockSyncCommand,
+    CounterValue,
+    CP24Time2a,
+    CP56Time2a,
+    DirectoryEntry,
+    DoubleCommand,
+    DoublePoint,
+    FileReady,
+    FileReadyAck,
+    FileSegment,
+    FileSelectCallGet,
+    GroupSinglePointWithStatus,
+    InitializationEnd,
+    LastSection,
+    NormalizedValue,
+    ParameterActivation,
+    ParameterCommandFloat,
+    ParameterCommandNormalized,
+    ParameterCommandNormalizedNoQuality,
+    ProtectionEvent,
+    QualityDescriptor,
+    RegulatingStepCommand,
+    ScaledValue,
+    SectionReady,
+    SectionReadyAck,
+    SetpointCommandN,
+    SetpointCommandS,
+    SetpointCommandScaled,
+    ShortFloat,
+    SingleCommand,
+    SinglePoint,
+    StepPosition,
+    TestCommandBitPattern,
+    TypeID,
+)
+from .types import (
+    ParameterCommandScaled as ParamCmdScaled,
 )
 
 
@@ -43,7 +67,7 @@ class InformationObject:
     """信息对象 — ASDU 的基本数据单元."""
     ioa: int = 0                # 信息对象地址 (1-3字节)
     data: Any = None            # 具体数据 (SinglePoint/NormalizedValue/etc.)
-    time_tag: Optional[CP56Time2a] = None  # 时标（可选）
+    time_tag: CP56Time2a | None = None  # 时标（可选）
 
 
 @dataclass
@@ -52,142 +76,23 @@ class ASDU:
     type_id: TypeID = TypeID.M_SP_NA_1
     sq: bool = False            # 结构限定词: True=连续, False=单独
     num: int = 1                # 信息对象数量
-    cot: int = COT.SPONT        # 传送原因
+    cot: int = COT.SPONT        # 传送原因 (bit0-5: 原因码)
+    pn: bool = False            # 否定确认标志 (COT bit6): False=肯定, True=否定
     origin_addr: int = 0        # 发起地址
     common_addr: int = 1        # 公共地址 (站地址)
     objects: list[InformationObject] = field(default_factory=list)
 
-    # ── 编码 ────────────────────────────────────────────────────────
-
-    def encode(self) -> bytes:
-        """编码 ASDU 为字节序列."""
-        buf = bytearray()
-
-        # Type ID
-        buf.append(self.type_id)
-
-        # VSQ
-        vsq = self.num & VSQ_NUM_MASK
-        if self.sq:
-            vsq |= VSQ_SQ_BIT
-        buf.append(vsq)
-
-        # COT (2 bytes: cause + origin)
-        buf.append(self.cot & 0x7F)  # 保留bit6 (P/N位)
-        buf.append(self.origin_addr & 0xFF)
-
-        # Common Address (2 bytes, little-endian)
-        buf.append(self.common_addr & 0xFF)
-        buf.append((self.common_addr >> 8) & 0xFF)
-
-        # Information Objects
-        for i, obj in enumerate(self.objects):
-            # IOA (3 bytes, little-endian) — 仅在非SQ模式或第一个对象时写入
-            if not self.sq or i == 0:
-                ioa = obj.ioa + i if self.sq else obj.ioa
-                buf.append(ioa & 0xFF)
-                buf.append((ioa >> 8) & 0xFF)
-                buf.append((ioa >> 16) & 0xFF)
-
-            # Data
-            if obj.data is not None:
-                buf.extend(self._encode_data(obj.data))
-
-            # Time tag
-            if obj.time_tag is not None:
-                buf.extend(obj.time_tag.to_bytes())
-
-        return bytes(buf)
-
-    def _encode_data(self, data: Any) -> bytes:
-        """编码信息对象数据."""
-        if hasattr(data, 'to_bytes'):
-            return data.to_bytes()
-        elif isinstance(data, bytes):
-            return data
-        raise TypeError(f"Cannot encode data type: {type(data)}")
-
-    # ── 解码 ────────────────────────────────────────────────────────
+    # ── 类级缓存（lazy init）──────────────────────────────────────
+    _DECODERS: ClassVar[dict | None] = None
+    _TIMED_TYPES: ClassVar[set | None] = None
+    _CP56_TYPES: ClassVar[set | None] = None
 
     @classmethod
-    def decode(cls, data: bytes, ca_length: int = 2) -> ASDU:
-        """从字节序列解码 ASDU.
-
-        Args:
-            data: ASDU 字节数据（不含APCI头）
-            ca_length: 公共地址长度 (1或2)
-        """
-        if len(data) < 4 + ca_length:
-            raise ValueError(f"ASDU too short: {len(data)} bytes")
-
-        pos = 0
-
-        # Type ID
-        type_id = TypeID(data[pos]); pos += 1
-
-        # VSQ
-        vsq = data[pos]; pos += 1
-        sq = bool(vsq & VSQ_SQ_BIT)
-        num = vsq & VSQ_NUM_MASK
-
-        # COT
-        cot = data[pos] & 0x7F; pos += 1  # 保留bit6 (P/N位)
-        origin_addr = data[pos]; pos += 1
-
-        # Common Address
-        if ca_length == 2:
-            common_addr = data[pos] | (data[pos + 1] << 8); pos += 2
-        else:
-            common_addr = data[pos]; pos += 1
-
-        asdu = cls(
-            type_id=type_id,
-            sq=sq,
-            num=num,
-            cot=cot,
-            origin_addr=origin_addr,
-            common_addr=common_addr,
-        )
-
-        # Information Objects
-        ioa_size = 3  # 标准IOA长度3字节
-        remaining = data[pos:]
-        base_ioa = 0
-
-        for i in range(num):
-            # SQ=1: 仅第一个对象有IOA字段，后续对象地址 = base + i
-            if not sq or i == 0:
-                if len(remaining) < ioa_size:
-                    break
-                base_ioa = remaining[0] | (remaining[1] << 8) | (remaining[2] << 16)
-                remaining = remaining[ioa_size:]
-
-            ioa = base_ioa + i if sq else base_ioa
-
-            # Data + Time tag
-            obj_data, time_tag, consumed = cls._decode_object_data(
-                type_id, remaining, cot
-            )
-
-            asdu.objects.append(InformationObject(
-                ioa=ioa,
-                data=obj_data,
-                time_tag=time_tag,
-            ))
-            remaining = remaining[consumed:]
-
-        return asdu
-
-    @classmethod
-    def _decode_object_data(cls, type_id: TypeID, data: bytes, cot: int
-                             ) -> tuple[Any, Optional[CP56Time2a], int]:
-        """解码信息对象的数据部分.
-
-        Returns:
-            (data, time_tag, consumed_bytes)
-        """
-        # 根据类型标识确定数据长度和解析方式
-        handlers = {
+    def _ensure_decoders(cls) -> None:
+        """延迟初始化解码器字典和类型集合，避免每次调用重建."""
+        if cls._DECODERS is not None:
+            return
+        cls._DECODERS = {
             # ── 单点信息 ──
             TypeID.M_SP_NA_1: (1, lambda d: SinglePoint.from_bytes(d)),
             TypeID.M_SP_TA_1: (1, lambda d: SinglePoint.from_bytes(d)),
@@ -236,6 +141,15 @@ class ASDU:
             TypeID.C_SE_NC_1: (5, lambda d: SetpointCommandS.from_bytes(d)),
             TypeID.C_BO_NA_1: (4, lambda d: BitString32Command.from_bytes(d)),
 
+            # ── 控制命令（带时标 CP56Time2a，数据体 = 命令 + 7字节时标）──
+            TypeID.C_SC_TA_1: (1, lambda d: SingleCommand.from_bytes(d)),
+            TypeID.C_DC_TA_1: (1, lambda d: DoubleCommand.from_bytes(d)),
+            TypeID.C_RC_TA_1: (1, lambda d: RegulatingStepCommand.from_bytes(d)),
+            TypeID.C_SE_TA_1: (3, lambda d: SetpointCommandN.from_bytes(d)),
+            TypeID.C_SE_TB_1: (3, lambda d: SetpointCommandScaled.from_bytes(d)),
+            TypeID.C_SE_TC_1: (5, lambda d: SetpointCommandS.from_bytes(d)),
+            TypeID.C_BO_TA_1: (4, lambda d: BitString32Command.from_bytes(d)),
+
             # ── 系统命令 ──
             TypeID.C_IC_NA_1: (1, lambda d: d),      # 总召唤
             TypeID.C_CI_NA_1: (1, lambda d: d),      # 累计量召唤
@@ -252,13 +166,13 @@ class ASDU:
             # ── 32比特串（带时标）──
             TypeID.M_BO_TA_1: (4, lambda d: BitString32.from_bytes(d)),
 
-            # ── 继电保护事件 ──
+            # ── 继电保护事件（数据体 = SEP/QDP 2+1 字节，时标由通用时标机制追加）──
             TypeID.M_EP_TA_1: (3, lambda d: ProtectionEvent.from_bytes_short_time(d)),
-            TypeID.M_EP_TB_1: (5, lambda d: ProtectionEvent.from_bytes_short_time(d)),
-            TypeID.M_EP_TC_1: (4, lambda d: ProtectionEvent.from_bytes_short_time(d)),
+            TypeID.M_EP_TB_1: (3, lambda d: ProtectionEvent.from_bytes_short_time(d)),
+            TypeID.M_EP_TC_1: (3, lambda d: ProtectionEvent.from_bytes_short_time(d)),
             TypeID.M_EP_TD_1: (3, lambda d: ProtectionEvent.from_bytes_long_time(d)),
-            TypeID.M_EP_TE_1: (5, lambda d: ProtectionEvent.from_bytes_long_time(d)),
-            TypeID.M_EP_TF_1: (4, lambda d: ProtectionEvent.from_bytes_long_time(d)),
+            TypeID.M_EP_TE_1: (3, lambda d: ProtectionEvent.from_bytes_long_time(d)),
+            TypeID.M_EP_TF_1: (3, lambda d: ProtectionEvent.from_bytes_long_time(d)),
 
             # ── 成组单点 ──
             TypeID.M_PS_NA_1: (2, lambda d: GroupSinglePointWithStatus.from_bytes(d)),
@@ -289,9 +203,7 @@ class ASDU:
             TypeID.F_FR_NB_1: (7, lambda d: FileReadyAck.from_bytes(d)),
             TypeID.F_SR_NB_1: (8, lambda d: SectionReadyAck.from_bytes(d)),
         }
-
-        # 带时标的类型
-        timed_types = {
+        cls._TIMED_TYPES = {
             TypeID.M_SP_TA_1, TypeID.M_SP_TB_1,
             TypeID.M_DP_TA_1, TypeID.M_DP_TB_1,
             TypeID.M_ST_TA_1, TypeID.M_ST_TB_1,
@@ -303,23 +215,232 @@ class ASDU:
             TypeID.M_EP_TA_1, TypeID.M_EP_TB_1, TypeID.M_EP_TC_1,
             TypeID.M_EP_TD_1, TypeID.M_EP_TE_1, TypeID.M_EP_TF_1,
             TypeID.M_PS_TB_1,
+            TypeID.C_SC_TA_1, TypeID.C_DC_TA_1, TypeID.C_RC_TA_1,
+            TypeID.C_SE_TA_1, TypeID.C_SE_TB_1, TypeID.C_SE_TC_1,
+            TypeID.C_BO_TA_1,
         }
-
-        # 使用CP56Time2a的类型
-        cp56_types = {
+        cls._CP56_TYPES = {
             TypeID.M_SP_TB_1, TypeID.M_DP_TB_1,
             TypeID.M_ST_TB_1, TypeID.M_BO_TB_1,
             TypeID.M_ME_TD_1, TypeID.M_ME_TE_1,
             TypeID.M_ME_TF_1, TypeID.M_IT_TB_1,
             TypeID.M_EP_TD_1, TypeID.M_EP_TE_1, TypeID.M_EP_TF_1,
             TypeID.M_PS_TB_1,
+            TypeID.C_SC_TA_1, TypeID.C_DC_TA_1, TypeID.C_RC_TA_1,
+            TypeID.C_SE_TA_1, TypeID.C_SE_TB_1, TypeID.C_SE_TC_1,
+            TypeID.C_BO_TA_1,
         }
 
-        if type_id not in handlers:
+    # ── 编码 ────────────────────────────────────────────────────────
+
+    def encode(self) -> bytes:
+        """编码 ASDU 为字节序列."""
+        buf = bytearray()
+
+        # Type ID
+        buf.append(self.type_id)
+
+        # VSQ
+        vsq = self.num & VSQ_NUM_MASK
+        if self.sq:
+            vsq |= VSQ_SQ_BIT
+        buf.append(vsq)
+
+        # COT (2 bytes: cause + origin)
+        # bit0-5: 传送原因码; bit6: P/N 否定确认; bit7: T 测试位 (本实现不使用)
+        cot_byte = (self.cot & 0x3F) | (0x40 if self.pn else 0)
+        buf.append(cot_byte)
+        buf.append(self.origin_addr & 0xFF)
+
+        # Common Address (2 bytes, little-endian)
+        buf.append(self.common_addr & 0xFF)
+        buf.append((self.common_addr >> 8) & 0xFF)
+
+        # Information Objects
+        for i, obj in enumerate(self.objects):
+            # IOA (3 bytes, little-endian) — 仅在非SQ模式或第一个对象时写入
+            if not self.sq or i == 0:
+                ioa = obj.ioa + i if self.sq else obj.ioa
+                buf.append(ioa & 0xFF)
+                buf.append((ioa >> 8) & 0xFF)
+                buf.append((ioa >> 16) & 0xFF)
+
+            # Data
+            if obj.data is not None:
+                buf.extend(self._encode_data(obj.data, self.type_id))
+
+            # Time tag
+            if obj.time_tag is not None:
+                buf.extend(obj.time_tag.to_bytes())
+
+        return bytes(buf)
+
+    def _encode_data(self, data: Any, type_id: TypeID | None = None) -> bytes:
+        """编码信息对象数据.
+
+        Args:
+            data: 待编码对象
+            type_id: 所属类型标识（用于区分同结构但长度不同的类型，如 M_ME_ND_1）
+        """
+        # M_ME_ND_1: 测量值不带品质描述词 — 仅 2 字节 NVA，无 QDS
+        if type_id == TypeID.M_ME_ND_1:
+            raw = data.to_bytes()
+            return raw[:2]
+        if hasattr(data, 'to_bytes'):
+            return data.to_bytes()
+        elif isinstance(data, bytes):
+            return data
+        raise TypeError(f"Cannot encode data type: {type(data)}")
+
+    # ── 解码 ────────────────────────────────────────────────────────
+
+    @classmethod
+    def decode(cls, data: bytes, ca_length: int = 2) -> ASDU:
+        """从字节序列解码 ASDU.
+
+        Args:
+            data: ASDU 字节数据（不含APCI头）
+            ca_length: 公共地址长度 (1或2)
+        """
+        if len(data) < 4 + ca_length:
+            raise ValueError(f"ASDU too short: {len(data)} bytes")
+
+        pos = 0
+
+        # Type ID
+        type_id = TypeID(data[pos])
+        pos += 1
+
+        # VSQ
+        vsq = data[pos]
+        pos += 1
+        sq = bool(vsq & VSQ_SQ_BIT)
+        num = vsq & VSQ_NUM_MASK
+
+        # COT (bit0-5: 原因码, bit6: P/N 否定确认, bit7: T 测试位)
+        cot_byte = data[pos]
+        pn = bool(cot_byte & 0x40)
+        cot = cot_byte & 0x3F
+        pos += 1
+        origin_addr = data[pos]
+        pos += 1
+
+        # Common Address
+        if ca_length == 2:
+            common_addr = data[pos] | (data[pos + 1] << 8)
+            pos += 2
+        else:
+            common_addr = data[pos]
+            pos += 1
+
+        asdu = cls(
+            type_id=type_id,
+            sq=sq,
+            num=num,
+            cot=cot,
+            pn=pn,
+            origin_addr=origin_addr,
+            common_addr=common_addr,
+        )
+
+        # Information Objects
+        ioa_size = 3  # 标准IOA长度3字节
+        remaining = data[pos:]
+        base_ioa = 0
+
+        for i in range(num):
+            # SQ=1: 仅第一个对象有IOA字段，后续对象地址 = base + i
+            if not sq or i == 0:
+                if len(remaining) < ioa_size:
+                    break
+                base_ioa = remaining[0] | (remaining[1] << 8) | (remaining[2] << 16)
+                remaining = remaining[ioa_size:]
+
+            ioa = base_ioa + i if sq else base_ioa
+
+            # Data + Time tag
+            obj_data, time_tag, consumed = cls._decode_object_data(
+                type_id, remaining, cot
+            )
+
+            asdu.objects.append(InformationObject(
+                ioa=ioa,
+                data=obj_data,
+                time_tag=time_tag,
+            ))
+            remaining = remaining[consumed:]
+
+        return asdu
+
+    @classmethod
+    def decode_header(cls, data: bytes, ca_length: int = 2) -> ASDU:
+        """仅解析 ASDU 头部（TypeID / VSQ / COT+PN / CA），不解析信息体.
+
+        用于信息体类型未知或无法解析时仍能提取头部字段，以便按标准
+        回送 "未知类型标识/未知传送原因/未知公共地址" 应答。
+
+        Args:
+            data: ASDU 字节数据（不含APCI头）
+            ca_length: 公共地址长度 (1或2)
+
+        Returns:
+            仅含头部字段、objects 为空的 ASDU；
+            未知 TypeID 时 type_id 保存原始整数值。
+        """
+        if len(data) < 4 + ca_length:
+            raise ValueError(f"ASDU too short: {len(data)} bytes")
+
+        pos = 0
+
+        raw_type = data[pos]
+        pos += 1
+        try:
+            type_id: Any = TypeID(raw_type)
+        except ValueError:
+            type_id = raw_type  # 未知类型标识：保留原始整数值
+
+        vsq = data[pos]
+        pos += 1
+        sq = bool(vsq & VSQ_SQ_BIT)
+        num = vsq & VSQ_NUM_MASK
+
+        cot_byte = data[pos]
+        pn = bool(cot_byte & 0x40)
+        cot = cot_byte & 0x3F
+        pos += 1
+        origin_addr = data[pos]
+        pos += 1
+
+        if ca_length == 2:
+            common_addr = data[pos] | (data[pos + 1] << 8)
+        else:
+            common_addr = data[pos]
+
+        return cls(
+            type_id=type_id,
+            sq=sq,
+            num=num,
+            cot=cot,
+            pn=pn,
+            origin_addr=origin_addr,
+            common_addr=common_addr,
+        )
+
+    @classmethod
+    def _decode_object_data(cls, type_id: TypeID, data: bytes, cot: int
+                             ) -> tuple[Any, CP56Time2a | None, int]:
+        """解码信息对象的数据部分.
+
+        Returns:
+            (data, time_tag, consumed_bytes)
+        """
+        cls._ensure_decoders()
+
+        if type_id not in cls._DECODERS:
             # 未知类型 — 跳过
             return None, None, 0
 
-        data_size, decoder = handlers[type_id]
+        data_size, decoder = cls._DECODERS[type_id]
 
         # 可变长度类型（如FileSegment）
         if data_size == -1:
@@ -338,21 +459,16 @@ class ASDU:
 
         # 时标
         time_tag = None
-        if type_id in timed_types:
-            if type_id in cp56_types:
+        if type_id in cls._TIMED_TYPES:
+            if type_id in cls._CP56_TYPES:
                 if len(data) >= consumed + 7:
                     time_tag = CP56Time2a.from_bytes(data, consumed)
                     consumed += 7
             else:
-                # CP24Time2a (旧类型) - 使用正确的解码方法
+                # CP24Time2a (短时标, 3 字节) — 保持原始类型，
+                # 避免转换为 CP56Time2a 后回编码时标长度由 3 膨胀为 7
                 if len(data) >= consumed + 3:
-                    cp24 = CP24Time2a.from_bytes(data, consumed)
-                    # 转换为CP56Time2a格式以便统一处理
-                    time_tag = CP56Time2a(
-                        millisecond=cp24.millisecond,
-                        minute=cp24.minute,
-                        invalid=cp24.invalid
-                    )
+                    time_tag = CP24Time2a.from_bytes(data, consumed)
                     consumed += 3
 
         return obj_data, time_tag, consumed
@@ -372,7 +488,7 @@ class ASDUBuilder:
 
         Args:
             common_addr: 站地址
-            qoi: 限定词 (20=站召唤, 1-16=组召唤)
+            qoi: 限定词 (20=站召唤, 21-36=第1-16组召唤)
             cot: 传送原因
         """
         asdu = ASDU(
@@ -404,7 +520,7 @@ class ASDUBuilder:
         )
 
     @staticmethod
-    def build_clock_sync(common_addr: int, time_tag: Optional[CP56Time2a] = None) -> bytes:
+    def build_clock_sync(common_addr: int, time_tag: CP56Time2a | None = None) -> bytes:
         """构造时钟同步命令 (C_CS_NA_1)."""
         if time_tag is None:
             time_tag = CP56Time2a.now()
@@ -417,13 +533,12 @@ class ASDUBuilder:
         )
         asdu.objects.append(InformationObject(
             ioa=0,
-            data=time_tag.to_bytes(),
             time_tag=time_tag,
         ))
         return asdu.encode()
 
     @staticmethod
-    def build_clock_sync_ack(common_addr: int, time_tag: Optional[CP56Time2a] = None) -> bytes:
+    def build_clock_sync_ack(common_addr: int, time_tag: CP56Time2a | None = None) -> bytes:
         """构造时钟同步确认."""
         if time_tag is None:
             time_tag = CP56Time2a.now()
@@ -436,7 +551,6 @@ class ASDUBuilder:
         )
         asdu.objects.append(InformationObject(
             ioa=0,
-            data=time_tag.to_bytes(),
             time_tag=time_tag,
         ))
         return asdu.encode()
@@ -801,6 +915,105 @@ class ASDUBuilder:
         asdu.objects.append(InformationObject(ioa=ioa, data=bc))
         return asdu.encode()
 
+    # ── 带时标 CP56Time2a 的控制命令 (TypeID 58-64) ──────────────
+
+    @staticmethod
+    def build_single_command_with_time(common_addr: int, ioa: int, state: bool,
+                                        select: bool = False, qu: int = 0,
+                                        time_tag: CP56Time2a | None = None) -> bytes:
+        """构造带时标单命令 (C_SC_TA_1)."""
+        if time_tag is None:
+            time_tag = CP56Time2a.now()
+        asdu = ASDU(type_id=TypeID.C_SC_TA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        asdu.objects.append(InformationObject(
+            ioa=ioa, data=SingleCommand(ioa=ioa, state=state, select=select, qu=qu),
+            time_tag=time_tag,
+        ))
+        return asdu.encode()
+
+    @staticmethod
+    def build_double_command_with_time(common_addr: int, ioa: int, state: int,
+                                        select: bool = False, qu: int = 0,
+                                        time_tag: CP56Time2a | None = None) -> bytes:
+        """构造带时标双命令 (C_DC_TA_1)."""
+        if time_tag is None:
+            time_tag = CP56Time2a.now()
+        asdu = ASDU(type_id=TypeID.C_DC_TA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        asdu.objects.append(InformationObject(
+            ioa=ioa, data=DoubleCommand(ioa=ioa, state=state, select=select, qu=qu),
+            time_tag=time_tag,
+        ))
+        return asdu.encode()
+
+    @staticmethod
+    def build_regulating_step_command_with_time(common_addr: int, ioa: int, state: int,
+                                                 select: bool = False, qu: int = 0,
+                                                 time_tag: CP56Time2a | None = None) -> bytes:
+        """构造带时标升降命令 (C_RC_TA_1)."""
+        if time_tag is None:
+            time_tag = CP56Time2a.now()
+        asdu = ASDU(type_id=TypeID.C_RC_TA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        asdu.objects.append(InformationObject(
+            ioa=ioa, data=RegulatingStepCommand(ioa=ioa, state=state, select=select, qu=qu),
+            time_tag=time_tag,
+        ))
+        return asdu.encode()
+
+    @staticmethod
+    def build_setpoint_normalized_with_time(common_addr: int, ioa: int, value: float,
+                                             select: bool = False,
+                                             time_tag: CP56Time2a | None = None) -> bytes:
+        """构造带时标归一化设点命令 (C_SE_TA_1)."""
+        if time_tag is None:
+            time_tag = CP56Time2a.now()
+        asdu = ASDU(type_id=TypeID.C_SE_TA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        asdu.objects.append(InformationObject(
+            ioa=ioa, data=SetpointCommandN(ioa=ioa, value=value, select=select),
+            time_tag=time_tag,
+        ))
+        return asdu.encode()
+
+    @staticmethod
+    def build_setpoint_scaled_with_time(common_addr: int, ioa: int, value: int,
+                                         select: bool = False,
+                                         time_tag: CP56Time2a | None = None) -> bytes:
+        """构造带时标标度化设点命令 (C_SE_TB_1)."""
+        if time_tag is None:
+            time_tag = CP56Time2a.now()
+        asdu = ASDU(type_id=TypeID.C_SE_TB_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        asdu.objects.append(InformationObject(
+            ioa=ioa, data=SetpointCommandScaled(ioa=ioa, value=value, select=select),
+            time_tag=time_tag,
+        ))
+        return asdu.encode()
+
+    @staticmethod
+    def build_setpoint_shortfloat_with_time(common_addr: int, ioa: int, value: float,
+                                             select: bool = False,
+                                             time_tag: CP56Time2a | None = None) -> bytes:
+        """构造带时标短浮点设点命令 (C_SE_TC_1)."""
+        if time_tag is None:
+            time_tag = CP56Time2a.now()
+        asdu = ASDU(type_id=TypeID.C_SE_TC_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        asdu.objects.append(InformationObject(
+            ioa=ioa, data=SetpointCommandS(ioa=ioa, value=value, select=select),
+            time_tag=time_tag,
+        ))
+        return asdu.encode()
+
+    @staticmethod
+    def build_bitstring_command_with_time(common_addr: int, ioa: int, value: int,
+                                           time_tag: CP56Time2a | None = None) -> bytes:
+        """构造带时标比特串命令 (C_BO_TA_1)."""
+        if time_tag is None:
+            time_tag = CP56Time2a.now()
+        asdu = ASDU(type_id=TypeID.C_BO_TA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        asdu.objects.append(InformationObject(
+            ioa=ioa, data=BitString32Command(ioa=ioa, value=value),
+            time_tag=time_tag,
+        ))
+        return asdu.encode()
+
     @staticmethod
     def build_read_command(common_addr: int, ioa: int) -> bytes:
         """构造读命令 (C_RD_NA_1)."""
@@ -809,7 +1022,7 @@ class ASDUBuilder:
         return asdu.encode()
 
     @staticmethod
-    def build_test_command_with_time(common_addr: int, time_tag: Optional[CP56Time2a] = None) -> bytes:
+    def build_test_command_with_time(common_addr: int, time_tag: CP56Time2a | None = None) -> bytes:
         """构造带时标测试命令 (C_TS_TA_1)."""
         if time_tag is None:
             time_tag = CP56Time2a.now()
@@ -1049,7 +1262,7 @@ class ASDUBuilder:
     @staticmethod
     def build_directory_entry(common_addr: int, ioa: int, file_name: int,
                                file_length: int, status: int = 0,
-                               time_tag: Optional[CP56Time2a] = None) -> bytes:
+                               time_tag: CP56Time2a | None = None) -> bytes:
         """构造目录 (F_DR_TA_1).
 
         Args:
@@ -1131,7 +1344,7 @@ class APDU:
     """完整 APDU = APCI + ASDU."""
     tx_seq: int = 0
     rx_seq: int = 0
-    asdu: Optional[ASDU] = None
+    asdu: ASDU | None = None
     # U-frame
     u_func: int = 0
     is_i_frame: bool = True

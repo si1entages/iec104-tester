@@ -9,14 +9,18 @@ from __future__ import annotations
 import enum
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Optional, Callable, Any
 
 from .types import (
-    TypeID, COT,
-    FileReady, SectionReady, CallDirectory, LastSection, AckFileSection,
-    FileSegment, DirectoryEntry, FileSelectCallGet, FileReadyAck, SectionReadyAck,
-    CP56Time2a,
+    AckFileSection,
+    DirectoryEntry,
+    FileReady,
+    FileReadyAck,
+    FileSegment,
+    LastSection,
+    SectionReady,
+    SectionReadyAck,
 )
 
 logger = logging.getLogger("iec104.file_transfer")
@@ -89,9 +93,9 @@ class FileTransferManager:
     def __init__(self, common_addr: int = 1):
         self._common_addr = common_addr
         self._context = FileTransferContext()
-        self._on_send_asdu: Optional[Callable[[bytes], None]] = None
-        self._on_file_received: Optional[Callable[[int, bytes], None]] = None
-        self._on_error: Optional[Callable[[str], None]] = None
+        self._on_send_asdu: Callable[[bytes], None] | None = None
+        self._on_file_received: Callable[[int, bytes], None] | None = None
+        self._on_error: Callable[[str], None] | None = None
 
     @property
     def context(self) -> FileTransferContext:
@@ -103,9 +107,9 @@ class FileTransferManager:
 
     def set_callbacks(
         self,
-        on_send_asdu: Optional[Callable[[bytes], None]] = None,
-        on_file_received: Optional[Callable[[int, bytes], None]] = None,
-        on_error: Optional[Callable[[str], None]] = None,
+        on_send_asdu: Callable[[bytes], None] | None = None,
+        on_file_received: Callable[[int, bytes], None] | None = None,
+        on_error: Callable[[str], None] | None = None,
     ):
         """设置回调函数."""
         self._on_send_asdu = on_send_asdu
@@ -139,8 +143,8 @@ class FileTransferManager:
         self._context.last_segment = data.last_segment
         self._context.state = FileTransferState.LAST_SECTION
 
-        # 传输完成
-        if data.status in (1, 2):  # 不带停止/带停止
+        # 传输完成: LS=1 表示"最后的节", LS=2 表示"最后的段"
+        if data.status in (1, 2):
             self._context.state = FileTransferState.COMPLETED
             if self._on_file_received:
                 self._on_file_received(self._context.file_name, bytes(self._context.data))
@@ -255,10 +259,16 @@ class FileTransferSlave(FileTransferManager):
         self._file_data[file_name] = data
 
     def handle_file_request(self, ioa: int, file_name: int, qualifier: int) -> None:
-        """处理文件请求."""
+        """处理文件请求.
+
+        qualifier:
+            1 = 请求读/召唤文件 → 发送 F_FR_NA_1 (文件准备就绪)
+            4 = 选择文件        → 记录选择并发送 F_FR_NA_1 (FRQ 肯定)
+            5 = 请求目录        → 发送目录 (F_DR_TA_1 序列)
+        """
         logger.info(f"File request received: file_name={file_name} qualifier={qualifier}")
 
-        if qualifier == 1:  # 请求读
+        if qualifier in (1, 4):  # 请求读 / 选择文件
             self._context.file_name = file_name
             self._context.state = FileTransferState.FILE_SELECTED
             self._context.start_time = time.monotonic()
@@ -272,6 +282,8 @@ class FileTransferSlave(FileTransferManager):
             self._send_file_ready(ioa)
         elif qualifier == 5:  # 请求目录
             self._send_directory(ioa)
+        else:
+            logger.warning(f"Unsupported file request qualifier: {qualifier}")
 
     def _send_file_ready(self, ioa: int) -> None:
         """发送文件准备就绪."""
@@ -339,11 +351,16 @@ class FileTransferSlave(FileTransferManager):
         self._send_last_section(ioa)
 
     def _send_last_section(self, ioa: int) -> None:
-        """发送最后的节."""
+        """发送最后的节 (F_LS_NA_1).
+
+        status (LS 字段): 1 = 最后的节; 2 = 最后的段。
+        本实现将整个文件作为单个节发送，故该报文标记"最后的节" → status=1。
+        主站据此判定接收完成 (见 FileTransferManager.handle_last_section)。
+        """
         from .asdu import ASDUBuilder
         asdu_data = ASDUBuilder.build_last_section(
             self._common_addr, ioa, self._context.file_name,
-            self._context.section_name, self._context.segment_number, status=0
+            self._context.section_name, self._context.segment_number, status=1
         )
         if self._on_send_asdu:
             self._on_send_asdu(asdu_data)

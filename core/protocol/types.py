@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import enum
-from dataclasses import dataclass, field
-from typing import Optional
 import time
-
+from dataclasses import dataclass, field
 
 # ═══════════════════════════════════════════════════════════════════
 #  Type Identification (类型标识)
@@ -59,6 +57,14 @@ class TypeID(enum.IntEnum):
     C_SE_NB_1 = 49      # 设点命令，标度化值
     C_SE_NC_1 = 50      # 设点命令，短浮点数
     C_BO_NA_1 = 51      # 32比特串
+    # ── 控制方向（带时标CP56Time2a的控制命令）──
+    C_SC_TA_1 = 58      # 单命令带时标CP56Time2a
+    C_DC_TA_1 = 59      # 双命令带时标CP56Time2a
+    C_RC_TA_1 = 60      # 升降命令带时标CP56Time2a
+    C_SE_TA_1 = 61      # 设点命令，归一化值，带时标CP56Time2a
+    C_SE_TB_1 = 62      # 设点命令，标度化值，带时标CP56Time2a
+    C_SE_TC_1 = 63      # 设点命令，短浮点数，带时标CP56Time2a
+    C_BO_TA_1 = 64      # 32比特串命令带时标CP56Time2a
     M_EI_NA_1 = 70  # 初始化结束
 
     # ── 系统命令 ──
@@ -113,33 +119,58 @@ class COT(enum.IntEnum):
     RETLOC      = 12    # 当地命令引起的返送信息
     FILE        = 13    # 文件传输
     # 14-19: 保留
-    INTROGEN    = 20    # 响应总召唤
-    # 21-31: 兼容范围（特殊用途）
-    # 32-47: 保留（特殊用途范围）
-    # 41: 响应第1组召唤
-    # 42: 响应第2组召唤
-    # ...
-    # 63: 响应第23组召唤
-    # 48-63: 特殊用途（由使用者约定）
+    INTROGEN    = 20    # 响应站召唤 (COT=20)
+    # 21-36: 响应第1-16组召唤 (COT = 20 + 组号)
+    COUNTER_REQ = 37    # 响应累计量总召唤（总请求）(COT=37)
+    # 38-41: 响应第1-4组累计量召唤 (COT = 37 + 组号)
+    UNKNOWN_TYPE = 42   # 未知类型标识 (IEC 60870-5-104 Table 1-72)
+    UNKNOWN_COT  = 43   # 未知传送原因
+    UNKNOWN_CA   = 44   # 未知公共地址
+    UNKNOWN_IOA  = 45   # 未知信息对象地址
+    # 46-47: 保留
 
     @classmethod
     def group_response(cls, group: int) -> int:
-        """返回组召唤响应的传送原因 (41-63)."""
-        if not 1 <= group <= 23:
-            raise ValueError(f"Group must be 1-23, got {group}")
-        return 40 + group
+        """返回第 group 组召唤响应的传送原因 (21-36).
+
+        标准 (IEC 60870-5-104 Table 1-72): 组召唤响应的 COT = 20 + 组号，
+        组号取值 1-16 → COT 21-36。
+        """
+        if not 1 <= group <= 16:
+            raise ValueError(f"Group must be 1-16, got {group}")
+        return 20 + group
 
     @classmethod
     def is_group_response(cls, cot: int) -> bool:
-        """判断传送原因是否为组召唤响应 (41-63)."""
-        return 41 <= cot <= 63
+        """判断传送原因是否为组召唤响应 (21-36)."""
+        return 21 <= cot <= 36
 
     @classmethod
     def get_group_number(cls, cot: int) -> int:
-        """从组召唤响应传送原因中提取组号 (1-23)."""
-        if not 41 <= cot <= 63:
+        """从组召唤响应传送原因中提取组号 (1-16)."""
+        if not 21 <= cot <= 36:
             raise ValueError(f"Not a group response COT: {cot}")
-        return cot - 40
+        return cot - 20
+
+    @classmethod
+    def counter_group_response(cls, group: int) -> int:
+        """返回第 group 组累计量召唤响应的传送原因 (38-41).
+
+        标准: 累计量召唤响应的 COT = 37 + 组号，组号取值 1-4 → COT 38-41。
+        """
+        if not 1 <= group <= 4:
+            raise ValueError(f"Counter group must be 1-4, got {group}")
+        return 37 + group
+
+    @classmethod
+    def is_counter_group_response(cls, cot: int) -> bool:
+        """判断传送原因是否为组累计量召唤响应 (38-41)."""
+        return 38 <= cot <= 41
+
+    @classmethod
+    def is_counter_response(cls, cot: int) -> bool:
+        """判断传送原因是否为累计量召唤响应 (37 或 38-41)."""
+        return cot == int(cls.COUNTER_REQ) or cls.is_counter_group_response(cot)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -186,10 +217,14 @@ class QualityDescriptor:
 
     def __str__(self) -> str:
         flags = []
-        if self.overflow: flags.append("OV")
-        if self.blocked:  flags.append("BL")
-        if self.not_topical: flags.append("NT")
-        if self.invalid:  flags.append("IV")
+        if self.overflow:
+            flags.append("OV")
+        if self.blocked:
+            flags.append("BL")
+        if self.not_topical:
+            flags.append("NT")
+        if self.invalid:
+            flags.append("IV")
         return "|".join(flags) if flags else "GOOD"
 
 
@@ -706,8 +741,8 @@ class ProtectionEvent:
     group_start_info: int = 0    # 成组启动信息 (M_EP_TB_1 / M_EP_TE_1)
     group_output_info: int = 0   # 成组输出电路信息 (M_EP_TC_1 / M_EP_TF_1)
     # 时标
-    time_short: Optional[CP24Time2a] = None    # M_EP_TA_1/TB_1/TC_1
-    time_long: Optional[CP56Time2a] = None     # M_EP_TD_1/TE_1/TF_1
+    time_short: CP24Time2a | None = None    # M_EP_TA_1/TB_1/TC_1
+    time_long: CP56Time2a | None = None     # M_EP_TD_1/TE_1/TF_1
 
     @classmethod
     def from_bytes_short_time(cls, data: bytes, offset: int = 0, ioa: int = 0) -> ProtectionEvent:
@@ -734,6 +769,19 @@ class ProtectionEvent:
             quality=q,
             time_long=time_tag,
         )
+
+    def to_bytes(self) -> bytes:
+        """编码继电保护事件数据体 (event 2字节 + quality 1字节).
+
+        注意: 时标 (CP24Time2a / CP56Time2a) 由 ASDU 编码层作为
+        InformationObject.time_tag 统一追加，此处**不包含时标**，
+        以避免与通用时标机制重复写入（时标长度由类型决定）。
+        """
+        return bytes([
+            self.event_value & 0xFF,
+            (self.event_value >> 8) & 0xFF,
+            self.quality.to_int(),
+        ])
 
     def to_bytes_short_time(self) -> bytes:
         result = bytes([self.event_value & 0xFF, (self.event_value >> 8) & 0xFF, self.quality.to_int()])
@@ -764,7 +812,7 @@ class GroupSinglePointWithStatus:
     """
     ioa: int = 0
     points: list = field(default_factory=list)  # list of (state: bool, detected: bool)
-    time_long: Optional[CP56Time2a] = None      # M_PS_TB_1 带时标
+    time_long: CP56Time2a | None = None      # M_PS_TB_1 带时标
 
     @classmethod
     def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0, count: int = 8) -> GroupSinglePointWithStatus:
@@ -833,7 +881,7 @@ class InitializationEnd:
 class InterrogationCommand:
     """总召唤命令 (C_IC_NA_1 = 100)."""
     ioa: int = 0
-    qoi: int = 20            # 限定词 (20=站召唤, 1-16=组召唤)
+    qoi: int = 20            # 限定词 (20=站召唤, 21-36=第1-16组召唤)
 
     @classmethod
     def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> InterrogationCommand:
@@ -846,8 +894,8 @@ class InterrogationCommand:
     def qoi_str(self) -> str:
         if self.qoi == 20:
             return "站召唤"
-        elif 1 <= self.qoi <= 16:
-            return f"第{self.qoi}组召唤"
+        elif 21 <= self.qoi <= 36:
+            return f"第{self.qoi - 20}组召唤"
         else:
             return f"未知({self.qoi})"
 
@@ -1391,6 +1439,14 @@ TYPE_REGISTRY: dict[int, type] = {
     TypeID.C_SE_NB_1: SetpointCommandScaled,
     TypeID.C_SE_NC_1: SetpointCommandS,
     TypeID.C_BO_NA_1: BitString32Command,
+    # 控制方向（带时标CP56Time2a）
+    TypeID.C_SC_TA_1: SingleCommand,
+    TypeID.C_DC_TA_1: DoubleCommand,
+    TypeID.C_RC_TA_1: RegulatingStepCommand,
+    TypeID.C_SE_TA_1: SetpointCommandN,
+    TypeID.C_SE_TB_1: SetpointCommandScaled,
+    TypeID.C_SE_TC_1: SetpointCommandS,
+    TypeID.C_BO_TA_1: BitString32Command,
     # 系统命令
     TypeID.C_IC_NA_1: InterrogationCommand,  # 总召唤命令
     TypeID.C_CI_NA_1: CounterInterrogationCommand,
@@ -1436,35 +1492,38 @@ def get_type_info(type_id: int) -> str:
 # ═══════════════════════════════════════════════════════════════════
 
 class QualifierOfInterrogation(enum.IntEnum):
-    """总召唤限定词 — IEC 60870-5-104 Table 1-75."""
-    GROUP_1 = 1        # 第1组
-    GROUP_2 = 2        # 第2组
-    GROUP_3 = 3
-    GROUP_4 = 4
-    GROUP_5 = 5
-    GROUP_6 = 6
-    GROUP_7 = 7
-    GROUP_8 = 8
-    GROUP_9 = 9
-    GROUP_10 = 10
-    GROUP_11 = 11
-    GROUP_12 = 12
-    GROUP_13 = 13
-    GROUP_14 = 14
-    GROUP_15 = 15
-    GROUP_16 = 16
+    """总召唤限定词 — IEC 60870-5-104 Table 1-75.
+
+    站召唤 QOI=20；组召唤 QOI=20+组号（第1-16组 → 21-36）。
+    """
     STATION = 20       # 站召唤（全局）
+    GROUP_1 = 21       # 第1组 (QOI=20+1)
+    GROUP_2 = 22
+    GROUP_3 = 23
+    GROUP_4 = 24
+    GROUP_5 = 25
+    GROUP_6 = 26
+    GROUP_7 = 27
+    GROUP_8 = 28
+    GROUP_9 = 29
+    GROUP_10 = 30
+    GROUP_11 = 31
+    GROUP_12 = 32
+    GROUP_13 = 33
+    GROUP_14 = 34
+    GROUP_15 = 35
+    GROUP_16 = 36      # 第16组 (QOI=20+16)
 
     @classmethod
     def is_valid(cls, qoi: int) -> bool:
-        """判断限定词是否有效 (1-16 或 20)."""
-        return (1 <= qoi <= 16) or qoi == 20
+        """判断限定词是否有效 (20 或 21-36)."""
+        return qoi == 20 or (21 <= qoi <= 36)
 
     @classmethod
-    def get_group_number(cls, qoi: int) -> Optional[int]:
+    def get_group_number(cls, qoi: int) -> int | None:
         """提取组号 (1-16), 站召唤返回 None."""
-        if 1 <= qoi <= 16:
-            return qoi
+        if 21 <= qoi <= 36:
+            return qoi - 20
         return None
 
 
@@ -1500,6 +1559,6 @@ class ConnState(enum.Enum):
 
 class APDUType(enum.Enum):
     """APDU 帧类型."""
-    I = "I-frame"
+    I = "I-frame"  # noqa: E741 — I/S/U 是 IEC 104 标准帧型命名
     S = "S-frame"
     U = "U-frame"

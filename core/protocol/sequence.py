@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from .constants import K_DEFAULT, W_DEFAULT
 
@@ -38,7 +38,7 @@ class SequenceManager:
         self._i_frame_count = 0  # 自上次S帧确认后收到的I帧数量
 
         self._lock = threading.Lock()
-        self._on_send_s_frame: Optional[Callable[[int], None]] = None
+        self._on_send_s_frame: Callable[[int], None] | None = None
 
     # ── 属性 ──────────────────────────────────────────────────────
 

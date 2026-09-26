@@ -16,33 +16,46 @@ import asyncio
 import logging
 import random
 import time
-from dataclasses import dataclass, field
-from typing import Optional, Callable, Any
+from collections import deque
+from collections.abc import Callable
+from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
-from ..protocol.apci import APCICodec, APCI
+from ..data.data_store import RealtimeDB
+from ..data.history import HistoryDB
+from ..data.point_table import PointTable
+from ..protocol.apci import APCI, APCICodec
 from ..protocol.asdu import ASDU, ASDUBuilder, InformationObject
-from ..protocol.types import (
-    TypeID, COT, ConnState,
-    SinglePoint, DoublePoint, NormalizedValue, ScaledValue, ShortFloat,
-    CounterValue, QualityDescriptor, CP56Time2a,
-    SingleCommand, DoubleCommand, RegulatingStepCommand,
-    SetpointCommandN, SetpointCommandS, SetpointCommandScaled,
-    BitString32Command,
-    QualifierOfInterrogation,
-    FileReady, SectionReady, CallDirectory, LastSection, AckFileSection,
-    FileSegment, DirectoryEntry, FileSelectCallGet, FileReadyAck, SectionReadyAck,
-    InitializationEnd,
-)
+from ..protocol.file_transfer import FileTransferSlave
 from ..protocol.sequence import SequenceManager
 from ..protocol.state_machine import ConnectionStateMachine, TimerType
-from ..transport.connection import TCPServer, TCPConnection
-from ..data.data_store import RealtimeDB
-from ..data.point_table import PointTable
-from ..data.history import HistoryDB
-from ..protocol.file_transfer import FileTransferSlave, FileTransferState
+from ..protocol.types import (
+    COT,
+    AckFileSection,
+    BitString32Command,
+    CallDirectory,
+    CP56Time2a,
+    DoubleCommand,
+    DoublePoint,
+    FileReadyAck,
+    FileSegment,
+    FileSelectCallGet,
+    InitializationEnd,
+    LastSection,
+    QualityDescriptor,
+    RegulatingStepCommand,
+    SectionReadyAck,
+    SingleCommand,
+    TypeID,
+)
+from ..transport.connection import TCPConnection, TCPServer
+from .base import EngineBase
 
 logger = logging.getLogger("iec104.slave")
+
+# 标准已定义的传送原因取值集合（用于识别"未知传送原因"）。
+_VALID_COTS: frozenset[int] = frozenset(int(member) for member in COT)
 
 
 class SlaveEvent(Enum):
@@ -90,7 +103,7 @@ class ResponseBehavior:
     testfr_interval: float = 20.0
 
     @classmethod
-    def from_dict(cls, config: dict) -> "ResponseBehavior":
+    def from_dict(cls, config: dict) -> ResponseBehavior:
         delays = config.get("delays", {}) or {}
         errors = config.get("errors", {}) or {}
         quality = config.get("quality", {}) or {}
@@ -131,7 +144,7 @@ class ResponseBehavior:
         return self.gi_delay > 0 or self.command_delay > 0 or self.data_delay > 0
 
 
-class SlaveEngine:
+class SlaveEngine(EngineBase):
     """IEC 104 子站引擎.
 
     典型使用:
@@ -142,7 +155,18 @@ class SlaveEngine:
         engine.simulate_yx_change(ioa=1, value=True)
         ...
         await engine.stop()
+
+    批量打包限制（考虑 APDU 253 字节上限）:
+        _MAX_SP_PER_FRAME = 120   # 单点遥信: 每对象1字节
+        _MAX_MV_PER_FRAME = 45    # 短浮点遥测: 每对象5字节
+        _MAX_DP_PER_FRAME = 120   # 双点遥信: 每对象1字节
+        _MAX_IT_PER_FRAME = 50    # 累计量: 每对象5字节
     """
+
+    _MAX_SP_PER_FRAME: int = 120
+    _MAX_MV_PER_FRAME: int = 45
+    _MAX_DP_PER_FRAME: int = 120
+    _MAX_IT_PER_FRAME: int = 50
 
     def __init__(
         self,
@@ -156,11 +180,12 @@ class SlaveEngine:
         t2: float = 10,
         t3: float = 20,
         max_connections: int = 16,
-        point_table: Optional[PointTable] = None,
+        point_table: PointTable | None = None,
         spontaneous_enabled: bool = True,
         event_buffer_size: int = 10000,
-        history_db: Optional[HistoryDB] = None,
+        history_db: HistoryDB | None = None,
     ):
+        super().__init__()
         self._host = host
         self._port = port
         self._common_addr = common_addr
@@ -200,23 +225,23 @@ class SlaveEngine:
         self._testfr_timer = 0.0
 
         # 回调
-        self._event_callback: Optional[EventCallback] = None
-        self._raw_frame_callback: Optional[Callable[[bytes, str, str], None]] = None
+        self._event_callback: EventCallback | None = None
+        self._raw_frame_callback: Callable[[bytes, str, str], None] | None = None
 
         # 报文录制器
         self._recorder = None
 
         # 模拟任务
-        self._simulation_task: Optional[asyncio.Task] = None
+        self._simulation_task: asyncio.Task | None = None
         self._simulation_running = False
 
         # 逐点自动变化任务
-        self._auto_change_task: Optional[asyncio.Task] = None
+        self._auto_change_task: asyncio.Task | None = None
         self._auto_change_running = False
 
         # 报文缓冲
-        self._rx_buffer: list[tuple[float, bytes, str]] = []
-        self._tx_buffer: list[tuple[float, bytes, str]] = []
+        self._rx_buffer: deque = deque(maxlen=1000)
+        self._tx_buffer: deque = deque(maxlen=1000)
 
         # 通信统计
         self._frames_sent = 0
@@ -230,35 +255,20 @@ class SlaveEngine:
         self._file_transfer.set_callbacks(
             on_send_asdu=lambda data: self._spawn(self._broadcast_i_frame(data)),
         )
-        # 后台任务引用，防止被 GC 回收
-        self._background_tasks: set[asyncio.Task] = set()
-
-    def _spawn(self, coro) -> Optional[asyncio.Task]:
-        """安全创建后台任务：保留引用并记录异常."""
-        try:
-            task = asyncio.create_task(coro)
-        except RuntimeError:
-            # 无运行中的事件循环（如同步测试环境）
-            coro.close()
-            return None
-        self._background_tasks.add(task)
-        task.add_done_callback(self._background_tasks.discard)
-
-        def _log_exc(t: asyncio.Task) -> None:
-            if t.cancelled():
-                return
-            exc = t.exception()
-            if exc is not None:
-                logger.error("Background task failed: %s", exc, exc_info=exc)
-
-        task.add_done_callback(_log_exc)
-        return task
 
     # ── 属性 ──────────────────────────────────────────────────────
 
     @property
     def is_running(self) -> bool:
         return self._server.is_running
+
+    @property
+    def host(self) -> str:
+        return self._host
+
+    @property
+    def port(self) -> int:
+        return self._port
 
     @property
     def data_store(self) -> RealtimeDB:
@@ -305,6 +315,10 @@ class SlaveEngine:
     def set_raw_frame_callback(self, callback: Callable[[bytes, str, str], None]) -> None:
         """设置原始帧回调 (data, direction, client_id)."""
         self._raw_frame_callback = callback
+
+    def get_raw_frame_callback(self) -> Callable | None:
+        """获取当前原始帧回调（供外部模块安全访问，避免直接访问私有属性）."""
+        return self._raw_frame_callback
 
     def set_response_behavior(self, config: dict | ResponseBehavior) -> None:
         """应用响应行为配置（来自 GUI 响应配置面板）。"""
@@ -397,7 +411,7 @@ class SlaveEngine:
                 pass
 
         if self._history_db:
-            self._history_db.flush()
+            await asyncio.to_thread(self._history_db.flush)
         await self._server.stop()
         logger.info("Slave engine stopped")
 
@@ -423,6 +437,9 @@ class SlaveEngine:
             seq=seq,
             state_machine=ConnectionStateMachine(
                 t0=self._t0, t1=self._t1, t2=self._t2, t3=self._t3,
+                # t0 是"连接建立超时"，仅适用于发起连接的控制站（主站）。
+                # 子站为被控站，被动接受连接，不使用 t0（标准 IEC 60870-5-104）。
+                use_t0=False,
             ),
         )
         seq.set_s_frame_callback(lambda rx_seq: self._on_s_frame_needed(state, rx_seq))
@@ -461,9 +478,7 @@ class SlaveEngine:
 
         # 记录到历史数据库
         if self._history_db:
-            frame_type = "I" if len(frame) >= 6 and (frame[2] & 0x01) == 0 else (
-                "S" if len(frame) >= 6 and (frame[2] & 0x03) == 0x01 else "U"
-            )
+            frame_type = APCICodec.frame_type_of(frame)
             self._history_db.record_frame("rx", frame, frame_type=frame_type, client_id=conn_id)
 
         state = self._client_states.get(conn_id)
@@ -512,7 +527,9 @@ class SlaveEngine:
             asdu = ASDU.decode(asdu_data)
             self._process_asdu(state, asdu)
         except Exception as e:
+            # 解码失败（多为未知类型标识）→ 解析头部后按标准回送 COT=42
             logger.error(f"ASDU decode error: {e}")
+            self._spawn(self._send_unknown_type_response(state, asdu_data))
 
         state.state_machine.on_i_frame_received()
 
@@ -591,14 +608,20 @@ class SlaveEngine:
 
     def _process_asdu(self, state: _ClientState, asdu: ASDU) -> None:
         """处理收到的 ASDU."""
+        rb = self._response_behavior
+
         # 公共地址校验（广播地址255不检查）
+        # 标准: 无法识别的公共地址 → 回送 COT=44（未知公共地址），保持连接。
         if asdu.common_addr != 255 and asdu.common_addr != self._common_addr:
             logger.warning(
                 f"Common addr mismatch: expected={self._common_addr}, got={asdu.common_addr}"
             )
+            if not rb.no_response:
+                self._spawn(self._send_standard_error(
+                    state, asdu.type_id, COT.UNKNOWN_CA, asdu.common_addr
+                ))
             return
 
-        rb = self._response_behavior
         type_id = asdu.type_id
         cot = asdu.cot
 
@@ -611,6 +634,14 @@ class SlaveEngine:
             logger.warning(
                 f"Response suppressed by config: type={type_id} cot={cot}"
             )
+            return
+
+        # 未知传送原因 → 回送 COT=43（未知传送原因），保持连接
+        if not self._is_known_cot(cot):
+            logger.warning(f"Unknown COT received: cot={cot}, type={type_id}")
+            self._spawn(self._send_standard_error(
+                state, type_id, COT.UNKNOWN_COT, asdu.common_addr
+            ))
             return
 
         # 总召唤
@@ -637,24 +668,25 @@ class SlaveEngine:
         elif type_id in (TypeID.C_TS_NA_1, TypeID.C_TS_TA_1, TypeID.C_TS_NB_1) and cot == COT.ACT:
             self._spawn(self._handle_test_command(state, asdu))
 
-        # 单命令
-        elif type_id == TypeID.C_SC_NA_1:
+        # 单命令 (含带时标 C_SC_TA_1)
+        elif type_id in (TypeID.C_SC_NA_1, TypeID.C_SC_TA_1):
             self._spawn(self._handle_single_command(state, asdu))
 
-        # 双命令
-        elif type_id == TypeID.C_DC_NA_1:
+        # 双命令 (含带时标 C_DC_TA_1)
+        elif type_id in (TypeID.C_DC_NA_1, TypeID.C_DC_TA_1):
             self._spawn(self._handle_double_command(state, asdu))
 
-        # 升降命令
-        elif type_id == TypeID.C_RC_NA_1:
+        # 升降命令 (含带时标 C_RC_TA_1)
+        elif type_id in (TypeID.C_RC_NA_1, TypeID.C_RC_TA_1):
             self._spawn(self._handle_regulating_command(state, asdu))
 
-        # 设点命令
-        elif type_id in (TypeID.C_SE_NA_1, TypeID.C_SE_NB_1, TypeID.C_SE_NC_1):
+        # 设点命令 (含带时标 C_SE_TA_1/TB_1/TC_1)
+        elif type_id in (TypeID.C_SE_NA_1, TypeID.C_SE_NB_1, TypeID.C_SE_NC_1,
+                          TypeID.C_SE_TA_1, TypeID.C_SE_TB_1, TypeID.C_SE_TC_1):
             self._spawn(self._handle_setpoint_command(state, asdu))
 
-        # 比特串命令
-        elif type_id == TypeID.C_BO_NA_1:
+        # 比特串命令 (含带时标 C_BO_TA_1)
+        elif type_id in (TypeID.C_BO_NA_1, TypeID.C_BO_TA_1):
             self._spawn(self._handle_bitstring_command(state, asdu))
 
         # 延时获得
@@ -675,6 +707,43 @@ class SlaveEngine:
 
         else:
             logger.warning(f"Unhandled ASDU: type={type_id}, cot={cot}")
+
+    @staticmethod
+    def _is_known_cot(cot: int) -> bool:
+        """判断传送原因是否为标准已定义值 (COT 枚举成员)."""
+        return int(cot) in _VALID_COTS
+
+    async def _send_standard_error(self, state: _ClientState, type_id: Any,
+                                    cot: int, common_addr: int) -> None:
+        """按标准回送错误应答 (COT=42/43/44).
+
+        ASDU 仅含头部（无信息体），携带原类型标识与公共地址，保持连接不中断。
+        标准依据: IEC 60870-5-104 Table 1-72 (COT 42/43/44)。
+        """
+        ack = ASDU(
+            type_id=type_id,
+            sq=False, num=0, cot=cot, common_addr=common_addr,
+        )
+        await self._send_i_frame(state, ack.encode())
+        logger.info(
+            f"Standard error reply sent: COT={cot}, type={type_id}, ca={common_addr}"
+        )
+
+    async def _send_unknown_type_response(self, state: _ClientState,
+                                           asdu_data: bytes) -> None:
+        """解码失败（多为未知类型标识）→ 回送 COT=42（未知类型标识）.
+
+        通过 ASDU.decode_header 仅解析头部，即使信息体类型未知也能提取
+        TypeID/COT/CA，从而按标准应答并保持连接。
+        """
+        try:
+            header = ASDU.decode_header(asdu_data)
+        except Exception as e:
+            logger.error(f"Cannot decode header for unknown-type reply: {e}")
+            return
+        await self._send_standard_error(
+            state, header.type_id, COT.UNKNOWN_TYPE, header.common_addr
+        )
 
     async def _auto_stopdt_after_start(self, state: _ClientState) -> None:
         """STARTDT 后按配置自动发送 STOPDT."""
@@ -717,20 +786,21 @@ class SlaveEngine:
         })
 
     async def _send_interrogation_data(self, state: _ClientState, qoi: int) -> None:
-        """发送总召唤数据（批量打包，SQ=1，分批发送）."""
-        cot = COT.INTROGEN if qoi == 20 else COT.group_response(qoi)
+        """发送总召唤数据（批量打包，SQ=1，分批发送）.
+
+        qoi 为收到的标准限定词: 20=站召唤; 21-36=第1-16组召唤。
+        组号 = qoi - 20；响应 COT 采用标准值 (20 或 21-36)。
+        """
+        group = COT.get_group_number(qoi) if COT.is_group_response(qoi) else None
+        cot = COT.INTROGEN if group is None else COT.group_response(group)
 
         # IEC 104 限制: VSQ 低7位最大127，APDU最大253字节
-        # 实际安全批次大小（考虑APDU长度限制）
-        MAX_SP_PER_FRAME = 120   # 单点遥信: 每对象1字节, 120+3+6=129B
-        MAX_MV_PER_FRAME = 45    # 短浮点遥测: 每对象5字节, 225+3+6=234B
-        MAX_DP_PER_FRAME = 120   # 双点遥信: 每对象1字节
-        MAX_IT_PER_FRAME = 50    # 累计量: 每对象5字节
+        # 实际安全批次大小（考虑APDU长度限制）— 使用类属性常量
 
         # ── 单点遥信打包发送 ──
         yx_points = self._point_table.get_all_yx()
-        if qoi != 20:
-            yx_points = self._point_table.get_yx_by_group(qoi)
+        if group is not None:
+            yx_points = self._point_table.get_yx_by_group(group)
 
         yx_batch = []
         for p in yx_points:
@@ -740,8 +810,8 @@ class SlaveEngine:
             if yx_data:
                 yx_batch.append((p.ioa, yx_data.value, self._apply_quality(yx_data.quality.to_int())))
 
-        for i in range(0, len(yx_batch), MAX_SP_PER_FRAME):
-            chunk = yx_batch[i:i + MAX_SP_PER_FRAME]
+        for i in range(0, len(yx_batch), self._MAX_SP_PER_FRAME):
+            chunk = yx_batch[i:i + self._MAX_SP_PER_FRAME]
             asdu_data = ASDUBuilder.build_single_point_sequence(
                 self._common_addr, chunk, cot=cot
             )
@@ -756,8 +826,8 @@ class SlaveEngine:
             if yx_data and yx_data.double_state:
                 dp_batch.append((p.ioa, yx_data.double_state, yx_data.quality.to_int()))
 
-        for i in range(0, len(dp_batch), MAX_DP_PER_FRAME):
-            chunk = dp_batch[i:i + MAX_DP_PER_FRAME]
+        for i in range(0, len(dp_batch), self._MAX_DP_PER_FRAME):
+            chunk = dp_batch[i:i + self._MAX_DP_PER_FRAME]
             # 使用ASDUBuilder构建双点遥信序列
             asdu = ASDU(
                 type_id=TypeID.M_DP_NA_1,
@@ -773,8 +843,8 @@ class SlaveEngine:
 
         # ── 遥测打包发送 ──
         yc_points = self._point_table.get_all_yc()
-        if qoi != 20:
-            yc_points = self._point_table.get_yc_by_group(qoi)
+        if group is not None:
+            yc_points = self._point_table.get_yc_by_group(group)
 
         yc_batch = []
         for p in yc_points:
@@ -784,8 +854,8 @@ class SlaveEngine:
             if yc_data:
                 yc_batch.append((p.ioa, yc_data.value, self._apply_quality(yc_data.quality.to_int())))
 
-        for i in range(0, len(yc_batch), MAX_MV_PER_FRAME):
-            chunk = yc_batch[i:i + MAX_MV_PER_FRAME]
+        for i in range(0, len(yc_batch), self._MAX_MV_PER_FRAME):
+            chunk = yc_batch[i:i + self._MAX_MV_PER_FRAME]
             asdu_data = ASDUBuilder.build_short_float_sequence(
                 self._common_addr, chunk, cot=cot
             )
@@ -793,8 +863,8 @@ class SlaveEngine:
 
         # ── 累计量打包发送 ──
         ym_points = self._point_table.get_all_ym()
-        if qoi != 20:
-            ym_points = self._point_table.get_ym_by_group(qoi) if hasattr(self._point_table, 'get_ym_by_group') else []
+        if group is not None:
+            ym_points = self._point_table.get_ym_by_group(group) if hasattr(self._point_table, 'get_ym_by_group') else []
 
         ym_batch = []
         for p in ym_points:
@@ -804,8 +874,8 @@ class SlaveEngine:
             if ym_data:
                 ym_batch.append((p.ioa, ym_data.value, ym_data.quality.to_int(), 0))
 
-        for i in range(0, len(ym_batch), MAX_IT_PER_FRAME):
-            chunk = ym_batch[i:i + MAX_IT_PER_FRAME]
+        for i in range(0, len(ym_batch), self._MAX_IT_PER_FRAME):
+            chunk = ym_batch[i:i + self._MAX_IT_PER_FRAME]
             asdu_data = ASDUBuilder.build_counter_sequence(
                 self._common_addr, chunk, cot=cot
             )
@@ -844,12 +914,15 @@ class SlaveEngine:
         asdu_ack.objects.append(asdu.objects[0])
         await self._send_i_frame(state, asdu_ack.encode())
 
-        # 根据qcc组号确定COT
-        group = qcc & 0x0F
-        cot = COT.INTROGEN if group == 0 else COT.group_response(group)
+        # 根据 qcc 组号确定标准响应 COT:
+        #   组号 0 → 37 (累计量总请求); 组号 1-4 → 38-41 (第1-4组请求)
+        group = qcc & 0x07
+        if 1 <= group <= 4:
+            cot = COT.counter_group_response(group)
+        else:
+            cot = COT.COUNTER_REQ
 
         # 发送电度数据 - 使用正确的类型 M_IT_NA_1 (累计量)
-        MAX_IT_PER_FRAME = 50  # 每帧最多50个累计量
 
         ym_batch = []
         for p in self._point_table.get_all_ym():
@@ -860,8 +933,8 @@ class SlaveEngine:
                 ym_batch.append((p.ioa, ym_data.value, ym_data.quality.to_int(), 0))
 
         # 分批打包发送
-        for i in range(0, len(ym_batch), MAX_IT_PER_FRAME):
-            chunk = ym_batch[i:i + MAX_IT_PER_FRAME]
+        for i in range(0, len(ym_batch), self._MAX_IT_PER_FRAME):
+            chunk = ym_batch[i:i + self._MAX_IT_PER_FRAME]
             asdu_data = ASDUBuilder.build_counter_sequence(
                 self._common_addr, chunk, cot=cot
             )
@@ -933,8 +1006,7 @@ class SlaveEngine:
     async def _handle_reset_process(self, state: _ClientState, asdu: ASDU) -> None:
         """处理复位进程."""
         logger.info(f"Reset Process from {state.conn.name}")
-        # 确认
-        ack = ASDUBuilder.build_reset_process(self._common_addr)
+        # 确认（回送 ACTCON + 原对象）
         asdu_ack = ASDU(
             type_id=TypeID.C_RP_NA_1, sq=False, num=1,
             cot=COT.ACTCON, common_addr=self._common_addr,
@@ -977,12 +1049,7 @@ class SlaveEngine:
                 # 选择命令：记录选择状态和时间
                 state.selected_commands[obj.ioa] = (cmd, time.monotonic())
                 # 回复选择确认
-                ack_asdu = ASDU(
-                    type_id=TypeID.C_SC_NA_1, sq=False, num=1,
-                    cot=COT.ACTCON, common_addr=self._common_addr,
-                )
-                ack_asdu.objects.append(obj)
-                await self._send_i_frame(state, ack_asdu.encode())
+                await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTCON, obj))
                 logger.info(f"Single Command SELECT ACK: IOA={obj.ioa}")
             else:
                 # 执行命令：先验证是否已选择
@@ -990,47 +1057,23 @@ class SlaveEngine:
                     # 已选择，执行操作
                     del state.selected_commands[obj.ioa]
                     # 回复执行确认
-                    ack_asdu = ASDU(
-                        type_id=TypeID.C_SC_NA_1, sq=False, num=1,
-                        cot=COT.ACTCON, common_addr=self._common_addr,
-                    )
-                    ack_asdu.objects.append(obj)
-                    await self._send_i_frame(state, ack_asdu.encode())
+                    await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTCON, obj))
 
                     # 更新数据
                     self._data_store.update_yk(obj.ioa, "execute", cmd.state)
 
                     # 发送激活终止
-                    term_asdu = ASDU(
-                        type_id=TypeID.C_SC_NA_1, sq=False, num=1,
-                        cot=COT.ACTTERM, common_addr=self._common_addr,
-                    )
-                    term_asdu.objects.append(obj)
-                    await self._send_i_frame(state, term_asdu.encode())
+                    await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTTERM, obj))
                 else:
-                    # 未选择，回复否定确认 (PN=1)
-                    ack_asdu = ASDU(
-                        type_id=TypeID.C_SC_NA_1, sq=False, num=1,
-                        cot=COT.ACTCON, common_addr=self._common_addr,
-                    )
-                    # 设置否定确认标志 (PN=1, bit7 of first byte)
-                    obj_data = bytearray(obj.data.to_bytes())
-                    obj_data[0] |= 0x80  # PN=1
-                    obj.data = bytes(obj_data)
-                    ack_asdu.objects.append(obj)
-                    await self._send_i_frame(state, ack_asdu.encode())
+                    # 未选择，回复否定确认 (COT bit6 P/N=1)
+                    await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTCON, obj, pn=True))
                     logger.warning(f"Single Command REJECTED (not selected): IOA={obj.ioa}")
         elif asdu.cot == COT.DEACT:
             # 停止激活：取消选择状态
             if obj.ioa in state.selected_commands:
                 del state.selected_commands[obj.ioa]
             # 回复停止激活确认
-            ack_asdu = ASDU(
-                type_id=TypeID.C_SC_NA_1, sq=False, num=1,
-                cot=COT.DEACTCON, common_addr=self._common_addr,
-            )
-            ack_asdu.objects.append(obj)
-            await self._send_i_frame(state, ack_asdu.encode())
+            await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.DEACTCON, obj))
             logger.info(f"Single Command DEACTCON: IOA={obj.ioa}")
 
     async def _handle_double_command(self, state: _ClientState, asdu: ASDU) -> None:
@@ -1049,12 +1092,7 @@ class SlaveEngine:
                 # 选择命令：记录选择状态和时间
                 state.selected_commands[obj.ioa] = (cmd, time.monotonic())
                 # 回复选择确认
-                ack_asdu = ASDU(
-                    type_id=TypeID.C_DC_NA_1, sq=False, num=1,
-                    cot=COT.ACTCON, common_addr=self._common_addr,
-                )
-                ack_asdu.objects.append(obj)
-                await self._send_i_frame(state, ack_asdu.encode())
+                await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTCON, obj))
                 logger.info(f"Double Command SELECT ACK: IOA={obj.ioa}")
             else:
                 # 执行命令：先验证是否已选择
@@ -1062,44 +1100,20 @@ class SlaveEngine:
                     # 已选择，执行操作
                     del state.selected_commands[obj.ioa]
                     # 回复执行确认
-                    ack_asdu = ASDU(
-                        type_id=TypeID.C_DC_NA_1, sq=False, num=1,
-                        cot=COT.ACTCON, common_addr=self._common_addr,
-                    )
-                    ack_asdu.objects.append(obj)
-                    await self._send_i_frame(state, ack_asdu.encode())
+                    await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTCON, obj))
 
                     # 发送激活终止
-                    term_asdu = ASDU(
-                        type_id=TypeID.C_DC_NA_1, sq=False, num=1,
-                        cot=COT.ACTTERM, common_addr=self._common_addr,
-                    )
-                    term_asdu.objects.append(obj)
-                    await self._send_i_frame(state, term_asdu.encode())
+                    await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTTERM, obj))
                 else:
-                    # 未选择，回复否定确认 (PN=1)
-                    ack_asdu = ASDU(
-                        type_id=TypeID.C_DC_NA_1, sq=False, num=1,
-                        cot=COT.ACTCON, common_addr=self._common_addr,
-                    )
-                    # 设置否定确认标志 (PN=1, bit7 of first byte)
-                    obj_data = bytearray(obj.data.to_bytes())
-                    obj_data[0] |= 0x80  # PN=1
-                    obj.data = bytes(obj_data)
-                    ack_asdu.objects.append(obj)
-                    await self._send_i_frame(state, ack_asdu.encode())
+                    # 未选择，回复否定确认 (COT bit6 P/N=1)
+                    await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTCON, obj, pn=True))
                     logger.warning(f"Double Command REJECTED (not selected): IOA={obj.ioa}")
         elif asdu.cot == COT.DEACT:
             # 停止激活：取消选择状态
             if obj.ioa in state.selected_commands:
                 del state.selected_commands[obj.ioa]
             # 回复停止激活确认
-            ack_asdu = ASDU(
-                type_id=TypeID.C_DC_NA_1, sq=False, num=1,
-                cot=COT.DEACTCON, common_addr=self._common_addr,
-            )
-            ack_asdu.objects.append(obj)
-            await self._send_i_frame(state, ack_asdu.encode())
+            await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.DEACTCON, obj))
             logger.info(f"Double Command DEACTCON: IOA={obj.ioa}")
 
     async def _handle_setpoint_command(self, state: _ClientState, asdu: ASDU) -> None:
@@ -1119,12 +1133,7 @@ class SlaveEngine:
                 # 选择命令：记录选择状态和时间
                 state.selected_commands[obj.ioa] = (obj.data, time.monotonic())
                 # 回复选择确认
-                ack_asdu = ASDU(
-                    type_id=asdu.type_id, sq=False, num=1,
-                    cot=COT.ACTCON, common_addr=self._common_addr,
-                )
-                ack_asdu.objects.append(obj)
-                await self._send_i_frame(state, ack_asdu.encode())
+                await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTCON, obj))
                 logger.info(f"Setpoint Command SELECT ACK: IOA={obj.ioa}")
             else:
                 # 执行命令：先验证是否已选择
@@ -1132,44 +1141,20 @@ class SlaveEngine:
                     # 已选择，执行操作
                     del state.selected_commands[obj.ioa]
                     # 回复执行确认
-                    ack_asdu = ASDU(
-                        type_id=asdu.type_id, sq=False, num=1,
-                        cot=COT.ACTCON, common_addr=self._common_addr,
-                    )
-                    ack_asdu.objects.append(obj)
-                    await self._send_i_frame(state, ack_asdu.encode())
+                    await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTCON, obj))
 
                     # 发送激活终止
-                    term_asdu = ASDU(
-                        type_id=asdu.type_id, sq=False, num=1,
-                        cot=COT.ACTTERM, common_addr=self._common_addr,
-                    )
-                    term_asdu.objects.append(obj)
-                    await self._send_i_frame(state, term_asdu.encode())
+                    await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTTERM, obj))
                 else:
-                    # 未选择，回复否定确认 (PN=1)
-                    ack_asdu = ASDU(
-                        type_id=asdu.type_id, sq=False, num=1,
-                        cot=COT.ACTCON, common_addr=self._common_addr,
-                    )
-                    # 设置否定确认标志 (PN=1, bit7 of first byte)
-                    obj_data = bytearray(obj.data.to_bytes())
-                    obj_data[0] |= 0x80  # PN=1
-                    obj.data = bytes(obj_data)
-                    ack_asdu.objects.append(obj)
-                    await self._send_i_frame(state, ack_asdu.encode())
+                    # 未选择，回复否定确认 (COT bit6 P/N=1)
+                    await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTCON, obj, pn=True))
                     logger.warning(f"Setpoint Command REJECTED (not selected): IOA={obj.ioa}")
         elif asdu.cot == COT.DEACT:
             # 停止激活：取消选择状态
             if obj.ioa in state.selected_commands:
                 del state.selected_commands[obj.ioa]
             # 回复停止激活确认
-            ack_asdu = ASDU(
-                type_id=asdu.type_id, sq=False, num=1,
-                cot=COT.DEACTCON, common_addr=self._common_addr,
-            )
-            ack_asdu.objects.append(obj)
-            await self._send_i_frame(state, ack_asdu.encode())
+            await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.DEACTCON, obj))
             logger.info(f"Setpoint Command DEACTCON: IOA={obj.ioa}")
 
     async def _handle_regulating_command(self, state: _ClientState, asdu: ASDU) -> None:
@@ -1194,12 +1179,7 @@ class SlaveEngine:
                 # 选择命令：记录选择状态和时间
                 state.selected_commands[obj.ioa] = (cmd, time.monotonic())
                 # 回复选择确认
-                ack_asdu = ASDU(
-                    type_id=TypeID.C_RC_NA_1, sq=False, num=1,
-                    cot=COT.ACTCON, common_addr=self._common_addr,
-                )
-                ack_asdu.objects.append(obj)
-                await self._send_i_frame(state, ack_asdu.encode())
+                await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTCON, obj))
                 logger.info(f"Regulating Command SELECT ACK: IOA={obj.ioa}")
             else:
                 # 执行命令：先验证是否已选择
@@ -1207,44 +1187,20 @@ class SlaveEngine:
                     # 已选择，执行操作
                     del state.selected_commands[obj.ioa]
                     # 回复执行确认
-                    ack_asdu = ASDU(
-                        type_id=TypeID.C_RC_NA_1, sq=False, num=1,
-                        cot=COT.ACTCON, common_addr=self._common_addr,
-                    )
-                    ack_asdu.objects.append(obj)
-                    await self._send_i_frame(state, ack_asdu.encode())
+                    await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTCON, obj))
 
                     # 发送激活终止
-                    term_asdu = ASDU(
-                        type_id=TypeID.C_RC_NA_1, sq=False, num=1,
-                        cot=COT.ACTTERM, common_addr=self._common_addr,
-                    )
-                    term_asdu.objects.append(obj)
-                    await self._send_i_frame(state, term_asdu.encode())
+                    await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTTERM, obj))
                 else:
-                    # 未选择，回复否定确认 (PN=1)
-                    ack_asdu = ASDU(
-                        type_id=TypeID.C_RC_NA_1, sq=False, num=1,
-                        cot=COT.ACTCON, common_addr=self._common_addr,
-                    )
-                    # 设置否定确认标志 (PN=1, bit7 of first byte)
-                    obj_data = bytearray(obj.data.to_bytes())
-                    obj_data[0] |= 0x80  # PN=1
-                    obj.data = bytes(obj_data)
-                    ack_asdu.objects.append(obj)
-                    await self._send_i_frame(state, ack_asdu.encode())
+                    # 未选择，回复否定确认 (COT bit6 P/N=1)
+                    await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTCON, obj, pn=True))
                     logger.warning(f"Regulating Command REJECTED (not selected): IOA={obj.ioa}")
         elif asdu.cot == COT.DEACT:
             # 停止激活：取消选择状态
             if obj.ioa in state.selected_commands:
                 del state.selected_commands[obj.ioa]
             # 回复停止激活确认
-            ack_asdu = ASDU(
-                type_id=TypeID.C_RC_NA_1, sq=False, num=1,
-                cot=COT.DEACTCON, common_addr=self._common_addr,
-            )
-            ack_asdu.objects.append(obj)
-            await self._send_i_frame(state, ack_asdu.encode())
+            await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.DEACTCON, obj))
             logger.info(f"Regulating Command DEACTCON: IOA={obj.ioa}")
 
     async def _handle_bitstring_command(self, state: _ClientState, asdu: ASDU) -> None:
@@ -1256,31 +1212,16 @@ class SlaveEngine:
         logger.info(f"Bitstring Command from {state.conn.name}: IOA={obj.ioa} value=0x{cmd.value:08X}")
         if asdu.cot == COT.ACT:
             # 比特串命令通常不需要选择-执行流程
-            ack_asdu = ASDU(
-                type_id=TypeID.C_BO_NA_1, sq=False, num=1,
-                cot=COT.ACTCON, common_addr=self._common_addr,
-            )
-            ack_asdu.objects.append(obj)
-            await self._send_i_frame(state, ack_asdu.encode())
+            await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTCON, obj))
 
             # 发送激活终止
-            term_asdu = ASDU(
-                type_id=TypeID.C_BO_NA_1, sq=False, num=1,
-                cot=COT.ACTTERM, common_addr=self._common_addr,
-            )
-            term_asdu.objects.append(obj)
-            await self._send_i_frame(state, term_asdu.encode())
+            await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTTERM, obj))
         elif asdu.cot == COT.DEACT:
             # 停止激活：取消选择状态
             if obj.ioa in state.selected_commands:
                 del state.selected_commands[obj.ioa]
             # 回复停止激活确认
-            ack_asdu = ASDU(
-                type_id=TypeID.C_BO_NA_1, sq=False, num=1,
-                cot=COT.DEACTCON, common_addr=self._common_addr,
-            )
-            ack_asdu.objects.append(obj)
-            await self._send_i_frame(state, ack_asdu.encode())
+            await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.DEACTCON, obj))
             logger.info(f"Bitstring Command DEACTCON: IOA={obj.ioa}")
 
     async def _handle_delay_command(self, state: _ClientState, asdu: ASDU) -> None:
@@ -1289,7 +1230,6 @@ class SlaveEngine:
         # 延时获得命令是主站向子站请求延时信息
         # 子站收到后应以突发(COT=SPONT)方式回复延时值
         if asdu.cot == COT.ACT and asdu.objects:
-            obj = asdu.objects[0]
             # 计算延时值（这里使用固定值，实际应用中应计算实际延时）
             delay_ms = 100  # 示例延时值
             asdu_data = ASDUBuilder.build_delay_command(
@@ -1299,29 +1239,53 @@ class SlaveEngine:
             logger.info(f"Delay Response sent: delay={delay_ms}ms")
 
     async def _handle_parameter_command(self, state: _ClientState, asdu: ASDU) -> None:
-        """处理参数命令."""
+        """处理参数命令.
+
+        标准流程:
+          - P_ME_NA_1/NB_1/NC_1/ND_1 (参数装载): ACT → ACTCON
+          - P_AC_NA_1 (参数激活):             ACT → ACTCON → ACTTERM
+        未装载直接激活时回否定确认 (COT bit6 P/N=1)。
+        """
         if not asdu.objects:
             return
         obj = asdu.objects[0]
         logger.info(f"Parameter Command from {state.conn.name}: type={asdu.type_id} IOA={obj.ioa}")
         if asdu.cot == COT.ACT:
-            ack_asdu = ASDU(
-                type_id=asdu.type_id, sq=False, num=1,
-                cot=COT.ACTCON, common_addr=self._common_addr,
-            )
-            ack_asdu.objects.append(obj)
-            await self._send_i_frame(state, ack_asdu.encode())
+            if asdu.type_id == TypeID.P_AC_NA_1:
+                qualifier = getattr(obj.data, "qualifier", 0)
+                if qualifier == 1 and obj.ioa not in state.loaded_parameters:
+                    # 激活但尚未装载 → 否定确认
+                    await self._send_i_frame(
+                        state,
+                        self._build_command_ack(asdu.type_id, COT.ACTCON, obj, pn=True),
+                    )
+                    logger.warning(
+                        f"Parameter Activation REJECTED (not loaded): IOA={obj.ioa}"
+                    )
+                else:
+                    await self._send_i_frame(
+                        state,
+                        self._build_command_ack(asdu.type_id, COT.ACTCON, obj),
+                    )
+                    await self._send_i_frame(
+                        state,
+                        self._build_command_ack(asdu.type_id, COT.ACTTERM, obj),
+                    )
+                    logger.info(f"Parameter Activation: IOA={obj.ioa} qualifier={qualifier}")
+            else:
+                # 参数装载 (P_ME_*): 记录已装载参数并回 ACTCON
+                state.loaded_parameters.add(obj.ioa)
+                await self._send_i_frame(
+                    state,
+                    self._build_command_ack(asdu.type_id, COT.ACTCON, obj),
+                )
         elif asdu.cot == COT.DEACT:
-            # 停止激活：取消选择状态
+            # 停止激活：取消选择状态并移除已装载记录
             if obj.ioa in state.selected_commands:
                 del state.selected_commands[obj.ioa]
+            state.loaded_parameters.discard(obj.ioa)
             # 回复停止激活确认
-            ack_asdu = ASDU(
-                type_id=asdu.type_id, sq=False, num=1,
-                cot=COT.DEACTCON, common_addr=self._common_addr,
-            )
-            ack_asdu.objects.append(obj)
-            await self._send_i_frame(state, ack_asdu.encode())
+            await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.DEACTCON, obj))
             logger.info(f"Parameter Command DEACTCON: IOA={obj.ioa}")
 
     async def _handle_file_transfer(self, state: _ClientState, asdu: ASDU) -> None:
@@ -1582,9 +1546,13 @@ class SlaveEngine:
                             state.state_machine.on_s_frame_sent()
                             logger.info(f"T2 expired: S-Frame sent to {conn_id}")
                         elif expired == TimerType.T3:
-                            # T3空闲超时发送TESTFR ACT
+                            # T3空闲超时发送TESTFR ACT（U帧，需在t1内收到CON）
                             self._spawn(self._send_to_client(state, APCICodec.testfr_act()))
+                            state.state_machine.on_u_frame_act_sent()
                             logger.info(f"T3 expired: TESTFR ACT sent to {conn_id}")
+                        # 注: T0 为"连接建立超时"，仅适用于发起连接的控制站（主站）。
+                        # 子站为被控站，其状态机以 use_t0=False 创建（见
+                        # _on_client_connected），不会启动 t0，故此处无需处理。
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -1599,6 +1567,7 @@ class SlaveEngine:
                     for conn_id, state in list(self._client_states.items()):
                         if state.data_transfer_enabled:
                             self._spawn(self._send_to_client(state, APCICodec.testfr_act()))
+                            state.state_machine.on_u_frame_act_sent()
                             logger.info(f"Config TESTFR ACT sent to {conn_id}")
 
     # ── S帧回调 ───────────────────────────────────────────────────
@@ -1625,7 +1594,7 @@ class SlaveEngine:
             except asyncio.TimeoutError:
                 raise RuntimeError(
                     f"Send window timeout: no S-frame received within t1={self._t1}s"
-                )
+                ) from None
 
         tx_seq = state.seq.get_send_seq()
         rx_seq = state.seq.get_recv_seq()
@@ -1633,6 +1602,25 @@ class SlaveEngine:
 
         await self._send_to_client(state, frame)
         state.state_machine.on_i_frame_sent()
+
+    def _build_command_ack(self, type_id: TypeID, cot: int,
+                            obj: InformationObject, pn: bool = False) -> bytes:
+        """构造命令确认/终止 ASDU 并编码为字节序列.
+
+        消除各命令处理方法中重复的 ASDU 构造样板代码。
+
+        Args:
+            type_id: 类型标识
+            cot: 传送原因
+            obj: 回显的信息对象
+            pn: 否定确认标志 (COT bit6)；True 表示否定确认
+        """
+        ack_asdu = ASDU(
+            type_id=type_id, sq=False, num=1,
+            cot=cot, pn=pn, common_addr=self._common_addr,
+        )
+        ack_asdu.objects.append(obj)
+        return ack_asdu.encode()
 
     async def _send_to_client(self, state: _ClientState, frame: bytes) -> None:
         """发送帧到指定客户端。"""
@@ -1671,9 +1659,7 @@ class SlaveEngine:
 
             # 记录到历史数据库
             if self._history_db:
-                frame_type = "I" if len(frame) >= 6 and (frame[2] & 0x01) == 0 else (
-                    "S" if len(frame) >= 6 and (frame[2] & 0x03) == 0x01 else "U"
-                )
+                frame_type = APCICodec.frame_type_of(frame)
                 self._history_db.record_frame("tx", frame, frame_type=frame_type, client_id=state.conn.name)
         except Exception as e:
             logger.error(f"Send to {state.conn.name} failed: {e}")
@@ -1700,10 +1686,10 @@ class SlaveEngine:
     # ── 报文缓冲 ──────────────────────────────────────────────────
 
     def get_rx_buffer(self, count: int = 100) -> list[tuple[float, bytes, str]]:
-        return self._rx_buffer[-count:]
+        return list(self._rx_buffer)[-count:]
 
     def get_tx_buffer(self, count: int = 100) -> list[tuple[float, bytes, str]]:
-        return self._tx_buffer[-count:]
+        return list(self._tx_buffer)[-count:]
 
 
 class _ClientState:
@@ -1729,11 +1715,14 @@ class _ClientState:
         # 命令选择状态存储 (IOA -> (命令对象, 选择时间))
         self.selected_commands: dict[int, tuple[Any, float]] = {}
 
+        # 已装载参数 (IOA 集合) — 用于 P_AC_NA_1 激活前校验
+        self.loaded_parameters: set[int] = set()
+
     def check_command_timeout(self) -> list[int]:
         """检查命令选择超时，返回超时的IOA列表."""
         now = time.monotonic()
         timeout_ioas = []
-        for ioa, (cmd, select_time) in list(self.selected_commands.items()):
+        for ioa, (_cmd, select_time) in list(self.selected_commands.items()):
             if now - select_time > self.COMMAND_SELECT_TIMEOUT:
                 timeout_ioas.append(ioa)
                 del self.selected_commands[ioa]

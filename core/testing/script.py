@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
 
 import yaml
 
@@ -67,7 +66,7 @@ class ScriptLoader:
         if not path.exists():
             raise FileNotFoundError(f"Script not found: {path}")
 
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, encoding='utf-8') as f:
             data = yaml.safe_load(f) or {}
 
         return ScriptLoader._parse(data, str(path))

@@ -9,15 +9,16 @@
 
 from __future__ import annotations
 
+import csv
+import logging
 import sqlite3
 import threading
 import time
-import json
-import csv
-from pathlib import Path
-from dataclasses import dataclass
-from typing import Optional
 from collections import deque
+from dataclasses import dataclass
+from pathlib import Path
+
+logger = logging.getLogger("iec104.history")
 
 
 @dataclass
@@ -58,7 +59,7 @@ class HistoryDB:
         self._db_path = str(db_path)
         self._max_records = max_records
         self._lock = threading.Lock()
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn: sqlite3.Connection | None = None
         self._write_buffer: deque = deque(maxlen=1000)
         self._frame_buffer: deque = deque(maxlen=1000)
         self._flush_interval = 5.0  # 批量提交间隔
@@ -181,7 +182,7 @@ class HistoryDB:
                 self._cleanup()
 
             except Exception as e:
-                print(f"History flush error: {e}")
+                logger.error(f"History flush error: {e}")
 
     def _cleanup(self) -> None:
         """清理过期数据."""
@@ -210,8 +211,8 @@ class HistoryDB:
                     (excess,),
                 )
 
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"History cleanup error: {e}")
 
     # ── 数据查询 ──────────────────────────────────────────────────
 
@@ -304,31 +305,60 @@ class HistoryDB:
 
     # ── 导出 ──────────────────────────────────────────────────────
 
+    def _iter_history_rows(self, sql: str, params: list, batch_size: int = 5000):
+        """分批游标读取（每批短暂持锁），避免大结果集一次性载入内存."""
+        if not self._conn:
+            return
+        with self._lock:
+            cur = self._conn.execute(sql, params)
+        try:
+            while True:
+                with self._lock:
+                    rows = cur.fetchmany(batch_size)
+                if not rows:
+                    return
+                yield from rows
+        finally:
+            cur.close()
+
     def export_data_csv(
         self,
         path: str | Path,
         point_type: str = "",
         start_time: float = 0.0,
         end_time: float = 0.0,
+        limit: int = 1_000_000,
     ) -> int:
-        """导出数据历史到 CSV."""
-        records = self.query_data(
-            point_type=point_type,
-            start_time=start_time,
-            end_time=end_time,
-            limit=1000000,
+        """导出数据历史到 CSV（流式分批读取，防 OOM）."""
+        conditions = ["1=1"]
+        params: list = []
+        if point_type:
+            conditions.append("point_type = ?")
+            params.append(point_type)
+        if start_time > 0:
+            conditions.append("timestamp >= ?")
+            params.append(start_time)
+        if end_time > 0:
+            conditions.append("timestamp <= ?")
+            params.append(end_time)
+        where = "WHERE " + " AND ".join(conditions)
+        sql = (
+            "SELECT timestamp, point_type, ioa, value, quality, source "
+            f"FROM data_history {where} ORDER BY timestamp DESC LIMIT ?"
         )
+        params.append(limit)
 
+        count = 0
         with open(path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             writer.writerow(["时间戳", "类型", "IOA", "值", "品质", "来源"])
-            for r in records:
+            for r in self._iter_history_rows(sql, params):
                 writer.writerow([
-                    time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r.timestamp)),
-                    r.point_type, r.ioa, r.value, r.quality, r.source,
+                    time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r[0])),
+                    r[1], r[2], r[3], r[4], r[5],
                 ])
-
-        return len(records)
+                count += 1
+        return count
 
     def export_frames_csv(
         self,
@@ -336,25 +366,38 @@ class HistoryDB:
         direction: str = "",
         start_time: float = 0.0,
         end_time: float = 0.0,
+        limit: int = 1_000_000,
     ) -> int:
-        """导出报文历史到 CSV."""
-        records = self.query_frames(
-            direction=direction,
-            start_time=start_time,
-            end_time=end_time,
-            limit=1000000,
+        """导出报文历史到 CSV（流式分批读取，防 OOM）."""
+        conditions = ["1=1"]
+        params: list = []
+        if direction:
+            conditions.append("direction = ?")
+            params.append(direction)
+        if start_time > 0:
+            conditions.append("timestamp >= ?")
+            params.append(start_time)
+        if end_time > 0:
+            conditions.append("timestamp <= ?")
+            params.append(end_time)
+        where = "WHERE " + " AND ".join(conditions)
+        sql = (
+            "SELECT timestamp, direction, frame_type, hex_data, parsed, client_id "
+            f"FROM frame_history {where} ORDER BY timestamp DESC LIMIT ?"
         )
+        params.append(limit)
 
+        count = 0
         with open(path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             writer.writerow(["时间戳", "方向", "帧类型", "HEX数据", "解析", "客户端"])
-            for r in records:
+            for r in self._iter_history_rows(sql, params):
                 writer.writerow([
-                    time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r.timestamp)),
-                    r.direction, r.frame_type, r.hex_data, r.parsed, r.client_id,
+                    time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r[0])),
+                    r[1], r[2], r[3], r[4], r[5],
                 ])
-
-        return len(records)
+                count += 1
+        return count
 
     # ── 统计 ──────────────────────────────────────────────────────
 

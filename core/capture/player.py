@@ -12,13 +12,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
+from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Optional
 
-from .format import CaptureFile, FrameEntry, FileHeader
 from .filter import FrameFilter
+from .format import CaptureFile, FileHeader, FrameEntry
 
 logger = logging.getLogger("iec104.capture.player")
 
@@ -51,16 +50,16 @@ class PacketPlayer:
     """
 
     def __init__(self):
-        self._header: Optional[FileHeader] = None
+        self._header: FileHeader | None = None
         self._frames: list[FrameEntry] = []
         self._filtered_frames: list[FrameEntry] = []
         self._state = PlaybackState.STOPPED
         self._speed: float = 1.0
         self._current_index: int = 0
-        self._play_task: Optional[asyncio.Task] = None
-        self._on_frame: Optional[Callable[[FrameEntry, int], None]] = None
-        self._on_complete: Optional[Callable[[], None]] = None
-        self._filter: Optional[FrameFilter] = None
+        self._play_task: asyncio.Task | None = None
+        self._on_frame: Callable[[FrameEntry, int], None] | None = None
+        self._on_complete: Callable[[], None] | None = None
+        self._filter: FrameFilter | None = None
 
     # ── 属性 ──────────────────────────────────────────────────────
 
@@ -81,7 +80,7 @@ class PacketPlayer:
         return self._current_index
 
     @property
-    def current_frame(self) -> Optional[FrameEntry]:
+    def current_frame(self) -> FrameEntry | None:
         frames = self._get_active_frames()
         if 0 <= self._current_index < len(frames):
             return frames[self._current_index]
@@ -103,7 +102,7 @@ class PacketPlayer:
         return self._frames[-1].timestamp
 
     @property
-    def header(self) -> Optional[FileHeader]:
+    def header(self) -> FileHeader | None:
         return self._header
 
     # ── 加载 ──────────────────────────────────────────────────────
@@ -132,7 +131,7 @@ class PacketPlayer:
 
     # ── 过滤 ──────────────────────────────────────────────────────
 
-    def set_filter(self, frame_filter: Optional[FrameFilter]) -> None:
+    def set_filter(self, frame_filter: FrameFilter | None) -> None:
         """设置帧过滤器."""
         self._filter = frame_filter
         if frame_filter:
@@ -243,7 +242,7 @@ class PacketPlayer:
 
     # ── 单步 ──────────────────────────────────────────────────────
 
-    def step_forward(self) -> Optional[FrameEntry]:
+    def step_forward(self) -> FrameEntry | None:
         """前进一帧."""
         frames = self._get_active_frames()
         if self._current_index < len(frames) - 1:
@@ -251,7 +250,7 @@ class PacketPlayer:
             return frames[self._current_index]
         return None
 
-    def step_backward(self) -> Optional[FrameEntry]:
+    def step_backward(self) -> FrameEntry | None:
         """后退一帧."""
         frames = self._get_active_frames()
         if self._current_index > 0:
@@ -259,7 +258,7 @@ class PacketPlayer:
             return frames[self._current_index]
         return None
 
-    def seek(self, index: int) -> Optional[FrameEntry]:
+    def seek(self, index: int) -> FrameEntry | None:
         """跳转到指定帧索引."""
         frames = self._get_active_frames()
         if 0 <= index < len(frames):
@@ -267,7 +266,7 @@ class PacketPlayer:
             return frames[self._current_index]
         return None
 
-    def seek_time(self, timestamp: float) -> Optional[FrameEntry]:
+    def seek_time(self, timestamp: float) -> FrameEntry | None:
         """跳转到指定时间(秒)."""
         frames = self._get_active_frames()
         for i, f in enumerate(frames):

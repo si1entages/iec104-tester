@@ -5,11 +5,10 @@
 
 from __future__ import annotations
 
-import enum
 import csv
+import enum
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Optional
 from pathlib import Path
 
 import yaml
@@ -142,19 +141,19 @@ class PointTable:
         with self._lock:
             self._ym[point.ioa] = point
 
-    def get_yx(self, ioa: int) -> Optional[YxPointDef]:
+    def get_yx(self, ioa: int) -> YxPointDef | None:
         with self._lock:
             return self._yx.get(ioa)
 
-    def get_yc(self, ioa: int) -> Optional[YcPointDef]:
+    def get_yc(self, ioa: int) -> YcPointDef | None:
         with self._lock:
             return self._yc.get(ioa)
 
-    def get_yk(self, ioa: int) -> Optional[YkPointDef]:
+    def get_yk(self, ioa: int) -> YkPointDef | None:
         with self._lock:
             return self._yk.get(ioa)
 
-    def get_ym(self, ioa: int) -> Optional[YmPointDef]:
+    def get_ym(self, ioa: int) -> YmPointDef | None:
         with self._lock:
             return self._ym.get(ioa)
 
@@ -228,7 +227,7 @@ class PointTable:
 
     def load_yaml(self, path: str | Path) -> None:
         """从 YAML 文件加载点表."""
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, encoding='utf-8') as f:
             data = yaml.safe_load(f)
 
         if not data:
@@ -365,7 +364,7 @@ class PointTable:
 
         CSV 格式: ioa, name, group, enabled, [type-specific fields...]
         """
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for row in reader:
                 ioa = int(row['ioa'])

@@ -15,27 +15,37 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Optional, Callable, Any
+from collections import deque
+from collections.abc import Callable
 from enum import Enum
+from typing import Any
 
-from ..protocol.apci import APCICodec, APCI
-from ..protocol.asdu import ASDU, ASDUBuilder, InformationObject
-from ..protocol.types import (
-    TypeID, COT, ConnState,
-    SinglePoint, DoublePoint, NormalizedValue, ScaledValue, ShortFloat,
-    CounterValue, QualityDescriptor, CP56Time2a,
-    SingleCommand, DoubleCommand, RegulatingStepCommand,
-    SetpointCommandN, SetpointCommandS, SetpointCommandScaled,
-    BitString32Command, BitString32, StepPosition,
-    ProtectionEvent, GroupSinglePointWithStatus, InitializationEnd,
-)
-from ..protocol.sequence import SequenceManager
-from ..protocol.state_machine import ConnectionStateMachine, TimerType
-from ..transport.connection import TCPClient, ConnectionStats
 from ..data.data_store import RealtimeDB
 from ..data.history import HistoryDB
-from .scheduler import TaskScheduler
+from ..protocol.apci import APCI, APCICodec
+from ..protocol.asdu import ASDU, ASDUBuilder
 from ..protocol.file_transfer import FileTransferMaster, FileTransferState
+from ..protocol.sequence import SequenceManager
+from ..protocol.state_machine import ConnectionStateMachine, TimerType
+from ..protocol.types import (
+    COT,
+    BitString32,
+    CounterValue,
+    CP56Time2a,
+    DoublePoint,
+    GroupSinglePointWithStatus,
+    NormalizedValue,
+    ProtectionEvent,
+    QualityDescriptor,
+    ScaledValue,
+    ShortFloat,
+    SinglePoint,
+    StepPosition,
+    TypeID,
+)
+from ..transport.connection import ConnectionStats, TCPClient
+from .base import EngineBase
+from .scheduler import TaskScheduler
 
 logger = logging.getLogger("iec104.master")
 
@@ -57,7 +67,7 @@ class MasterEvent(Enum):
 EventCallback = Callable[[MasterEvent, dict[str, Any]], None]
 
 
-class MasterEngine:
+class MasterEngine(EngineBase):
     """IEC 104 主站引擎.
 
     典型使用:
@@ -84,8 +94,9 @@ class MasterEngine:
         auto_gi: bool = False,           # STARTDT后自动总召唤
         reconnect: bool = True,
         reconnect_interval: float = 5.0,
-        history_db: Optional[HistoryDB] = None,
+        history_db: HistoryDB | None = None,
     ):
+        super().__init__()
         self._host = host
         self._port = port
         self._common_addr = common_addr
@@ -99,6 +110,12 @@ class MasterEngine:
             on_state_change=self._on_state_change,
             on_timer_expired=self._on_timer_expired,
         )
+
+        # 发送超时 t1（用于 k 窗口耗尽的对称等待，与子站行为一致）
+        self._t1 = t1
+        # 发送窗口可用事件：窗口满时清除，收到确认释放空间时置位
+        self._window_available = asyncio.Event()
+        self._window_available.set()
 
         # 数据存储
         self._data_store = RealtimeDB()
@@ -124,18 +141,18 @@ class MasterEngine:
         )
 
         # 回调
-        self._event_callback: Optional[EventCallback] = None
-        self._raw_frame_callback: Optional[Callable[[bytes, str], None]] = None
+        self._event_callback: EventCallback | None = None
+        self._raw_frame_callback: Callable[[bytes, str], None] | None = None
 
         # 定时器检查任务
-        self._timer_task: Optional[asyncio.Task] = None
+        self._timer_task: asyncio.Task | None = None
 
         # 报文缓冲
-        self._rx_buffer: list[tuple[float, bytes]] = []
-        self._tx_buffer: list[tuple[float, bytes]] = []
+        self._rx_buffer: deque = deque(maxlen=1000)
+        self._tx_buffer: deque = deque(maxlen=1000)
 
         # 时钟同步校验
-        self._last_clock_sync_sent_time: Optional[float] = None
+        self._last_clock_sync_sent_time: float | None = None
 
         # 文件传输管理器
         self._file_transfer = FileTransferMaster(common_addr)
@@ -144,28 +161,6 @@ class MasterEngine:
             on_file_received=self._on_file_received,
             on_error=self._on_file_transfer_error,
         )
-        # 后台任务引用，防止被 GC 回收
-        self._background_tasks: set[asyncio.Task] = set()
-
-    def _spawn(self, coro) -> Optional[asyncio.Task]:
-        """安全创建后台任务：保留引用并记录异常."""
-        try:
-            task = asyncio.create_task(coro)
-        except RuntimeError:
-            coro.close()
-            return None
-        self._background_tasks.add(task)
-        task.add_done_callback(self._background_tasks.discard)
-
-        def _log_exc(t: asyncio.Task) -> None:
-            if t.cancelled():
-                return
-            exc = t.exception()
-            if exc is not None:
-                logger.error("Background task failed: %s", exc, exc_info=exc)
-
-        task.add_done_callback(_log_exc)
-        return task
 
     # ── 属性 ──────────────────────────────────────────────────────
 
@@ -178,6 +173,14 @@ class MasterEngine:
         return self._state_machine.is_running
 
     @property
+    def host(self) -> str:
+        return self._host
+
+    @property
+    def port(self) -> int:
+        return self._port
+
+    @property
     def data_store(self) -> RealtimeDB:
         return self._data_store
 
@@ -186,7 +189,7 @@ class MasterEngine:
         return self._seq
 
     @property
-    def connection_stats(self) -> Optional[ConnectionStats]:
+    def connection_stats(self) -> ConnectionStats | None:
         return self._client.stats
 
     @property
@@ -194,7 +197,7 @@ class MasterEngine:
         return self._scheduler
 
     @property
-    def history_db(self) -> Optional[HistoryDB]:
+    def history_db(self) -> HistoryDB | None:
         return self._history_db
 
     # ── 回调设置 ──────────────────────────────────────────────────
@@ -205,6 +208,10 @@ class MasterEngine:
     def set_raw_frame_callback(self, callback: Callable[[bytes, str], None]) -> None:
         """设置原始帧回调 (data, direction: 'rx'/'tx')."""
         self._raw_frame_callback = callback
+
+    def get_raw_frame_callback(self) -> Callable | None:
+        """获取当前原始帧回调（供外部模块安全访问，避免直接访问私有属性）."""
+        return self._raw_frame_callback
 
     def set_packet_recorder(self, recorder) -> None:
         """设置报文录制器."""
@@ -244,7 +251,7 @@ class MasterEngine:
 
         # 刷新历史数据库
         if self._history_db:
-            self._history_db.flush()
+            await asyncio.to_thread(self._history_db.flush)
 
         await asyncio.wait_for(self._client.stop(), timeout=3.0)
         self._state_machine.on_disconnected()
@@ -263,58 +270,85 @@ class MasterEngine:
         """发送 STOPDT ACT."""
         frame = APCICodec.stopdt_act()
         await self._send_frame(frame)
+        # STOPDT ACT 属 U 格式报文，发送后须在 t1 内收到 STOPDT CON
+        self._state_machine.on_u_frame_act_sent()
         logger.info("STOPDT ACT sent")
+
+    async def _await_send_window(self) -> None:
+        """等待发送窗口可用（最多 t1）— 与子站行为对称.
+
+        标准 (IEC 60870-5-104 Section 5.5): 发送方在有 k 个 I 帧未获确认时
+        停止数据传送。本实现不立即失败，而是等待至多 t1；若仍无确认则认为
+        TCP 连接异常，抛出 RuntimeError（与 SlaveEngine._send_i_frame 一致）。
+
+        Raises:
+            RuntimeError: 在 t1 内窗口未释放（迟迟收不到对端确认）。
+        """
+        if self._seq.send_window_available:
+            return
+        logger.debug("Send window full, waiting for acknowledgement...")
+        self._window_available.clear()
+        try:
+            await asyncio.wait_for(self._window_available.wait(), timeout=self._t1)
+        except asyncio.TimeoutError:
+            raise RuntimeError(
+                f"Send window timeout: no acknowledgement within t1={self._t1}s"
+            ) from None
+
+    async def _send_command_asdu(self, asdu_data: bytes) -> None:
+        """发送命令 ASDU — 公共封装：状态检查 + 序列号 + 编码 + 发送.
+
+        所有命令方法（总召唤/遥控/遥调/参数等）共用此方法，
+        消除重复的状态检查和帧编码样板代码。
+        """
+        if not self._state_machine.is_running:
+            raise RuntimeError("Not in running state")
+        await self._await_send_window()
+        tx_seq = self._seq.get_send_seq()
+        rx_seq = self._seq.get_recv_seq()
+        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
+        self._state_machine.on_i_frame_sent()
+        await self._send_frame(frame)
+        # 发送后若窗口已满，清除事件以等待对端确认
+        if not self._seq.send_window_available:
+            self._window_available.clear()
 
     async def general_interrogation(self, qoi: int = 20) -> None:
         """发送总召唤命令.
 
         Args:
-            qoi: 20=站召唤, 1-16=组召唤
+            qoi: 召唤范围 — 20=站召唤；1-16=第1-16组召唤。
+                 内部换算为标准限定词 QOI（组召唤 → 20+组号，即 21-36）。
         """
-        if not self._state_machine.is_running:
-            raise RuntimeError("Not in running state")
+        if qoi == 20:
+            std_qoi = 20
+        elif 1 <= qoi <= 16:
+            std_qoi = 20 + qoi
+        else:
+            raise ValueError(
+                f"Invalid interrogation qualifier {qoi} (expected 1-16 or 20)"
+            )
 
         asdu_data = ASDUBuilder.build_general_interrogation(
-            self._common_addr, qoi
+            self._common_addr, std_qoi
         )
-        tx_seq = self._seq.get_send_seq()
-        rx_seq = self._seq.get_recv_seq()
-        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
+        await self._send_command_asdu(asdu_data)
 
-        self._state_machine.on_i_frame_sent()
-        await self._send_frame(frame)
-
-        logger.info(f"General Interrogation sent (QOI={qoi})")
+        logger.info(f"General Interrogation sent (group={qoi}, QOI={std_qoi})")
         self._fire_event(MasterEvent.GENERAL_INTERROGATION, {"qoi": qoi})
 
     async def counter_interrogation(self, qcc: int = 0) -> None:
         """发送累计量召唤命令."""
-        if not self._state_machine.is_running:
-            raise RuntimeError("Not in running state")
-
         asdu_data = ASDUBuilder.build_counter_interrogation(
             self._common_addr, qcc
         )
-        tx_seq = self._seq.get_send_seq()
-        rx_seq = self._seq.get_recv_seq()
-        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
-
-        self._state_machine.on_i_frame_sent()
-        await self._send_frame(frame)
+        await self._send_command_asdu(asdu_data)
         logger.info(f"Counter Interrogation sent (QCC={qcc})")
 
-    async def clock_sync(self, time_tag: Optional[CP56Time2a] = None) -> None:
+    async def clock_sync(self, time_tag: CP56Time2a | None = None) -> None:
         """发送时钟同步命令."""
-        if not self._state_machine.is_running:
-            raise RuntimeError("Not in running state")
-
         asdu_data = ASDUBuilder.build_clock_sync(self._common_addr, time_tag)
-        tx_seq = self._seq.get_send_seq()
-        rx_seq = self._seq.get_recv_seq()
-        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
-
-        self._state_machine.on_i_frame_sent()
-        await self._send_frame(frame)
+        await self._send_command_asdu(asdu_data)
 
         # 记录发送时间用于校验
         self._last_clock_sync_sent_time = time.monotonic()
@@ -324,30 +358,14 @@ class MasterEngine:
 
     async def reset_process(self, qrp: int = 1) -> None:
         """发送复位进程命令."""
-        if not self._state_machine.is_running:
-            raise RuntimeError("Not in running state")
-
         asdu_data = ASDUBuilder.build_reset_process(self._common_addr, qrp)
-        tx_seq = self._seq.get_send_seq()
-        rx_seq = self._seq.get_recv_seq()
-        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
-
-        self._state_machine.on_i_frame_sent()
-        await self._send_frame(frame)
+        await self._send_command_asdu(asdu_data)
         logger.info(f"Reset Process sent (QRP={qrp})")
 
     async def send_test_command(self) -> None:
         """发送测试命令."""
-        if not self._state_machine.is_running:
-            raise RuntimeError("Not in running state")
-
         asdu_data = ASDUBuilder.build_test_command(self._common_addr)
-        tx_seq = self._seq.get_send_seq()
-        rx_seq = self._seq.get_recv_seq()
-        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
-
-        self._state_machine.on_i_frame_sent()
-        await self._send_frame(frame)
+        await self._send_command_asdu(asdu_data)
         logger.info("Test Command sent")
 
     # ── 遥控操作 ──────────────────────────────────────────────────
@@ -355,18 +373,10 @@ class MasterEngine:
     async def single_command(self, ioa: int, state: bool,
                               select: bool = False, qu: int = 0) -> None:
         """发送单命令 (选择/执行)."""
-        if not self._state_machine.is_running:
-            raise RuntimeError("Not in running state")
-
         asdu_data = ASDUBuilder.build_single_command(
             self._common_addr, ioa, state, select, qu
         )
-        tx_seq = self._seq.get_send_seq()
-        rx_seq = self._seq.get_recv_seq()
-        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
-
-        self._state_machine.on_i_frame_sent()
-        await self._send_frame(frame)
+        await self._send_command_asdu(asdu_data)
 
         action = "SELECT" if select else "EXECUTE"
         state_str = "ON" if state else "OFF"
@@ -379,18 +389,10 @@ class MasterEngine:
     async def double_command(self, ioa: int, state: int,
                               select: bool = False, qu: int = 0) -> None:
         """发送双命令."""
-        if not self._state_machine.is_running:
-            raise RuntimeError("Not in running state")
-
         asdu_data = ASDUBuilder.build_double_command(
             self._common_addr, ioa, state, select, qu
         )
-        tx_seq = self._seq.get_send_seq()
-        rx_seq = self._seq.get_recv_seq()
-        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
-
-        self._state_machine.on_i_frame_sent()
-        await self._send_frame(frame)
+        await self._send_command_asdu(asdu_data)
 
         action = "SELECT" if select else "EXECUTE"
         logger.info(f"Double Command: IOA={ioa} {action} state={state}")
@@ -398,18 +400,10 @@ class MasterEngine:
     async def setpoint_normalized(self, ioa: int, value: float,
                                     select: bool = False) -> None:
         """发送归一化设点命令."""
-        if not self._state_machine.is_running:
-            raise RuntimeError("Not in running state")
-
         asdu_data = ASDUBuilder.build_setpoint_normalized(
             self._common_addr, ioa, value, select
         )
-        tx_seq = self._seq.get_send_seq()
-        rx_seq = self._seq.get_recv_seq()
-        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
-
-        self._state_machine.on_i_frame_sent()
-        await self._send_frame(frame)
+        await self._send_command_asdu(asdu_data)
 
         action = "SELECT" if select else "EXECUTE"
         logger.info(f"Setpoint Normalized: IOA={ioa} {action} value={value}")
@@ -417,18 +411,10 @@ class MasterEngine:
     async def setpoint_shortfloat(self, ioa: int, value: float,
                                     select: bool = False) -> None:
         """发送短浮点设点命令."""
-        if not self._state_machine.is_running:
-            raise RuntimeError("Not in running state")
-
         asdu_data = ASDUBuilder.build_setpoint_shortfloat(
             self._common_addr, ioa, value, select
         )
-        tx_seq = self._seq.get_send_seq()
-        rx_seq = self._seq.get_recv_seq()
-        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
-
-        self._state_machine.on_i_frame_sent()
-        await self._send_frame(frame)
+        await self._send_command_asdu(asdu_data)
 
         action = "SELECT" if select else "EXECUTE"
         logger.info(f"Setpoint ShortFloat: IOA={ioa} {action} value={value}")
@@ -443,18 +429,10 @@ class MasterEngine:
             select: True=选择, False=执行
             qu: 限定词 (0-31)
         """
-        if not self._state_machine.is_running:
-            raise RuntimeError("Not in running state")
-
         asdu_data = ASDUBuilder.build_regulating_step_command(
             self._common_addr, ioa, state, select, qu
         )
-        tx_seq = self._seq.get_send_seq()
-        rx_seq = self._seq.get_recv_seq()
-        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
-
-        self._state_machine.on_i_frame_sent()
-        await self._send_frame(frame)
+        await self._send_command_asdu(asdu_data)
 
         action = "SELECT" if select else "EXECUTE"
         state_str = {1: "降一步", 2: "升一步"}.get(state, f"未知({state})")
@@ -473,18 +451,10 @@ class MasterEngine:
             value: 标度化值 (-32768..+32767)
             select: True=选择, False=执行
         """
-        if not self._state_machine.is_running:
-            raise RuntimeError("Not in running state")
-
         asdu_data = ASDUBuilder.build_setpoint_scaled(
             self._common_addr, ioa, value, select
         )
-        tx_seq = self._seq.get_send_seq()
-        rx_seq = self._seq.get_recv_seq()
-        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
-
-        self._state_machine.on_i_frame_sent()
-        await self._send_frame(frame)
+        await self._send_command_asdu(asdu_data)
 
         action = "SELECT" if select else "EXECUTE"
         logger.info(f"Setpoint Scaled: IOA={ioa} {action} value={value}")
@@ -500,22 +470,97 @@ class MasterEngine:
             ioa: 信息对象地址
             value: 32位无符号整数
         """
-        if not self._state_machine.is_running:
-            raise RuntimeError("Not in running state")
-
         asdu_data = ASDUBuilder.build_bitstring_command(
             self._common_addr, ioa, value
         )
-        tx_seq = self._seq.get_send_seq()
-        rx_seq = self._seq.get_recv_seq()
-        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
-
-        self._state_machine.on_i_frame_sent()
-        await self._send_frame(frame)
+        await self._send_command_asdu(asdu_data)
 
         logger.info(f"Bitstring Command: IOA={ioa} value=0x{value:08X}")
         self._fire_event(MasterEvent.COMMAND_SENT, {
             "type": "bitstring", "ioa": ioa, "value": value
+        })
+
+    # ── 带时标 CP56Time2a 的控制命令 (TypeID 58-64) ────────────────
+
+    async def single_command_with_time(self, ioa: int, state: bool,
+                                        select: bool = False, qu: int = 0,
+                                        time_tag: CP56Time2a | None = None) -> None:
+        """发送带时标单命令 (C_SC_TA_1)."""
+        asdu_data = ASDUBuilder.build_single_command_with_time(
+            self._common_addr, ioa, state, select, qu, time_tag
+        )
+        await self._send_command_asdu(asdu_data)
+        logger.info(f"Single Command (with time): IOA={ioa} state={state}")
+        self._fire_event(MasterEvent.COMMAND_SENT, {
+            "type": "single_command_ta", "ioa": ioa, "state": state,
+        })
+
+    async def double_command_with_time(self, ioa: int, state: int,
+                                        select: bool = False, qu: int = 0,
+                                        time_tag: CP56Time2a | None = None) -> None:
+        """发送带时标双命令 (C_DC_TA_1)."""
+        asdu_data = ASDUBuilder.build_double_command_with_time(
+            self._common_addr, ioa, state, select, qu, time_tag
+        )
+        await self._send_command_asdu(asdu_data)
+        logger.info(f"Double Command (with time): IOA={ioa} state={state}")
+        self._fire_event(MasterEvent.COMMAND_SENT, {
+            "type": "double_command_ta", "ioa": ioa, "state": state,
+        })
+
+    async def regulating_step_command_with_time(self, ioa: int, state: int,
+                                                 select: bool = False, qu: int = 0,
+                                                 time_tag: CP56Time2a | None = None) -> None:
+        """发送带时标升降命令 (C_RC_TA_1)."""
+        asdu_data = ASDUBuilder.build_regulating_step_command_with_time(
+            self._common_addr, ioa, state, select, qu, time_tag
+        )
+        await self._send_command_asdu(asdu_data)
+        logger.info(f"Regulating Step Command (with time): IOA={ioa} state={state}")
+        self._fire_event(MasterEvent.COMMAND_SENT, {
+            "type": "regulating_step_ta", "ioa": ioa, "state": state,
+        })
+
+    async def setpoint_normalized_with_time(self, ioa: int, value: float,
+                                             select: bool = False,
+                                             time_tag: CP56Time2a | None = None) -> None:
+        """发送带时标归一化设点命令 (C_SE_TA_1)."""
+        asdu_data = ASDUBuilder.build_setpoint_normalized_with_time(
+            self._common_addr, ioa, value, select, time_tag
+        )
+        await self._send_command_asdu(asdu_data)
+        logger.info(f"Setpoint Normalized (with time): IOA={ioa} value={value}")
+
+    async def setpoint_scaled_with_time(self, ioa: int, value: int,
+                                         select: bool = False,
+                                         time_tag: CP56Time2a | None = None) -> None:
+        """发送带时标标度化设点命令 (C_SE_TB_1)."""
+        asdu_data = ASDUBuilder.build_setpoint_scaled_with_time(
+            self._common_addr, ioa, value, select, time_tag
+        )
+        await self._send_command_asdu(asdu_data)
+        logger.info(f"Setpoint Scaled (with time): IOA={ioa} value={value}")
+
+    async def setpoint_shortfloat_with_time(self, ioa: int, value: float,
+                                             select: bool = False,
+                                             time_tag: CP56Time2a | None = None) -> None:
+        """发送带时标短浮点设点命令 (C_SE_TC_1)."""
+        asdu_data = ASDUBuilder.build_setpoint_shortfloat_with_time(
+            self._common_addr, ioa, value, select, time_tag
+        )
+        await self._send_command_asdu(asdu_data)
+        logger.info(f"Setpoint ShortFloat (with time): IOA={ioa} value={value}")
+
+    async def bitstring_command_with_time(self, ioa: int, value: int,
+                                           time_tag: CP56Time2a | None = None) -> None:
+        """发送带时标比特串命令 (C_BO_TA_1)."""
+        asdu_data = ASDUBuilder.build_bitstring_command_with_time(
+            self._common_addr, ioa, value, time_tag
+        )
+        await self._send_command_asdu(asdu_data)
+        logger.info(f"Bitstring Command (with time): IOA={ioa} value=0x{value:08X}")
+        self._fire_event(MasterEvent.COMMAND_SENT, {
+            "type": "bitstring_ta", "ioa": ioa, "value": value,
         })
 
     async def read_command(self, ioa: int) -> None:
@@ -524,18 +569,10 @@ class MasterEngine:
         Args:
             ioa: 信息对象地址
         """
-        if not self._state_machine.is_running:
-            raise RuntimeError("Not in running state")
-
         asdu_data = ASDUBuilder.build_read_command(
             self._common_addr, ioa
         )
-        tx_seq = self._seq.get_send_seq()
-        rx_seq = self._seq.get_recv_seq()
-        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
-
-        self._state_machine.on_i_frame_sent()
-        await self._send_frame(frame)
+        await self._send_command_asdu(asdu_data)
 
         logger.info(f"Read Command: IOA={ioa}")
 
@@ -545,39 +582,23 @@ class MasterEngine:
         Args:
             delay_ms: 延时值（毫秒）
         """
-        if not self._state_machine.is_running:
-            raise RuntimeError("Not in running state")
-
         asdu_data = ASDUBuilder.build_delay_command(
             self._common_addr, delay_ms
         )
-        tx_seq = self._seq.get_send_seq()
-        rx_seq = self._seq.get_recv_seq()
-        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
-
-        self._state_machine.on_i_frame_sent()
-        await self._send_frame(frame)
+        await self._send_command_asdu(asdu_data)
 
         logger.info(f"Delay Command: delay={delay_ms}ms")
 
-    async def test_command_with_time(self, time_tag: Optional[CP56Time2a] = None) -> None:
+    async def test_command_with_time(self, time_tag: CP56Time2a | None = None) -> None:
         """发送带时标测试命令 (C_TS_TA_1).
 
         Args:
             time_tag: 时标，默认使用当前时间
         """
-        if not self._state_machine.is_running:
-            raise RuntimeError("Not in running state")
-
         asdu_data = ASDUBuilder.build_test_command_with_time(
             self._common_addr, time_tag
         )
-        tx_seq = self._seq.get_send_seq()
-        rx_seq = self._seq.get_recv_seq()
-        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
-
-        self._state_machine.on_i_frame_sent()
-        await self._send_frame(frame)
+        await self._send_command_asdu(asdu_data)
 
         logger.info("Test Command with Time sent")
 
@@ -592,18 +613,10 @@ class MasterEngine:
             value: 归一化值 (-1.0..+1.0)
             param_change: 参数变更标志 (0=未用, 1=运行中使用, 2=运行中不使用)
         """
-        if not self._state_machine.is_running:
-            raise RuntimeError("Not in running state")
-
         asdu_data = ASDUBuilder.build_parameter_normalized(
             self._common_addr, ioa, value, param_change
         )
-        tx_seq = self._seq.get_send_seq()
-        rx_seq = self._seq.get_recv_seq()
-        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
-
-        self._state_machine.on_i_frame_sent()
-        await self._send_frame(frame)
+        await self._send_command_asdu(asdu_data)
 
         logger.info(f"Parameter Normalized: IOA={ioa} value={value} change={param_change}")
 
@@ -616,18 +629,10 @@ class MasterEngine:
             value: 标度化值 (-32768..+32767)
             param_change: 参数变更标志
         """
-        if not self._state_machine.is_running:
-            raise RuntimeError("Not in running state")
-
         asdu_data = ASDUBuilder.build_parameter_scaled(
             self._common_addr, ioa, value, param_change
         )
-        tx_seq = self._seq.get_send_seq()
-        rx_seq = self._seq.get_recv_seq()
-        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
-
-        self._state_machine.on_i_frame_sent()
-        await self._send_frame(frame)
+        await self._send_command_asdu(asdu_data)
 
         logger.info(f"Parameter Scaled: IOA={ioa} value={value} change={param_change}")
 
@@ -640,18 +645,10 @@ class MasterEngine:
             value: 短浮点值
             param_change: 参数变更标志
         """
-        if not self._state_machine.is_running:
-            raise RuntimeError("Not in running state")
-
         asdu_data = ASDUBuilder.build_parameter_float(
             self._common_addr, ioa, value, param_change
         )
-        tx_seq = self._seq.get_send_seq()
-        rx_seq = self._seq.get_recv_seq()
-        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
-
-        self._state_machine.on_i_frame_sent()
-        await self._send_frame(frame)
+        await self._send_command_asdu(asdu_data)
 
         logger.info(f"Parameter Float: IOA={ioa} value={value} change={param_change}")
 
@@ -662,18 +659,10 @@ class MasterEngine:
             ioa: 信息对象地址
             qualifier: 0=未用/取消, 1=激活/周期, 2=去激活
         """
-        if not self._state_machine.is_running:
-            raise RuntimeError("Not in running state")
-
         asdu_data = ASDUBuilder.build_parameter_activation(
             self._common_addr, ioa, qualifier
         )
-        tx_seq = self._seq.get_send_seq()
-        rx_seq = self._seq.get_recv_seq()
-        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
-
-        self._state_machine.on_i_frame_sent()
-        await self._send_frame(frame)
+        await self._send_command_asdu(asdu_data)
 
         action_str = {0: "未用", 1: "激活", 2: "去激活"}.get(qualifier, f"未知({qualifier})")
         logger.info(f"Parameter Activation: IOA={ioa} qualifier={action_str}")
@@ -686,19 +675,12 @@ class MasterEngine:
         Args:
             ioa: 信息对象地址
         """
-        if not self._state_machine.is_running:
-            raise RuntimeError("Not in running state")
-
         asdu_data = ASDUBuilder.build_call_directory(
             self._common_addr, ioa, qualifier=5
         )
-        tx_seq = self._seq.get_send_seq()
-        rx_seq = self._seq.get_recv_seq()
-        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
-
-        self._state_machine.on_i_frame_sent()
-        await self._send_frame(frame)
-
+        # 与非文件传输命令一致：窗口满时等待至多 t1（文件传输会产生大量 I 帧，
+        # 是最容易打满 k 窗口的场景）。
+        await self._send_command_asdu(asdu_data)
         logger.info("File Call Directory sent")
 
     async def file_select(self, ioa: int, file_name: int) -> None:
@@ -708,19 +690,10 @@ class MasterEngine:
             ioa: 信息对象地址
             file_name: 文件名 (16-bit)
         """
-        if not self._state_machine.is_running:
-            raise RuntimeError("Not in running state")
-
         asdu_data = ASDUBuilder.build_file_select_call_get(
             self._common_addr, ioa, file_name, qualifier=4
         )
-        tx_seq = self._seq.get_send_seq()
-        rx_seq = self._seq.get_recv_seq()
-        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
-
-        self._state_machine.on_i_frame_sent()
-        await self._send_frame(frame)
-
+        await self._send_command_asdu(asdu_data)
         logger.info(f"File Select: file_name={file_name}")
 
     async def file_request(self, ioa: int, file_name: int) -> None:
@@ -730,19 +703,10 @@ class MasterEngine:
             ioa: 信息对象地址
             file_name: 文件名 (16-bit)
         """
-        if not self._state_machine.is_running:
-            raise RuntimeError("Not in running state")
-
         asdu_data = ASDUBuilder.build_file_select_call_get(
             self._common_addr, ioa, file_name, qualifier=1
         )
-        tx_seq = self._seq.get_send_seq()
-        rx_seq = self._seq.get_recv_seq()
-        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
-
-        self._state_machine.on_i_frame_sent()
-        await self._send_frame(frame)
-
+        await self._send_command_asdu(asdu_data)
         logger.info(f"File Request: file_name={file_name}")
 
     async def file_ack(self, ioa: int, file_name: int,
@@ -755,19 +719,10 @@ class MasterEngine:
             section_name: 节名 (8-bit)
             qualifier: 0=缺省, 1=肯定文件, 2=否定文件, 3=肯定节, 4=否定节
         """
-        if not self._state_machine.is_running:
-            raise RuntimeError("Not in running state")
-
         asdu_data = ASDUBuilder.build_ack_file_section(
             self._common_addr, ioa, file_name, section_name, qualifier
         )
-        tx_seq = self._seq.get_send_seq()
-        rx_seq = self._seq.get_recv_seq()
-        frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
-
-        self._state_machine.on_i_frame_sent()
-        await self._send_frame(frame)
-
+        await self._send_command_asdu(asdu_data)
         qual_str = {0: "缺省", 1: "肯定文件", 2: "否定文件", 3: "肯定节", 4: "否定节"}.get(qualifier, f"未知({qualifier})")
         logger.info(f"File ACK: file_name={file_name} section={section_name} qualifier={qual_str}")
 
@@ -783,12 +738,15 @@ class MasterEngine:
         self._file_transfer.request_file(ioa, file_name)
 
     async def _send_i_frame_with_data(self, asdu_data: bytes) -> None:
-        """发送I帧（内部方法）."""
+        """发送I帧（内部方法）— 与命令发送共享 k 窗口等待语义."""
+        await self._await_send_window()
         tx_seq = self._seq.get_send_seq()
         rx_seq = self._seq.get_recv_seq()
         frame = APCICodec.encode_i(tx_seq, rx_seq, asdu_data)
         self._state_machine.on_i_frame_sent()
         await self._send_frame(frame)
+        if not self._seq.send_window_available:
+            self._window_available.clear()
 
     def _on_file_received(self, file_name: int, data: bytes) -> None:
         """文件接收完成回调."""
@@ -827,9 +785,7 @@ class MasterEngine:
 
         # 记录到历史数据库
         if self._history_db:
-            frame_type = "I" if len(frame) >= 6 and (frame[2] & 0x01) == 0 else (
-                "S" if len(frame) >= 6 and (frame[2] & 0x03) == 0x01 else "U"
-            )
+            frame_type = APCICodec.frame_type_of(frame)
             self._history_db.record_frame("rx", frame, frame_type=frame_type)
 
         try:
@@ -849,9 +805,24 @@ class MasterEngine:
 
     def _handle_i_frame(self, apci: APCI, frame: bytes) -> None:
         """处理 I 帧."""
-        self._seq.process_rx_i_frame(apci.tx_seq)
+        seq_ok = self._seq.process_rx_i_frame(apci.tx_seq)
+        if not seq_ok:
+            # 标准: 报文丢失/错序意味着 TCP 连接异常，应关闭连接并重建。
+            # 主站与子站策略统一：均断开连接。使用 disconnect() 仅重建当前
+            # 连接 —— 关闭底层连接后 _connect_loop 会触发 _on_tcp_disconnected
+            # (状态机离开 Running + 触发 DISCONNECTED) 并按配置重连；
+            # 若用 stop() 会取消重连循环并跳过 on_disconnected 回调。
+            logger.error(
+                f"Sequence mismatch: expected={self._seq.recv_seq}, "
+                f"received={apci.tx_seq}, disconnecting"
+            )
+            self._spawn(self._client.disconnect())
+            return
         # I帧的rx_seq是隐式确认，等效于S帧
         self._seq.process_rx_i_frame_ack(apci.rx_seq)
+        # 隐式确认可能释放了发送窗口
+        if self._seq.send_window_available:
+            self._window_available.set()
 
         # 解析 ASDU
         asdu_data = frame[6:6 + apci.asdu_length]
@@ -859,13 +830,24 @@ class MasterEngine:
             asdu = ASDU.decode(asdu_data)
             self._process_asdu(asdu)
         except Exception as e:
-            logger.error(f"ASDU decode error: {e}")
+            # 解码失败可能因"未知类型标识"应答 — 仅解析头部以优雅处理
+            try:
+                header = ASDU.decode_header(asdu_data)
+                if header.cot in (COT.UNKNOWN_TYPE, COT.UNKNOWN_COT, COT.UNKNOWN_CA):
+                    self._handle_standard_error_reply(header)
+                else:
+                    logger.error(f"ASDU decode error: {e}")
+            except Exception:
+                logger.error(f"ASDU decode error: {e}")
 
         self._state_machine.on_i_frame_received()
 
     def _handle_s_frame(self, apci: APCI) -> None:
         """处理 S 帧."""
         self._seq.process_rx_s_frame(apci.rx_seq)
+        # S帧确认释放了发送窗口
+        if self._seq.send_window_available:
+            self._window_available.set()
         self._state_machine.on_ack_received()
         logger.debug(f"S-Frame: rx_seq={apci.rx_seq}")
 
@@ -907,6 +889,17 @@ class MasterEngine:
 
     def _process_asdu(self, asdu: ASDU) -> None:
         """处理解析后的 ASDU."""
+        type_id = asdu.type_id
+        cot = asdu.cot
+
+        # ── 标准应答: 未知类型标识/未知传送原因/未知公共地址 (COT 42/43/44) ──
+        # 子站无法识别来报时按标准回送 COT=42/43/44 并保持连接；主站优雅处理。
+        # 注意: 需在公共地址校验之前处理 —— COT=44 应答会回显"错误的"公共地址，
+        # 若先做地址校验会被误丢弃。
+        if cot in (COT.UNKNOWN_TYPE, COT.UNKNOWN_COT, COT.UNKNOWN_CA):
+            self._handle_standard_error_reply(asdu)
+            return
+
         # 公共地址校验（广播地址255不检查）
         if asdu.common_addr != 255 and asdu.common_addr != self._common_addr:
             logger.warning(
@@ -914,17 +907,17 @@ class MasterEngine:
             )
             return
 
-        type_id = asdu.type_id
-        cot = asdu.cot
-
         # 总召唤
         if type_id == TypeID.C_IC_NA_1:
             if cot == COT.ACTCON:
                 logger.info("General Interrogation ACTCON received")
             elif cot == COT.ACTTERM:
                 logger.info("General Interrogation ACTTERM received")
-            elif cot >= COT.INTROGEN:
+            elif cot == COT.INTROGEN or COT.is_group_response(cot):
+                # 仅接受标准响应 COT: 20(站召唤) 或 21-36(第1-16组)
                 self._process_interrogation_response(asdu)
+            else:
+                logger.debug(f"General Interrogation with unexpected COT={cot}")
 
         # 累计量召唤
         elif type_id == TypeID.C_CI_NA_1:
@@ -932,8 +925,11 @@ class MasterEngine:
                 logger.info("Counter Interrogation ACTCON received")
             elif cot == COT.ACTTERM:
                 logger.info("Counter Interrogation ACTTERM received")
-            elif cot >= COT.INTROGEN:
+            elif COT.is_counter_response(cot):
+                # 仅接受标准响应 COT: 37(总请求) 或 38-41(第1-4组)
                 self._process_counter(asdu)
+            else:
+                logger.debug(f"Counter Interrogation with unexpected COT={cot}")
 
         # 单点遥信
         elif type_id in (TypeID.M_SP_NA_1, TypeID.M_SP_TB_1):
@@ -979,7 +975,10 @@ class MasterEngine:
         # 命令确认
         elif type_id in (TypeID.C_SC_NA_1, TypeID.C_DC_NA_1, TypeID.C_RC_NA_1,
                           TypeID.C_SE_NA_1, TypeID.C_SE_NB_1, TypeID.C_SE_NC_1,
-                          TypeID.C_BO_NA_1):
+                          TypeID.C_BO_NA_1,
+                          TypeID.C_SC_TA_1, TypeID.C_DC_TA_1, TypeID.C_RC_TA_1,
+                          TypeID.C_SE_TA_1, TypeID.C_SE_TB_1, TypeID.C_SE_TC_1,
+                          TypeID.C_BO_TA_1):
             self._process_command_ack(asdu)
 
         # 时钟同步确认
@@ -999,12 +998,15 @@ class MasterEngine:
         elif type_id in (TypeID.C_TS_NA_1, TypeID.C_TS_TA_1, TypeID.C_TS_NB_1):
             logger.info(f"Test Command ACK received, COT={cot}")
 
-        # 复位进程确认
+        # 复位进程确认 (C_RP_NA_1)
+        # 标准流程: ACT → ACTCON，不包含 ACTTERM；收到 ACTCON 即视为完成。
         elif type_id == TypeID.C_RP_NA_1:
             if cot == COT.ACTCON:
-                logger.info("Reset Process ACTCON received")
+                logger.info("Reset Process ACTCON received (completed)")
             elif cot == COT.ACTTERM:
-                logger.info("Reset Process ACTTERM received")
+                logger.info("Reset Process ACTTERM received (non-standard)")
+            else:
+                logger.debug(f"Reset Process with unexpected COT={cot}")
 
         # 延时获得
         elif type_id == TypeID.C_CD_NA_1:
@@ -1115,12 +1117,18 @@ class MasterEngine:
 
         if type_id == TypeID.F_FR_NA_1:
             self._file_transfer.handle_file_ready(obj.data)
+            # 主站收到"文件准备就绪"应立即回复 F_FR_NB_1 确认
+            self._file_transfer.send_file_ready_ack(obj.ioa)
         elif type_id == TypeID.F_SR_NA_1:
             self._file_transfer.handle_section_ready(obj.data)
+            # 主站收到"节准备就绪"应立即回复 F_SR_NB_1 确认
+            self._file_transfer.send_section_ready_ack(obj.ioa)
         elif type_id == TypeID.F_SG_NA_1:
             self._file_transfer.handle_file_segment(obj.data)
         elif type_id == TypeID.F_LS_NA_1:
             self._file_transfer.handle_last_section(obj.data)
+            # 收到"最后的节/段"后回复 F_AF_NA_1 (肯定节) 完成握手
+            self._file_transfer.send_ack(obj.ioa, qualifier=3)
         elif type_id == TypeID.F_DR_TA_1:
             self._file_transfer.handle_directory_entry(obj.data)
         elif type_id == TypeID.F_FR_NB_1:
@@ -1153,20 +1161,47 @@ class MasterEngine:
             elif isinstance(obj.data, CounterValue):
                 self._data_store.update_ym(obj.ioa, obj.data.value, obj.data.quality)
             elif isinstance(obj.data, GroupSinglePointWithStatus):
-                for i, (state, detected) in enumerate(obj.data.points):
+                for i, (state, _detected) in enumerate(obj.data.points):
                     self._data_store.update_yx(obj.ioa + i, state, QualityDescriptor())
 
-    def _process_command_ack(self, asdu: ASDU) -> None:
-        """处理命令确认."""
-        cot = asdu.cot
-        for obj in asdu.objects:
-            # 检查PN标志
-            pn = False
-            if hasattr(obj.data, 'to_bytes'):
-                data_bytes = obj.data.to_bytes()
-                if data_bytes and (data_bytes[0] & 0x80):
-                    pn = True
+    def _handle_standard_error_reply(self, asdu: ASDU) -> None:
+        """优雅处理子站按标准回送的 COT 42/43/44 应答.
 
+        - COT 42: 未知类型标识 (unknown type identification)
+        - COT 43: 未知传送原因 (unknown cause of transmission)
+        - COT 44: 未知公共地址 (unknown common address)
+
+        主站记录告警并触发事件，但**不**断开连接（连接本身正常）。
+        """
+        cot = asdu.cot
+        reason = {
+            COT.UNKNOWN_TYPE: "未知类型标识 (COT=42)",
+            COT.UNKNOWN_COT: "未知传送原因 (COT=43)",
+            COT.UNKNOWN_CA: "未知公共地址 (COT=44)",
+        }.get(cot, f"标准错误应答 (COT={cot})")
+        logger.warning(
+            f"Slave standard error reply: {reason}, type={asdu.type_id}, "
+            f"ca={asdu.common_addr}"
+        )
+        self._fire_event(MasterEvent.DATA_RECEIVED, {
+            "type_id": asdu.type_id,
+            "cot": cot,
+            "common_addr": asdu.common_addr,
+            "error_reply": reason,
+            "objects": asdu.objects,
+        })
+
+    def _process_command_ack(self, asdu: ASDU) -> None:
+        """处理命令确认.
+
+        否定确认 (P/N) 严格取自标准 COT bit6 (``asdu.pn``)。
+        不再退回解析命令数据字节 bit7 —— 该字节是 S/E (选择/执行) 位，
+        对 SBO 选择命令 S/E=1，会把"肯定选择确认"误判为 NACK
+        (子站自 P0/#4 起已不再用数据字节伪造 P/N)。
+        """
+        cot = asdu.cot
+        pn = asdu.pn
+        for obj in asdu.objects:
             if cot == COT.ACTCON:
                 if pn:
                     logger.warning(f"Command NACK (PN=1): type={asdu.type_id} IOA={obj.ioa}")
@@ -1203,7 +1238,7 @@ class MasterEngine:
         """处理成组单点状态检出."""
         for obj in asdu.objects:
             gsp: GroupSinglePointWithStatus = obj.data
-            for i, (state, detected) in enumerate(gsp.points):
+            for i, (state, _detected) in enumerate(gsp.points):
                 self._data_store.update_yx(obj.ioa + i, state, QualityDescriptor())
 
     def _process_read_response(self, asdu: ASDU) -> None:
@@ -1232,9 +1267,7 @@ class MasterEngine:
 
         # 记录到历史数据库
         if self._history_db:
-            frame_type = "I" if len(frame) >= 6 and (frame[2] & 0x01) == 0 else (
-                "S" if len(frame) >= 6 and (frame[2] & 0x03) == 0x01 else "U"
-            )
+            frame_type = APCICodec.frame_type_of(frame)
             self._history_db.record_frame("tx", frame, frame_type=frame_type)
 
     def _send_s_frame(self, rx_seq: int) -> None:
@@ -1290,8 +1323,9 @@ class MasterEngine:
             self._state_machine.on_s_frame_sent()
             logger.info(f"T2 expired: S-Frame sent (rx_seq={rx_seq})")
         elif timer_type == TimerType.T3:
-            # 空闲超时，发送测试帧
+            # 空闲超时，发送测试帧 — U 帧 ACT，发送后须在 t1 内收到 TESTFR CON
             self._spawn(self._send_frame(APCICodec.testfr_act()))
+            self._state_machine.on_u_frame_act_sent()
 
     # ── 定时器循环 ─────────────────────────────────────────────────
 
@@ -1320,7 +1354,7 @@ class MasterEngine:
     # ── 报文缓冲访问 ──────────────────────────────────────────────
 
     def get_rx_buffer(self, count: int = 100) -> list[tuple[float, bytes]]:
-        return self._rx_buffer[-count:]
+        return list(self._rx_buffer)[-count:]
 
     def get_tx_buffer(self, count: int = 100) -> list[tuple[float, bytes]]:
-        return self._tx_buffer[-count:]
+        return list(self._tx_buffer)[-count:]

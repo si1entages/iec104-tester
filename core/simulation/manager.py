@@ -24,9 +24,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+import time
+from typing import Any
 
-from .conditions import NetworkCondition, ConditionPreset
+from .conditions import ConditionPreset, NetworkCondition
 from .proxy import NetworkProxy
 
 logger = logging.getLogger("iec104.simulation.manager")
@@ -40,7 +41,7 @@ class SimulationManager:
 
     def __init__(self):
         self._condition = NetworkCondition()
-        self._proxy: Optional[NetworkProxy] = None
+        self._proxy: NetworkProxy | None = None
         self._engine: Any = None
         self._installed = False
 
@@ -53,7 +54,7 @@ class SimulationManager:
         return self._condition
 
     @property
-    def proxy(self) -> Optional[NetworkProxy]:
+    def proxy(self) -> NetworkProxy | None:
         return self._proxy
 
     # ── 配置 ──────────────────────────────────────────────────────
@@ -96,7 +97,7 @@ class SimulationManager:
         self._proxy.install_on_engine(engine)
 
         # 替换引擎的 raw_frame_callback
-        original_callback = getattr(engine, '_raw_frame_callback', None)
+        original_callback = engine.get_raw_frame_callback()
         if original_callback:
             wrapped = self._proxy.wrap_rx_callback(original_callback)
             engine.set_raw_frame_callback(wrapped)
@@ -132,7 +133,7 @@ class SimulationManager:
             return "Simulation not active"
 
         lines = [
-            f"🔧 Network Simulation",
+            "🔧 Network Simulation",
             f"   Condition: {self._condition.describe()}",
             f"   Active: {self._condition.active}",
             f"   RX: {s.get('rx_total', 0)} total, "
@@ -170,7 +171,7 @@ class SimulationManager:
         """手动触发断线."""
         if self._proxy:
             self._proxy._disconnected_until = (
-                __import__('time').monotonic() + duration
+                time.monotonic() + duration
             )
             self._proxy._stats["disconnects"] += 1
             logger.warning(f"Manual disconnect for {duration}s")

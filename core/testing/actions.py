@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any, Callable, Optional
+from collections.abc import Callable
 
 from .context import TestContext
 
@@ -26,7 +26,7 @@ class ActionRegistry:
     def register(self, name: str, handler: Callable) -> None:
         self._actions[name] = handler
 
-    def get(self, name: str) -> Optional[Callable]:
+    def get(self, name: str) -> Callable | None:
         return self._actions.get(name)
 
     def list_actions(self) -> list[str]:
@@ -82,11 +82,11 @@ async def action_connect(ctx: TestContext, params: dict) -> dict:
     if ctx.role == "master":
         await engine.start()
         ctx.connected = True
-        return {"message": f"Master connecting to {engine._host}:{engine._port}"}
+        return {"message": f"Master connecting to {engine.host}:{engine.port}"}
     else:
         await engine.start()
         ctx.connected = True
-        return {"message": f"Slave listening on port {engine._port}"}
+        return {"message": f"Slave listening on port {engine.port}"}
 
 
 async def action_disconnect(ctx: TestContext, params: dict) -> dict:
@@ -223,7 +223,7 @@ async def action_wait_frames(ctx: TestContext, params: dict) -> dict:
     """等待收到指定数量的帧."""
     direction = params.get("direction", "rx")
     count = params.get("count", 1)
-    frame_type = params.get("frame_type", None)
+    frame_type = params.get("frame_type")
     timeout = params.get("timeout", 10.0)
     poll_interval = params.get("poll_interval", 0.1)
 
@@ -252,7 +252,6 @@ async def action_wait_asdu(ctx: TestContext, params: dict) -> dict:
     count = params.get("count", 1)
     poll_interval = params.get("poll_interval", 0.1)
 
-    from ..protocol.types import TypeID, COT
 
     start = time.monotonic()
     matched = 0

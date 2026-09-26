@@ -22,10 +22,10 @@
 from __future__ import annotations
 
 import enum
-import time
 import threading
-from typing import Optional, Callable
-from dataclasses import dataclass, field
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
 
 from .constants import T0_DEFAULT, T1_DEFAULT, T2_DEFAULT, T3_DEFAULT
 from .types import ConnState
@@ -75,12 +75,17 @@ class ConnectionStateMachine:
         t1: float = T1_DEFAULT,
         t2: float = T2_DEFAULT,
         t3: float = T3_DEFAULT,
-        on_state_change: Optional[Callable[[str, str], None]] = None,
-        on_timer_expired: Optional[Callable[[TimerType], None]] = None,
+        on_state_change: Callable[[str, str], None] | None = None,
+        on_timer_expired: Callable[[TimerType], None] | None = None,
+        use_t0: bool = True,
     ):
 
         self._state = ConnState.STOPPED
         self._lock = threading.Lock()
+
+        # t0 仅适用于发起 TCP 连接的一方（控制站/主站）: t0 是"连接建立超时",
+        # 被控站（子站）被动接受连接，不使用 t0。子站传 use_t0=False。
+        self._use_t0 = use_t0
 
         # 定时器
         self._timers = {
@@ -124,7 +129,9 @@ class ConnectionStateMachine:
             old = self._state.value
             if self._state == ConnState.STOPPED:
                 self._state = ConnState.CONNECTING
-                self._start_timer(TimerType.T0)
+                # t0 仅由发起连接的控制站启动；被控站 (use_t0=False) 不启动。
+                if self._use_t0:
+                    self._start_timer(TimerType.T0)
                 self._notify_state_change(old, self._state.value)
 
     def on_startdt_con(self) -> None:
@@ -158,7 +165,16 @@ class ConnectionStateMachine:
             self._notify_state_change(old, self._state.value)
 
     def on_startdt_act_sent(self) -> None:
-        """发送了 STARTDT ACT — 等待确认."""
+        """发送了 STARTDT ACT — 等待确认 (t1)."""
+        self.on_u_frame_act_sent()
+
+    def on_u_frame_act_sent(self) -> None:
+        """发送了任意 U 帧 ACT (STARTDT/STOPDT/TESTFR) — 等待对应 CON.
+
+        标准 (IEC 60870-5-104): 发送一个 I 格式报文**或 U 格式报文**后，
+        必须在 t1 时间内得到接收方认可，否则认为 TCP 连接异常。因此
+        STOPDT ACT 与 TESTFR ACT 同样需要启动 t1。
+        """
         self._start_timer(TimerType.T1)
 
     def on_i_frame_sent(self) -> None:
@@ -191,7 +207,7 @@ class ConnectionStateMachine:
 
     # ── 定时器检查 ─────────────────────────────────────────────────
 
-    def check_timers(self) -> Optional[TimerType]:
+    def check_timers(self) -> TimerType | None:
         """检查所有定时器，返回第一个超时的定时器类型.
 
         Returns:

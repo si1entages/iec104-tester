@@ -8,11 +8,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-import struct
-import time
 import threading
+import time
 from collections import deque
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from .conditions import NetworkCondition
 
@@ -38,8 +37,8 @@ class NetworkProxy:
         self._lock = threading.Lock()
 
         # 原始回调
-        self._original_rx: Optional[Callable] = None
-        self._original_tx: Optional[Callable] = None
+        self._original_rx: Callable | None = None
+        self._original_tx: Callable | None = None
 
         # 乱序缓冲
         self._reorder_buffer: deque = deque(maxlen=condition.reorder_window)
@@ -99,10 +98,30 @@ class NetworkProxy:
     def install_on_engine(self, engine) -> None:
         """在引擎上安装代理.
 
-        自动包装引擎的 frame_callback，不需要手动设置。
+        自动包装引擎的 TX 发送方法和 RX 回调，不需要手动设置。
         """
         # 保存引擎引用，用于后续发送
         self._engine = engine
+
+        # 安装 TX 拦截：包装引擎的 _send_frame 方法
+        if hasattr(engine, '_send_frame'):
+            original_tx = engine._send_frame
+            engine._send_frame = self.wrap_tx_callback(original_tx)
+
+        # 安装 RX 拦截：包装引擎的 _on_frame_received 方法
+        # 对于主站，TCP 客户端直接调用 engine._on_frame_received
+        # 对于子站，TCP 服务端调用 engine._on_frame_received
+        if hasattr(engine, '_on_frame_received'):
+            original_rx = engine._on_frame_received
+            wrapped_rx = self.wrap_rx_callback(original_rx)
+            # 替换引擎实例上的回调（实例属性覆盖类方法）
+            engine._on_frame_received = wrapped_rx
+            # 如果 TCP 客户端/服务端持有回调引用，也需要更新
+            if hasattr(engine, '_client') and hasattr(engine._client, '_on_frame'):
+                engine._client._on_frame = wrapped_rx
+            elif hasattr(engine, '_server') and hasattr(engine._server, '_on_frame'):
+                engine._server._on_frame = wrapped_rx
+
         logger.info(f"Network proxy installed: {self._condition.describe()}")
 
     # ── 帧处理 ────────────────────────────────────────────────────
@@ -130,7 +149,7 @@ class NetworkProxy:
         # 丢包
         if random.random() < self._condition.loss_rate:
             self._stats["rx_dropped"] += 1
-            logger.debug(f"RX frame dropped (loss)")
+            logger.debug("RX frame dropped (loss)")
             return
 
         # 损坏
@@ -145,10 +164,15 @@ class NetworkProxy:
         if self._condition.delay_ms > 0:
             delay = self._calc_delay()
             self._stats["rx_delayed"] += 1
-            asyncio.get_event_loop().call_later(
-                delay / 1000.0,
-                lambda: self._deliver_rx(frame, *args, **kwargs),
-            )
+            try:
+                loop = asyncio.get_running_loop()
+                loop.call_later(
+                    delay / 1000.0,
+                    lambda: self._deliver_rx(frame, *args, **kwargs),
+                )
+            except RuntimeError:
+                # 无运行中的事件循环（同步调用场景）— 降级为立即投递，不延迟
+                self._deliver_rx(frame, *args, **kwargs)
         else:
             self._deliver_rx(frame, *args, **kwargs)
 
@@ -175,7 +199,7 @@ class NetworkProxy:
         # 丢包
         if random.random() < self._condition.loss_rate:
             self._stats["tx_dropped"] += 1
-            logger.debug(f"TX frame dropped (loss)")
+            logger.debug("TX frame dropped (loss)")
             return
 
         # 损坏
@@ -206,6 +230,28 @@ class NetworkProxy:
         if self._condition.disconnect_rate > 0:
             if random.random() < self._condition.disconnect_rate:
                 self._trigger_disconnect()
+
+        # 乱序处理
+        if self._condition.reorder_rate > 0 and random.random() < self._condition.reorder_rate:
+            self._reorder_buffer.append(frame)
+            self._stats["tx_reordered"] += 1
+            logger.debug(f"TX frame buffered for reorder ({len(self._reorder_buffer)}/{self._condition.reorder_window})")
+            # 缓冲区满时，打乱顺序释放所有帧
+            if len(self._reorder_buffer) >= self._condition.reorder_window:
+                frames = list(self._reorder_buffer)
+                random.shuffle(frames)
+                self._reorder_buffer.clear()
+                for f in frames:
+                    await self._deliver_tx(f, *args, **kwargs)
+            return
+
+        # 非乱序帧：先刷新缓冲区中积压的帧（打乱后发送），再发送当前帧
+        if self._reorder_buffer:
+            frames = list(self._reorder_buffer)
+            random.shuffle(frames)
+            self._reorder_buffer.clear()
+            for f in frames:
+                await self._deliver_tx(f, *args, **kwargs)
 
         await self._deliver_tx(frame, *args, **kwargs)
 

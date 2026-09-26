@@ -6,15 +6,15 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Optional, Callable, Any
+from typing import Any
 
-from .slave import SlaveEngine, SlaveEvent
+from ..config import FlowControlConfig, TimerConfig
 from ..data.point_table import PointTable
-from ..config import TimerConfig, FlowControlConfig, SlaveConfig
+from .slave import SlaveEngine, SlaveEvent
 
 logger = logging.getLogger("iec104.multi_station")
 
@@ -83,7 +83,7 @@ class MultiStationManager:
         self._config = config
         self._engines: dict[str, SlaveEngine] = {}
         self._station_configs: dict[str, StationConfig] = {}
-        self._global_event_callback: Optional[Callable] = None
+        self._global_event_callback: Callable | None = None
         self._running = False
         self._start_time: float = 0.0
 
@@ -209,11 +209,11 @@ class MultiStationManager:
         logger.info(f"Station {config.station_id} started on port {config.port} "
                    f"(common_addr={config.common_addr})")
 
-    def get_engine(self, station_id: str) -> Optional[SlaveEngine]:
+    def get_engine(self, station_id: str) -> SlaveEngine | None:
         """获取指定站的引擎."""
         return self._engines.get(station_id)
 
-    def get_station_status(self, station_id: str) -> Optional[StationStatus]:
+    def get_station_status(self, station_id: str) -> StationStatus | None:
         """获取指定站的状态."""
         engine = self._engines.get(station_id)
         config = self._station_configs.get(station_id)

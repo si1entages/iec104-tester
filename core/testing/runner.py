@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Optional, Callable
 
-from .context import TestContext, TestResult, StepResult, TestStatus, StepStatus
-from .script import ScriptLoader, TestScript, TestStep
 from .actions import ActionRegistry
 from .assertions import AssertionEngine
+from .context import StepResult, StepStatus, TestContext, TestResult, TestStatus
 from .report import ReportGenerator
+from .script import ScriptLoader, TestScript, TestStep
 
 logger = logging.getLogger("iec104.testing.runner")
 
@@ -33,8 +32,8 @@ class TestRunner:
     def __init__(
         self,
         report_dir: str = "test_reports",
-        on_step_complete: Optional[Callable[[StepResult], None]] = None,
-        on_test_complete: Optional[Callable[[TestResult], None]] = None,
+        on_step_complete: Callable[[StepResult], None] | None = None,
+        on_test_complete: Callable[[TestResult], None] | None = None,
     ):
         self._scripts: list[TestScript] = []
         self._report_dir = Path(report_dir)
@@ -42,6 +41,17 @@ class TestRunner:
         self._assertions = AssertionEngine()
         self._on_step_complete = on_step_complete
         self._on_test_complete = on_test_complete
+
+    def set_callbacks(
+        self,
+        on_step_complete: Callable[[StepResult], None] | None = None,
+        on_test_complete: Callable[[TestResult], None] | None = None,
+    ) -> None:
+        """设置或更新回调函数（公开 API，避免直接访问私有属性）."""
+        if on_step_complete is not None:
+            self._on_step_complete = on_step_complete
+        if on_test_complete is not None:
+            self._on_test_complete = on_test_complete
 
     @property
     def scripts(self) -> list[TestScript]:
@@ -256,8 +266,8 @@ class TestRunner:
                 reconnect_interval=conn.get("reconnect_interval", 5.0),
             )
         else:
-            from ..engine.slave import SlaveEngine
             from ..data.point_table import PointTable
+            from ..engine.slave import SlaveEngine
 
             pt = PointTable()
             pt_config = script.point_table

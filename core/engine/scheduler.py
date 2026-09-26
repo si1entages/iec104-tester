@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Optional, Callable, Any
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 logger = logging.getLogger("iec104.scheduler")
@@ -55,7 +55,7 @@ class TaskScheduler:
     def __init__(self):
         self._tasks: dict[str, ScheduledTask] = {}
         self._running = False
-        self._loop_task: Optional[asyncio.Task] = None
+        self._loop_task: asyncio.Task | None = None
 
     @property
     def is_running(self) -> bool:
@@ -113,7 +113,7 @@ class TaskScheduler:
             return True
         return False
 
-    def get_task(self, name: str) -> Optional[ScheduledTask]:
+    def get_task(self, name: str) -> ScheduledTask | None:
         return self._tasks.get(name)
 
     def get_all_tasks(self) -> list[ScheduledTask]:

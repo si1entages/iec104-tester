@@ -17,12 +17,14 @@ import logging
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Optional
 
 from .format import (
-    CaptureFile, FrameEntry, FileHeader,
-    DIRECTION_RX, DIRECTION_TX,
+    DIRECTION_RX,
+    DIRECTION_TX,
+    CaptureFile,
+    FrameEntry,
 )
 
 logger = logging.getLogger("iec104.capture.recorder")
@@ -48,7 +50,7 @@ class PacketRecorder:
         self._buffer: deque[FrameEntry] = deque(maxlen=buffer_size)
         self._lock = threading.Lock()
         self._start_time: float = 0.0
-        self._file_path: Optional[Path] = None
+        self._file_path: Path | None = None
         self._file_format: str = "binary"  # binary / json
         self._description: str = ""
 
@@ -69,7 +71,7 @@ class PacketRecorder:
         self._frames_since_flush: int = 0
 
         # 回调（用于实时通知）
-        self._on_frame: Optional[Callable[[FrameEntry], None]] = None
+        self._on_frame: Callable[[FrameEntry], None] | None = None
 
     # ── 属性 ──────────────────────────────────────────────────────
 

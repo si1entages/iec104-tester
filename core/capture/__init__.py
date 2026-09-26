@@ -23,11 +23,11 @@
         process(frame)
 """
 
-from .recorder import PacketRecorder
-from .player import PacketPlayer
-from .format import CaptureFile, FrameEntry, FileHeader
-from .filter import FrameFilter
 from .analyzer import CaptureAnalyzer
+from .filter import FrameFilter
+from .format import CaptureFile, FileHeader, FrameEntry
+from .player import PacketPlayer
+from .recorder import PacketRecorder
 
 __all__ = [
     "PacketRecorder",

@@ -28,13 +28,16 @@ U-Frame (控制):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from .constants import (
-    START_BYTE, APCI_LENGTH,
-    U_STARTDT_ACT, U_STARTDT_CON, U_STOPDT_ACT, U_STOPDT_CON,
-    U_TESTFR_ACT, U_TESTFR_CON, U_TYPE_MASK,
-    I_FORMAT_LENGTH, S_FORMAT_LENGTH, U_FORMAT_LENGTH,
+    APCI_LENGTH,
+    START_BYTE,
+    U_STARTDT_ACT,
+    U_STARTDT_CON,
+    U_STOPDT_ACT,
+    U_STOPDT_CON,
+    U_TESTFR_ACT,
+    U_TESTFR_CON,
 )
 from .types import APDUType
 
@@ -243,3 +246,20 @@ class APCICodec:
     @staticmethod
     def testfr_con() -> bytes:
         return APCICodec.encode_u(U_TESTFR_CON)
+
+    @staticmethod
+    def frame_type_of(frame: bytes) -> str:
+        """快速判断帧类型（不解析完整 APCI）.
+
+        Args:
+            frame: 原始帧字节
+
+        Returns:
+            "I" / "S" / "U"
+        """
+        if len(frame) >= 6 and (frame[2] & 0x01) == 0:
+            return "I"
+        elif len(frame) >= 6 and (frame[2] & 0x03) == 0x01:
+            return "S"
+        else:
+            return "U"

@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
 
 from .context import TestContext
 
 logger = logging.getLogger("iec104.testing.assertions")
 
 
-class AssertionError(Exception):
+class AssertionFailed(Exception):
     """断言失败."""
     pass
 

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import time
 import threading
+import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
 from enum import Enum
+from typing import Any
 
 
 class StepStatus(Enum):
@@ -179,11 +179,7 @@ class TestContext:
         for _, data in self.rx_frames:
             if len(data) >= 6:
                 cf = data[2]
-                if frame_type == "I" and (cf & 0x01) == 0:
-                    count += 1
-                elif frame_type == "S" and (cf & 0x03) == 0x01:
-                    count += 1
-                elif frame_type == "U" and (cf & 0x03) == 0x03:
+                if frame_type == "I" and (cf & 0x01) == 0 or frame_type == "S" and (cf & 0x03) == 0x01 or frame_type == "U" and (cf & 0x03) == 0x03:
                     count += 1
         return count
 
@@ -194,10 +190,6 @@ class TestContext:
         for _, data in self.tx_frames:
             if len(data) >= 6:
                 cf = data[2]
-                if frame_type == "I" and (cf & 0x01) == 0:
-                    count += 1
-                elif frame_type == "S" and (cf & 0x03) == 0x01:
-                    count += 1
-                elif frame_type == "U" and (cf & 0x03) == 0x03:
+                if frame_type == "I" and (cf & 0x01) == 0 or frame_type == "S" and (cf & 0x03) == 0x01 or frame_type == "U" and (cf & 0x03) == 0x03:
                     count += 1
         return count
