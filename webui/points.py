@@ -6,7 +6,13 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from core.data.point_table import PointTable
+from core.data.point_table import (
+    PointTable,
+    YcPointDef,
+    YkPointDef,
+    YmPointDef,
+    YxPointDef,
+)
 
 
 class PointService:
@@ -15,6 +21,7 @@ class PointService:
     def __init__(self, table: PointTable | None = None):
         self.table = table or PointTable()
         self._count = 0
+        self.refresh_count()
 
     @property
     def count(self) -> int:
@@ -145,18 +152,109 @@ class PointService:
             return {"ok": False, "error": str(e)}
 
     def export_csv(self, engine: Any = None) -> str:
+        """导出 CSV（列: type,ioa,name,group,enabled,value,quality,subtype,sbo）.
+
+        ``subtype`` 为类型细分（遥信 single/double、遥测 short_float/normalized/scaled、
+        遥控 single/double）；``sbo`` 仅遥控有效（是否需要选择-执行）。
+        导入 :meth:`import_csv` 与本格式回环兼容，且兼容缺列的旧文件。
+        """
+
         def esc(v: Any) -> str:
             s = "" if v is None else str(v)
             if any(c in s for c in (',', '"', '\n', '\r')):
                 return '"' + s.replace('"', '""') + '"'
             return s
-        lines = ["type,ioa,name,group,enabled,value,quality"]
+
+        subtype = {
+            "YX": {p.ioa: p.point_type.value for p in self.table.get_all_yx()},
+            "YC": {p.ioa: p.data_type.value for p in self.table.get_all_yc()},
+            # 遥控命令类型是字符串（"single"/"double"），不是枚举
+            "YK": {p.ioa: str(p.command_type) for p in self.table.get_all_yk()},
+            "YM": {},
+        }
+        sbo = {p.ioa: int(bool(p.select_before_execute)) for p in self.table.get_all_yk()}
+
+        lines = ["type,ioa,name,group,enabled,value,quality,subtype,sbo"]
         for p in self.snapshot(engine):
             val = p.get("value", "")
             if isinstance(val, float):
                 val = f"{val:.6g}"
+            ioa = p["ioa"]
+            t = p["type"]
             lines.append(",".join(esc(x) for x in (
-                p["type"], p["ioa"], p.get("name", ""), p.get("group", ""),
+                t, ioa, p.get("name", ""), p.get("group", ""),
                 int(bool(p.get("enabled", True))), val, p.get("quality", ""),
+                subtype.get(t, {}).get(ioa, ""), sbo.get(ioa, "") if t == "YK" else "",
             )))
         return "\n".join(lines) + "\n"
+
+    def import_csv(self, text: str, engine: Any = None) -> dict:
+        """从 CSV 文本导入点表（整表替换）.
+
+        列: ``type,ioa,name,group,enabled[,value[,quality[,subtype[,sbo]]]]``
+        与 :meth:`export_csv` 回环兼容；缺失列取缺省值。
+        """
+        import csv
+        import io
+
+        try:
+            rows = list(csv.DictReader(io.StringIO(text)))
+        except Exception as e:
+            return {"ok": False, "error": f"CSV 解析失败: {e}"}
+        if not rows:
+            return {"ok": False, "error": "CSV 无数据行"}
+        if "type" not in rows[0] or "ioa" not in rows[0]:
+            return {"ok": False, "error": "CSV 缺少 type/ioa 列"}
+
+        new_table = PointTable()
+        new_table.common_addr = self.table.common_addr
+        new_table.station_name = self.table.station_name
+        count = 0
+        for row in rows:
+            try:
+                ptype = (row.get("type") or "").strip().upper()
+                ioa = int(row.get("ioa") or 0)
+                name = (row.get("name") or f"{ptype}_{ioa}").strip()
+                group = int(row.get("group") or 1)
+                enabled = (row.get("enabled") or "true").strip().lower() in ("true", "1", "yes")
+                subtype = (row.get("subtype") or "").strip()
+                if ptype == "YX":
+                    from core.data.point_table import YxType
+
+                    new_table.add_yx(YxPointDef(
+                        ioa=ioa, name=name, group=group, enabled=enabled,
+                        point_type=YxType(subtype) if subtype else YxType.SINGLE,
+                    ))
+                elif ptype == "YC":
+                    from core.data.point_table import YcType
+
+                    new_table.add_yc(YcPointDef(
+                        ioa=ioa, name=name, group=group, enabled=enabled,
+                        data_type=YcType(subtype) if subtype else YcType.SHORT_FLOAT,
+                        initial_value=float(row.get("value") or 0),
+                    ))
+                elif ptype == "YK":
+                    new_table.add_yk(YkPointDef(
+                        ioa=ioa, name=name, group=group, enabled=enabled,
+                        command_type=subtype if subtype in ("single", "double") else "single",
+                        select_before_execute=(row.get("sbo") or "0").strip()
+                        in ("1", "true", "True"),
+                    ))
+                elif ptype == "YM":
+                    new_table.add_ym(YmPointDef(ioa=ioa, name=name, group=group,
+                                                enabled=enabled,
+                                                initial_value=int(row.get("value") or 0)))
+                else:
+                    continue
+                count += 1
+            except Exception as e:
+                return {"ok": False,
+                        "error": f"第 {count + 2} 行解析失败（ioa={row.get('ioa')}）: {e}"}
+
+        if count == 0:
+            return {"ok": False, "error": "CSV 未解析出有效点（type 须为 YX/YC/YK/YM）"}
+        self.table = new_table
+        self.refresh_count()
+        if engine is not None:
+            self.rebuild_store(engine)
+        return {"ok": True, "points": self._count}

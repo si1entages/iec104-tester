@@ -93,6 +93,10 @@ class MasterEngine(EngineBase):
         t3: float = 20,
         auto_start: bool = True,        # 连接后自动发送STARTDT
         auto_gi: bool = False,           # STARTDT后自动总召唤
+        auto_gi_on_init_end: bool = False,  # 收到初始化结束(COT=4)后自动重总召唤
+        # 默认关闭：实测部分真机在收到主站 I 帧后会断开或停摆数据流，
+        # 自动重 GI 会造成「重连→EI→GI→被断开」的无限循环。对这类装置请保持
+        # 关闭，改为手动总召唤；对支持该语义的装置可开启。
         reconnect: bool = True,
         reconnect_interval: float = 5.0,
         history_db: HistoryDB | None = None,
@@ -104,6 +108,7 @@ class MasterEngine(EngineBase):
         self._common_addr = common_addr
         self._auto_start = auto_start
         self._auto_gi = auto_gi
+        self._auto_gi_on_init_end = auto_gi_on_init_end
 
         # 协议组件
         self._seq = SequenceManager(k=k, w=w)
@@ -1250,6 +1255,11 @@ class MasterEngine(EngineBase):
                     logger.info(f"End of Initialization: {obj.data.cause_str}")
                 else:
                     logger.info(f"End of Initialization received, COT={cot}")
+            # 标准语义（真机为准）：子站初始化结束后其原实时数据可能已失效，
+            # 主站应**重新总召唤**刷新全数据。但部分真机收到主站 I 帧后会直接
+            # 断开/停摆（实测），故默认关闭、可经 auto_gi_on_init_end=True 开启。
+            if cot == COT.INIT and self._auto_gi_on_init_end:
+                self._spawn(self._regi_after_init())
 
         # 参数命令确认
         elif type_id in (TypeID.P_ME_NA_1, TypeID.P_ME_NB_1, TypeID.P_ME_NC_1,
@@ -1550,6 +1560,21 @@ class MasterEngine(EngineBase):
         except Exception as e:
             logger.error(f"Auto STARTDT failed: {e}")
 
+    async def _regi_after_init(self) -> None:
+        """收到初始化结束(M_EI_NA_1, COT=4)后的自动重总召唤.
+
+        装置重启后原实时数据可能已失效，标准要求主站重新召唤；
+        延迟 2s 等待装置完成初始化收尾（部分真机对连接初期的 I 帧敏感），
+        失败不影响连接（t1 超时会按标准断开并自动重连）。
+        """
+        await asyncio.sleep(2.0)
+        try:
+            if self._state_machine.is_running:
+                logger.info("Auto re-GI after End of Initialization")
+                await self.general_interrogation()
+        except Exception as e:
+            logger.warning(f"Auto re-GI after init failed: {e}")
+
     def _on_state_change(self, old_state: str, new_state: str) -> None:
         logger.info(f"State: {old_state} → {new_state}")
 
@@ -1558,12 +1583,15 @@ class MasterEngine(EngineBase):
         self._fire_event(MasterEvent.TIMER_EXPIRED, {"timer": timer_type})
 
         if timer_type == TimerType.T0:
-            # 连接超时
-            self._spawn(self._client.stop())
+            # 连接超时：仅重建当前连接，保留重连循环（stop() 会取消重连）
+            self._spawn(self._client.disconnect())
         elif timer_type == TimerType.T1:
-            # 发送超时 - 根据规范应断开连接
+            # 发送超时 - 根据规范应断开连接。
+            # 必须用 disconnect() 而非 stop()：stop() 会取消重连循环且跳过
+            # on_disconnected 回调，导致 t1 超时后永久停在 Stopped（真机实测：
+            # 对未知 IOA 的读命令，设备不回 ACK → t1 超时 → 再也不重连）。
             logger.error("T1 timeout: no confirmation received, disconnecting")
-            self._spawn(self._client.stop())  # 断连，reconnect机制会自动重连
+            self._spawn(self._client.disconnect())
         elif timer_type == TimerType.T2:
             # 无数据确认超时 — 发送S帧确认已收到的I帧
             rx_seq = self._seq.get_recv_seq()

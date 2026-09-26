@@ -129,8 +129,11 @@
           <button class="btn" id="btn-export-ses">导出会话</button>
         </div>
         <div class="row">
-          <input type="file" id="import-yaml" accept=".yaml,.yml,text/yaml" class="grow" />
+          <button class="btn primary" id="btn-import-points">导入点表</button>
+          <input type="file" id="import-file" accept=".yaml,.yml,.csv,.json" class="grow"
+                 title="支持 YAML / CSV / JSON 点表文件" />
         </div>
+        <div class="muted">CSV 列: type,ioa,name,group,enabled[,subtype,sbo]，与导出格式回环兼容。</div>
       </div>
       <div class="card">
         <h4>提示</h4>
@@ -163,7 +166,7 @@
         <button class="btn" id="log-export">导出</button>
       </span>
     </div>
-    <div class="bottom-body three">
+    <div class="bottom-body">
       <div class="feed" id="feed-frames" role="log" aria-label="报文流"></div>
       <div class="feed" id="feed-events" role="log" aria-label="事件流"></div>
       <div class="feed" id="feed-logs" role="log" aria-label="日志流"></div>
@@ -269,14 +272,19 @@ $("#btn-param").onclick = async () => {
 $("#btn-export-yaml").onclick = () => { location.href = "/api/points/yaml"; };
 $("#btn-export-csv").onclick = () => { location.href = "/api/export/points.csv"; };
 $("#btn-export-ses").onclick = () => { location.href = "/api/export/session.json"; };
-$("#import-yaml").onchange = async (e) => {
+/* 点表导入：按扩展名选 format，服务端再按内容嗅探兜底 */
+$("#btn-import-points").onclick = () => $("#import-file").click();
+$("#import-file").onchange = async (e) => {
   const file = e.target.files[0];
   if (!file) return;
   const text = await file.text();
-  const r = await fetch("/api/points/yaml", { method: "POST", body: text });
+  const ext = (file.name.split(".").pop() || "").toLowerCase();
+  const fmt = ext === "csv" ? "csv" : ext === "json" ? "json" : "yaml";
+  const r = await fetch(`/api/points/import?format=${fmt}`, { method: "POST", body: text });
   const body = await r.json();
-  toast(body.ok ? `已导入 ${body.points} 点` : body.error || "失败");
+  toast(body.ok ? `已导入 ${body.points} 点` : body.error || "导入失败");
   if (body.ok) IEC104.refreshPoints();
+  e.target.value = "";   // 允许连续导入同一文件
 };
 $("#yk-on").onclick = () => {
   const ioa = +$("#cmd-ioa").value;

@@ -268,6 +268,9 @@ class EngineBridge:
     def import_points_yaml(self, text: str) -> dict:
         return self.points.import_yaml(text, engine=self.engine)
 
+    def import_points_csv(self, text: str) -> dict:
+        return self.points.import_csv(text, engine=self.engine)
+
     def export_session_json(self) -> dict:
         return self.bus.export_session(self.role, self.status())
 

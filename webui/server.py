@@ -254,6 +254,36 @@ def create_app(bridge: EngineBridge) -> web.Application:
             return web.json_response({"ok": False, "error": "invalid body"}, status=400)
         return web.json_response(bridge.import_points_yaml(text))
 
+    async def api_points_import(request: web.Request) -> web.Response:
+        """点表导入: ?format=csv|yaml|json|auto（auto 按内容嗅探）.
+
+        约定 body 为原始文本；CSV 列格式见 ``PointService.export_csv``。
+        """
+        try:
+            text = await request.text()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid body"}, status=400)
+        fmt = (request.query.get("format") or "auto").lower()
+        if fmt == "auto":
+            first_line = text.splitlines()[0].strip().lower() if text.strip() else ""
+            if text.lstrip().startswith("{"):
+                fmt = "json"
+            elif "," in first_line and "type" in first_line:
+                fmt = "csv"
+            else:
+                fmt = "yaml"
+        if fmt == "csv":
+            return web.json_response(bridge.import_points_csv(text))
+        if fmt == "json":
+            try:
+                data = json.loads(text)
+            except Exception as e:
+                return web.json_response({"ok": False, "error": f"JSON 解析失败: {e}"},
+                                         status=400)
+            # JSON 顶层键结构与 YAML 一致，序列化后复用 YAML 导入
+            return web.json_response(bridge.import_points_yaml(json.dumps(data)))
+        return web.json_response(bridge.import_points_yaml(text))
+
     async def api_export_csv(request: web.Request) -> web.Response:
         return web.Response(text=bridge.export_points_csv(), content_type="text/csv")
 
@@ -441,7 +471,12 @@ def create_app(bridge: EngineBridge) -> web.Application:
                     except Exception:
                         break
                 if recv_task in done:
-                    msg = recv_task.result()
+                    try:
+                        msg = recv_task.result()
+                    except Exception:
+                        # 客户端断开（含浏览器直接关标签页）属正常退出，
+                        # 不能让 RuntimeError 冒泡成 500 日志噪音
+                        break
                     if msg.type in (WSMsgType.CLOSE, WSMsgType.ERROR):
                         break
                     if msg.type == WSMsgType.TEXT:
@@ -476,6 +511,7 @@ def create_app(bridge: EngineBridge) -> web.Application:
     app.router.add_post("/api/master/file", api_file)
     app.router.add_get("/api/points/yaml", api_points_yaml_get)
     app.router.add_post("/api/points/yaml", api_points_yaml_put)
+    app.router.add_post("/api/points/import", api_points_import)
     app.router.add_get("/api/export/points.csv", api_export_csv)
     app.router.add_get("/api/export/session.json", api_export_session)
     app.router.add_get("/api/logs", api_logs)

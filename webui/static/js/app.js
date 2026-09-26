@@ -212,7 +212,11 @@
     syncRunButtons(st);
     const label = st.running
       ? (STATE_LABEL[st.state] || "运行中")
-      : (st.started ? "连接中" : "未连接");
+      : (st.started
+          // 主站会话存活但引擎未运行 = 连接被断开、自动重连等待中；
+          // 显示"已停止"会误导用户以为会话结束了
+          ? (state.role === "master" && st.state === "Stopped" ? "重连中" : "连接中")
+          : "未连接");
     set("#st-conn", `状态 ${label}`);
     const dot = $("#st-dot");
     if (dot) dot.classList.toggle("on", !!st.running);

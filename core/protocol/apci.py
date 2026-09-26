@@ -191,14 +191,20 @@ class APCICodec:
 
     @staticmethod
     def encode_s(rx_seq: int) -> bytes:
-        """编码 S-Frame (确认帧)."""
+        """编码 S-Frame (确认帧).
+
+        标准（IEC 60870-5-104 图 5）：SS = rx_seq << 1，**bit0 恒为 0**。
+        曾误加 ``| 0x01`` 导致 SS 恒为奇数（如 rx_seq=8 编成 0x11）——
+        自家解码用 ``>> 1`` 掩掉了 bit0 所以互通自洽，但真机按标准校验
+        直接断开连接（实测：S 确认发出后 100ms 内被对端关闭）。
+        """
         rx_seq = rx_seq & 0x7FFF
 
         length = 4  # S帧没有ASDU
         cf = bytes([
             0x01,                               # byte1: bit0=1, bit1=0 (S帧标志)
             0x00,                               # byte2
-            ((rx_seq & 0x7F) << 1) | 0x01,      # byte3: 低7位左移 + bit0=1
+            (rx_seq & 0x7F) << 1,               # byte3: 低7位左移，bit0 恒为 0
             (rx_seq >> 7) & 0xFF,               # byte4: 高8位
         ])
 

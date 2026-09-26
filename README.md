@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/WebUI-aiohttp-41CD52" alt="Web UI">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/IEC--104-Complete-brightgreen.svg" alt="IEC 104">
-  <img src="https://img.shields.io/badge/Tests-451-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-478-brightgreen.svg" alt="Tests">
 </p>
 
 ---
@@ -59,7 +59,7 @@
 
 ### 测试
 
-- 单元 + 集成：`pytest tests/`（**451**，含 Web API、协议符合性、类型覆盖与机制层用例）
+- 单元 + 集成：`pytest tests/`（**478**，含 Web API、协议符合性、类型覆盖与日志模块用例）
 - 全流程验收：`python qa_verify/qa_full_flow.py [--shots]`（从零复位→启动→系统/控制命令→参数文件→模拟→注入→点表→多客户端→前端→关停重连，可选截图）
 - 前端：`node qa_verify/qa_webui_dom.mjs`（Node 沙箱真跑页面脚本：按钮绑定 + 按钮状态同步 + WS 实时刷新 + CSS 覆盖检查）
 - 真机联调：`python qa_verify/qa_joint_debug.py`（对运行中的主/子站逐项下发并逐帧核对）
