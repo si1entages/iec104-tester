@@ -90,6 +90,21 @@ class TCPConnection:
         self._read_task = asyncio.create_task(self._read_loop())
         logger.info(f"[{self._name}] Connection started: {self._remote_addr}")
 
+    def close(self) -> None:
+        """请求关闭底层连接（幂等、非阻塞）.
+
+        读循环退出（对端断开/EOF/取消）与显式 ``stop()`` 都必须走到这里，
+        否则 socket 会一直处于打开状态：Python 3.13+ 的 ``Server.wait_closed()``
+        会等待所有连接真正关闭，未关闭的连接会让 ``TCPServer.stop()`` 阻塞到超时，
+        同时泄漏文件描述符。
+        """
+        writer = self._writer
+        try:
+            if not writer.is_closing():
+                writer.close()
+        except Exception as e:  # noqa: BLE001 — 关闭阶段不允许抛出
+            logger.debug(f"[{self._name}] close() failed: {e}")
+
     async def stop(self) -> None:
         """停止连接."""
         self._running = False
@@ -100,8 +115,8 @@ class TCPConnection:
             except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
                 pass
 
+        self.close()
         try:
-            self._writer.close()
             await asyncio.wait_for(self._writer.wait_closed(), timeout=1.0)
         except Exception:
             pass
@@ -205,6 +220,8 @@ class TCPConnection:
             self._stats.errors += 1
         finally:
             self._running = False
+            # 无论何种退出路径都必须关闭 transport（否则 FD 泄漏 + 服务端停止阻塞）
+            self.close()
             if self._on_disconnected:
                 self._on_disconnected()
 

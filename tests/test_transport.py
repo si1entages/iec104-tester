@@ -12,11 +12,30 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import asyncio
+import socket
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from core.transport.connection import ConnectionStats, TCPClient, TCPConnection, TCPServer
+
+
+def _free_port() -> int:
+    """取一个空闲端口（避免真实 socket 测试撞端口）。"""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+async def _wait_until(predicate, timeout: float = 3.0, interval: float = 0.02) -> bool:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        if predicate():
+            return True
+        await asyncio.sleep(interval)
+    return predicate()
 
 # ── Fixtures ─────────────────────────────────────────────────────
 
@@ -360,6 +379,32 @@ class TestTCPConnection:
         await conn._read_loop()
         assert conn._running is False
 
+    @pytest.mark.asyncio
+    async def test_read_loop_closes_transport_on_eof(self, mock_stream_reader, mock_stream_writer):
+        """对端断开（EOF）时读循环必须关闭 transport，否则 FD 泄漏."""
+        mock_stream_reader.read = AsyncMock(return_value=b"")
+        mock_stream_writer.is_closing = MagicMock(return_value=False)
+
+        conn = TCPConnection(
+            reader=mock_stream_reader,
+            writer=mock_stream_writer,
+            name="test",
+        )
+        conn._running = True
+
+        await conn._read_loop()
+
+        assert conn._running is False
+        mock_stream_writer.close.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_close_is_idempotent(self, mock_connection, mock_stream_writer):
+        """close() 幂等：已关闭的连接不重复 close()."""
+        mock_stream_writer.is_closing = MagicMock(return_value=True)
+        mock_connection.close()
+        mock_connection.close()
+        mock_stream_writer.close.assert_not_called()
+
 
 # ── TCPClient 测试 ───────────────────────────────────────────────
 
@@ -555,6 +600,32 @@ class TestTCPServer:
         assert tcp_server.is_running is False
         mock_conn.stop.assert_called_once()
         tcp_server._server.close.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_stop_after_peer_disconnect_releases_transport(self):
+        """真实 socket：对端先断开后 server.stop() 必须立即返回.
+
+        回归 `Server wait_closed timeout`：连接被对端断开后已从 `_connections`
+        移除，`stop()` 不会再调用 `conn.stop()`；若读循环退出时不关闭 transport，
+        Python 3.13+ 的 `Server.wait_closed()` 会一直等待到超时（实测 2.0s）。
+        """
+        port = _free_port()
+        server = TCPServer(host="127.0.0.1", port=port)
+        await server.start()
+        try:
+            _reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            assert await _wait_until(lambda: server.connection_count == 1)
+
+            writer.close()
+            await writer.wait_closed()
+            assert await _wait_until(lambda: server.connection_count == 0)
+
+            start = time.monotonic()
+            await asyncio.wait_for(server.stop(), timeout=5)
+            elapsed = time.monotonic() - start
+            assert elapsed < 1.0, f"server.stop() 阻塞 {elapsed:.2f}s（transport 未关闭）"
+        finally:
+            await asyncio.wait_for(server.stop(), timeout=5)
 
     @pytest.mark.asyncio
     async def test_handle_client(self, tcp_server):

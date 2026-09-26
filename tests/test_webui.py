@@ -12,6 +12,7 @@ import pytest
 import pytest_asyncio
 from aiohttp.test_utils import TestClient, TestServer
 
+from core.protocol.types import COT
 from webui.bridge import EngineBridge
 from webui.server import create_app
 
@@ -460,6 +461,43 @@ async def test_html_declares_icon(master_client):
     html = await r.text()
     assert 'rel="icon"' in html
     assert "/favicon.svg" in html
+
+
+# ── 错误 COT 注入（Web 全链路） ────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_wrong_cot_api_path(slave_client):
+    """UI 开关 → /api/slave/response → 引擎 ResponseBehavior 全链路生效."""
+    client, bridge = slave_client
+    port = _free_port()
+    r = await client.post("/api/slave/response", json={
+        "errors": {"wrong_cot": True},
+    })
+    assert (await r.json())["ok"] is True
+
+    r = await client.post("/api/slave/start", json={"host": "127.0.0.1", "port": port, "addr": 1})
+    assert (await r.json())["ok"] is True
+    try:
+        engine = bridge.engine
+        assert engine.response_behavior.wrong_cot is True
+        assert engine._reply_cot(COT.ACTCON) == int(COT.ACTCON) + 1
+    finally:
+        await client.post("/api/slave/stop")
+
+    # 关闭后恢复标准 COT（引擎已停，校验暂存配置）
+    r = await client.post("/api/slave/response", json={"errors": {"wrong_cot": False}})
+    assert (await r.json())["ok"] is True
+    assert bridge.session.pending_response["errors"]["wrong_cot"] is False
+
+
+@pytest.mark.asyncio
+async def test_slave_page_exposes_wrong_cot_control(slave_client):
+    """子站页需提供「返回错误COT」开关并与 API 字段名一致（防止 UI 与后端脱节）."""
+    client, _ = slave_client
+    html = await (await client.get("/")).text()
+    assert 'id="wrong-cot"' in html
+    assert '"#wrong-cot"' in html
+    assert "wrong_cot:" in html
 
 
 # ── CLI 点表传递到 Web 会话 ────────────────────────────────────────

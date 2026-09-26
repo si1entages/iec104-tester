@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/WebUI-aiohttp-41CD52" alt="Web UI">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/IEC--104-Complete-brightgreen.svg" alt="IEC 104">
-  <img src="https://img.shields.io/badge/Tests-371-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-405-brightgreen.svg" alt="Tests">
 </p>
 
 ---
@@ -40,7 +40,7 @@
 
 - TCP 多客户端监听；系统命令响应；DEACT；SOE/自发上送
 - 可编辑点表（点 YX 切换、改 YC 自发上送）
-- **响应注入**（延迟、丢帧、损坏、不响应、品质）
+- **响应注入**（延迟、丢帧、损坏、不响应、品质、**错误 COT**）
 - 数据模拟（手动/自动）；YAML 点表
 
 ### 多站 / 录制 / 模拟（CLI）
@@ -51,7 +51,7 @@
 
 ### 测试
 
-- 单元 + 集成：`pytest tests/`（**371**，含 Web API 与协议符合性用例）
+- 单元 + 集成：`pytest tests/`（**405**，含 Web API 与协议符合性用例）
 - 一致性：`tests/conformance/test_conformance.py`（42 用例）
 - 脚本：`run_tests.py tests/scripts/`（YAML 动作 + 断言）
 

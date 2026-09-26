@@ -37,7 +37,7 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 | core/engine/master.py | 主站引擎（发送命令、处理响应） | 高 |
 | core/engine/slave.py | 子站引擎（响应召唤、上报数据） | 高 |
 | core/engine/multi_station.py | 多站并发管理 | 中 |
-| core/transport/ | TCP 异步连接管理 | 低 |
+| core/transport/ | TCP 异步连接管理（读循环退出必须 `close()` transport，否则 FD 泄漏且 `TCPServer.stop()` 阻塞） | 低 |
 | core/data/ | 点表模型、实时数据存储 | 中 |
 | core/testing/ | YAML 测试脚本执行引擎 | 中 |
 | core/capture/ | 报文录制/回放 | 低 |
@@ -58,6 +58,7 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - GUI 层已移除 PySide6；界面为 webui/（HTML/CSS + aiohttp），纯 web 形态——浏览器是唯一 UI，无桌面壳（pywebview 已移除）
 - 入口层 app.py 提供统一 Web 入口 `run_web()`：启动服务后台线程轮询端口就绪后再打开浏览器；`--no-browser` 关闭自动打开
 - 后台任务: 引擎层统一用 `_spawn()` 创建，保留任务引用并记录异常
+- 响应注入: `ResponseBehavior` 承载延迟/丢帧/损坏/不响应/品质/错误 COT；错误 COT 由 `SlaveEngine._reply_cot()` 统一处理（应答 COT +1，配置项 `errors.wrong_cot`）
 
 ### 测试
 - 单元测试: tests/test_*.py（协议各层）
@@ -79,8 +80,9 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - [x] 纯 web 形态：移除 pywebview 桌面壳 / `--no-shell` / web_lab 一键联调；浏览器自动打开
 - [x] Web API：组召唤/复位/测试/读/参数/文件 + 点表 YAML/CSV/会话导出
 - [x] PyInstaller 脚本 build/build_all.py（iec104-master / iec104-slave）
-- [ ] wrong_cot 注入尚未完全落到 ASDU 构建（预留字段）
-- [ ] GUI 关闭时多站管理器资源清理
+- [x] wrong_cot 注入落到 ASDU 构建（子站应答 COT 整体 +1，含 Web UI 开关）
+- [x] 对端断开时 transport 未关闭：`_read_loop` 退出补 `close()`（修 FD 泄漏 + `server.stop()` 阻塞 2s）
+- [ ] 多站管理器在 Web 会话关停时的资源清理（`stop()` 已无阻塞，仍缺显式回收路径）
 - [ ] 主站定义表双击值直接发命令（需选中行后用右侧命令面板）
 
 ## 双应用入口（纯 Web UI）

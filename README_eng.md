@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/WebUI-aiohttp-41CD52" alt="Web UI">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/IEC--104-Complete-brightgreen.svg" alt="IEC 104">
-  <img src="https://img.shields.io/badge/Tests-371-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-405-brightgreen.svg" alt="Tests">
 </p>
 
 ---
@@ -39,7 +39,7 @@ Industrial IEC 60870-5-104 testing tool: browser-based **Web UI** (master + slav
 
 - Multi-client TCP server, system commands, DEACT, SOE/spontaneous
 - Editable point table (toggle YX, set YC with spontaneous send)
-- **Response injection** (delay, drop, corrupt, no-response, quality)
+- **Response injection** (delay, drop, corrupt, no-response, quality, **wrong COT**)
 - Manual/auto simulation, YAML point table
 
 ### CLI tools
@@ -48,7 +48,7 @@ Industrial IEC 60870-5-104 testing tool: browser-based **Web UI** (master + slav
 
 ### Tests
 
-- `pytest tests/` (**371** including Web API and protocol conformance), conformance suite (42), YAML scripts
+- `pytest tests/` (**405** including Web API and protocol conformance), conformance suite (42), YAML scripts
 
 ## Quick start
 

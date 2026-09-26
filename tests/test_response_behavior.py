@@ -2,6 +2,7 @@
 
 from core.data.point_table import PointTable
 from core.engine.slave import ResponseBehavior, SlaveEngine
+from core.protocol.types import COT
 
 
 def test_response_behavior_from_dict():
@@ -88,3 +89,27 @@ def test_set_response_behavior_from_dataclass():
     engine.set_response_behavior(rb)
     assert engine.response_behavior.gi_delay == 1.0
     assert engine.response_behavior.no_response is True
+
+
+# ── 错误 COT 注入 ─────────────────────────────────────────────────
+
+def test_reply_cot_identity_by_default():
+    """默认不注入：应答 COT 原样返回."""
+    engine = SlaveEngine(port=0, point_table=PointTable())
+    for cot in (COT.ACTCON, COT.ACTTERM, COT.INTROGEN, COT.SPONT):
+        assert engine._reply_cot(cot) == int(cot)
+
+
+def test_reply_cot_offsets_all_reply_causes():
+    """wrong_cot=True：应答 COT 整体 +1（确定性的"错误 COT"）."""
+    engine = SlaveEngine(port=0, point_table=PointTable())
+    engine.set_response_behavior({"errors": {"wrong_cot": True}})
+
+    # ACTCON(7) → 8（DEACTCON）；ACTTERM(10) → 11；站召唤数据(20) → 21（第1组）
+    assert engine._reply_cot(COT.ACTCON) == int(COT.ACTCON) + 1
+    assert engine._reply_cot(COT.ACTTERM) == int(COT.ACTTERM) + 1
+    assert engine._reply_cot(COT.INTROGEN) == int(COT.INTROGEN) + 1
+    # 6 位有效范围内回绕，不含 P/N(bit6) 与 T(bit7)
+    assert engine._reply_cot(63) == 0
+    assert engine._reply_cot(0x40 | COT.ACTCON) == int(COT.ACTCON) + 1
+

@@ -506,17 +506,19 @@ class ASDUBuilder:
         return asdu.encode()
 
     @staticmethod
-    def build_general_interrogation_ack(common_addr: int, qoi: int = 20) -> bytes:
-        """构造总召唤确认."""
+    def build_general_interrogation_ack(common_addr: int, qoi: int = 20,
+                                         cot: int = COT.ACTCON) -> bytes:
+        """构造总召唤确认（cot 可覆盖，供错误 COT 注入测试使用）."""
         return ASDUBuilder.build_general_interrogation(
-            common_addr, qoi, cot=COT.ACTCON
+            common_addr, qoi, cot=cot
         )
 
     @staticmethod
-    def build_general_interrogation_end(common_addr: int, qoi: int = 20) -> bytes:
-        """构造总召唤结束."""
+    def build_general_interrogation_end(common_addr: int, qoi: int = 20,
+                                         cot: int = COT.ACTTERM) -> bytes:
+        """构造总召唤结束（cot 可覆盖，供错误 COT 注入测试使用）."""
         return ASDUBuilder.build_general_interrogation(
-            common_addr, qoi, cot=COT.ACTTERM
+            common_addr, qoi, cot=cot
         )
 
     @staticmethod
@@ -538,15 +540,16 @@ class ASDUBuilder:
         return asdu.encode()
 
     @staticmethod
-    def build_clock_sync_ack(common_addr: int, time_tag: CP56Time2a | None = None) -> bytes:
-        """构造时钟同步确认."""
+    def build_clock_sync_ack(common_addr: int, time_tag: CP56Time2a | None = None,
+                              cot: int = COT.ACTCON) -> bytes:
+        """构造时钟同步确认（cot 可覆盖，供错误 COT 注入测试使用）."""
         if time_tag is None:
             time_tag = CP56Time2a.now()
         asdu = ASDU(
             type_id=TypeID.C_CS_NA_1,
             sq=False,
             num=1,
-            cot=COT.ACTCON,
+            cot=cot,
             common_addr=common_addr,
         )
         asdu.objects.append(InformationObject(
@@ -1039,9 +1042,15 @@ class ASDUBuilder:
         return asdu.encode()
 
     @staticmethod
-    def build_counter_interrogation_ack(common_addr: int, qcc: int = 0) -> bytes:
-        """构造累计量召唤确认."""
-        return ASDUBuilder.build_counter_interrogation(common_addr, qcc)
+    def build_counter_interrogation_ack(common_addr: int, qcc: int = 0,
+                                         cot: int = COT.ACTCON) -> bytes:
+        """构造累计量召唤确认（COT=ACTCON，修正原先误用 COT=ACT 的问题）."""
+        asdu = ASDU(
+            type_id=TypeID.C_CI_NA_1, sq=False, num=1,
+            cot=cot, common_addr=common_addr,
+        )
+        asdu.objects.append(InformationObject(ioa=0, data=bytes([qcc])))
+        return asdu.encode()
 
     @staticmethod
     def build_counter_interrogation_end(common_addr: int, qcc: int = 0) -> bytes:

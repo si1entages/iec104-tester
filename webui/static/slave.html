@@ -60,6 +60,11 @@
           <label><input id="no-resp" type="checkbox" /> 不响应</label>
           <label><input id="corrupt" type="checkbox" /> 损坏帧</label>
         </div>
+        <div class="row">
+          <label title="应答的传送原因整体 +1（错位），用于验证主站对 COT 的严格校验">
+            <input id="wrong-cot" type="checkbox" /> 返回错误COT
+          </label>
+        </div>
         <button class="btn primary" id="btn-resp">应用响应配置</button>
       </div>
       <div class="card">
@@ -138,7 +143,7 @@ $("#btn-resp").onclick = async () => {
       drop_rate: +$("#drop-rate").value || 0,
       corrupt: $("#corrupt").checked,
       no_response: $("#no-resp").checked,
-      wrong_cot: false,
+      wrong_cot: $("#wrong-cot").checked,
     },
   });
   toast(r.ok ? "响应配置已应用" : r.error || "失败");

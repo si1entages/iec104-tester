@@ -15,9 +15,12 @@ import socket
 
 import pytest
 
-from core.data.point_table import PointTable
+from core.data.point_table import PointTable, YkPointDef
 from core.engine.master import MasterEngine, MasterEvent
 from core.engine.slave import SlaveEngine, SlaveEvent
+from core.protocol.apci import APCICodec
+from core.protocol.asdu import ASDU
+from core.protocol.types import COT, TypeID
 
 
 def _free_port() -> int:
@@ -259,3 +262,153 @@ async def test_response_behavior_gi_delay():
             await asyncio.wait_for(slave.stop(), timeout=5)
         except Exception:
             pass
+
+
+# ── 错误 COT 注入（真 TCP 端到端） ────────────────────────────────
+
+def _yk_point_table() -> PointTable:
+    """SBO 点(100) + 直发点(101) + 若干遥信遥测，用于 COT 注入验证."""
+    pt = PointTable()
+    # 注意：generate_demo_points 会清空全部点表，必须先调用再追加自定义点
+    pt.generate_demo_points(yx_count=3, yc_count=2)
+    pt.common_addr = 1
+    pt.station_name = "WRONG-COT"
+    pt.add_yk(YkPointDef(ioa=100, name="YK_SBO", command_type="single",
+                         select_before_execute=True))
+    pt.add_yk(YkPointDef(ioa=101, name="YK_DIRECT", command_type="single",
+                         select_before_execute=False))
+    return pt
+
+
+async def _start_pair(point_table: PointTable, *, wrong_cot: bool, t1: float = 0.6):
+    """起真实主/子站，返回 (master, slave, slave_tx_frames, master_tx_frames)."""
+    port = _free_port()
+    slave = SlaveEngine(host="127.0.0.1", port=port, common_addr=1,
+                        point_table=point_table)
+    slave.data_store.init_from_point_table(point_table)
+    if wrong_cot:
+        slave.set_response_behavior({"errors": {"wrong_cot": True}})
+
+    slave_tx: list[bytes] = []
+    master_tx: list[bytes] = []
+    slave.set_raw_frame_callback(
+        lambda data, direction, client="": slave_tx.append(data) if direction == "tx" else None
+    )
+
+    master = MasterEngine(host="127.0.0.1", port=port, common_addr=1,
+                          auto_start=True, auto_gi=False, reconnect=False,
+                          point_table=point_table, t1=t1)
+    master.set_raw_frame_callback(
+        lambda data, direction: master_tx.append(data) if direction == "tx" else None
+    )
+
+    await slave.start()
+    await master.start()
+    assert await _wait_master_ready(master, timeout=8), f"state={master.state}"
+    assert await _wait_until(lambda: slave.client_count > 0, timeout=5)
+    return master, slave, slave_tx, master_tx
+
+
+def _i_frames(frames: list[bytes]) -> list[tuple[TypeID, int]]:
+    """把原始帧列表解码为 [(type_id, cot), ...]（仅 I 帧）."""
+    out: list[tuple[TypeID, int]] = []
+    for frame in frames:
+        if APCICodec.frame_type_of(frame) != "I":
+            continue
+        asdu = ASDU.decode(frame[6:])
+        out.append((asdu.type_id, asdu.cot))
+    return out
+
+
+async def _stop_pair(master: MasterEngine, slave: SlaveEngine) -> None:
+    for eng in (master, slave):
+        try:
+            await asyncio.wait_for(eng.stop(), timeout=6)
+        except Exception:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_wrong_cot_shifts_command_ack_cot():
+    """真连接：wrong_cot=True 时命令确认/终止的 COT 各错位 +1."""
+    points = _yk_point_table()
+    master, slave, slave_tx, _ = await _start_pair(points, wrong_cot=True)
+    try:
+        slave_tx.clear()
+        # 绕过主站自动 SBO，单发执行帧，直接看子站回什么 COT
+        await master._send_single_command_raw(101, True, select=False, qu=0)
+        await asyncio.sleep(0.5)
+
+        cots = {cot for tid, cot in _i_frames(slave_tx) if tid == TypeID.C_SC_NA_1}
+        assert cots == {int(COT.ACTCON) + 1, int(COT.ACTTERM) + 1}, (
+            f"期望 COT 错位 +1，实测 {cots}"
+        )
+    finally:
+        await _stop_pair(master, slave)
+
+
+@pytest.mark.asyncio
+async def test_wrong_cot_shifts_gi_reply_cot():
+    """真连接：wrong_cot=True 时召唤确认/数据/结束的 COT 各错位 +1."""
+    points = _yk_point_table()
+    master, slave, slave_tx, _ = await _start_pair(points, wrong_cot=True)
+    try:
+        slave_tx.clear()
+        await master.general_interrogation()
+        assert await _wait_until(
+            lambda: any(tid == TypeID.M_SP_NA_1 for tid, _ in _i_frames(slave_tx)),
+            timeout=5,
+        ), "召唤数据未到达"
+
+        decoded = _i_frames(slave_tx)
+        ic_cots = {cot for tid, cot in decoded if tid == TypeID.C_IC_NA_1}
+        data_cots = {cot for tid, cot in decoded if tid in (TypeID.M_SP_NA_1, TypeID.M_ME_NC_1)}
+        assert ic_cots == {int(COT.ACTCON) + 1, int(COT.ACTTERM) + 1}, f"召唤确认/结束 COT={ic_cots}"
+        assert data_cots == {int(COT.INTROGEN) + 1}, f"召唤数据 COT={data_cots}"
+    finally:
+        await _stop_pair(master, slave)
+
+
+@pytest.mark.asyncio
+async def test_wrong_cot_select_ack_not_accepted_by_master():
+    """严格校验：选择确认 COT 错位时主站不误判成功，超时中止且不发执行帧."""
+    points = _yk_point_table()
+    master, slave, _slave_tx, master_tx = await _start_pair(points, wrong_cot=True, t1=0.6)
+    try:
+        master_tx.clear()
+        with pytest.raises(RuntimeError, match="SBO select failed"):
+            await master.single_command(100, True, select=False, qu=0)
+        await asyncio.sleep(0.3)
+
+        cmds = [c for c in _i_frames(master_tx) if c[0] == TypeID.C_SC_NA_1]
+        # 只应发出选择帧（S/E=1），不得发出执行帧
+        selects = []
+        for frame in master_tx:
+            if APCICodec.frame_type_of(frame) != "I":
+                continue
+            asdu = ASDU.decode(frame[6:])
+            if asdu.type_id != TypeID.C_SC_NA_1:
+                continue
+            obj = asdu.objects[0]
+            selects.append(bool(getattr(obj.data, "select", False)))
+        assert len(cmds) == 1 and selects == [True], (
+            f"期望仅 1 个选择帧，实测 {list(zip(cmds, selects, strict=True))}"
+        )
+    finally:
+        await _stop_pair(master, slave)
+
+
+@pytest.mark.asyncio
+async def test_wrong_cot_disabled_keeps_standard_cot():
+    """对照组：未开启注入时命令确认为标准 COT（7/10）."""
+    points = _yk_point_table()
+    master, slave, slave_tx, _ = await _start_pair(points, wrong_cot=False)
+    try:
+        slave_tx.clear()
+        await master._send_single_command_raw(101, True, select=False, qu=0)
+        await asyncio.sleep(0.5)
+
+        cots = {cot for tid, cot in _i_frames(slave_tx) if tid == TypeID.C_SC_NA_1}
+        assert cots == {int(COT.ACTCON), int(COT.ACTTERM)}, f"实测 {cots}"
+    finally:
+        await _stop_pair(master, slave)

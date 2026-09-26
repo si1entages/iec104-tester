@@ -168,6 +168,9 @@ class SlaveEngine(EngineBase):
     _MAX_DP_PER_FRAME: int = 120
     _MAX_IT_PER_FRAME: int = 50
 
+    # 错误 COT 注入的偏移量（确定性，便于断言）
+    _WRONG_COT_OFFSET: int = 1
+
     def __init__(
         self,
         host: str = "0.0.0.0",
@@ -347,6 +350,18 @@ class SlaveEngine(EngineBase):
         if mask:
             return quality | mask
         return quality
+
+    def _reply_cot(self, cot: int) -> int:
+        """应答的传送原因（按配置可注入错误 COT）。
+
+        配置 ``errors.wrong_cot=True`` 时，子站对请求的应答（命令确认、
+        召唤确认/数据/结束、时钟同步确认）的 COT 整体错位 ``_WRONG_COT_OFFSET``，
+        用于验证主站对 COT 的严格校验与超时处理。自发上送与标准错误应答
+        （COT 42/43/44）不参与注入，避免混淆测试结论。
+        """
+        if not self._response_behavior.wrong_cot:
+            return int(cot)
+        return (int(cot) + self._WRONG_COT_OFFSET) & 0x3F
 
     def _maybe_drop_frame(self) -> bool:
         """按配置决定是否丢弃当前发送帧。"""
@@ -771,14 +786,18 @@ class SlaveEngine(EngineBase):
         logger.info(f"Interrogation from {state.conn.name}: QOI={qoi}")
 
         # 发送激活确认
-        ack = ASDUBuilder.build_general_interrogation_ack(self._common_addr, qoi)
+        ack = ASDUBuilder.build_general_interrogation_ack(
+            self._common_addr, qoi, cot=self._reply_cot(COT.ACTCON)
+        )
         await self._send_i_frame(state, ack)
 
         # 发送所有数据
         await self._send_interrogation_data(state, qoi)
 
         # 发送激活结束
-        term = ASDUBuilder.build_general_interrogation_end(self._common_addr, qoi)
+        term = ASDUBuilder.build_general_interrogation_end(
+            self._common_addr, qoi, cot=self._reply_cot(COT.ACTTERM)
+        )
         await self._send_i_frame(state, term)
 
         self._fire_event(SlaveEvent.GI_RECEIVED, {
@@ -792,7 +811,9 @@ class SlaveEngine(EngineBase):
         组号 = qoi - 20；响应 COT 采用标准值 (20 或 21-36)。
         """
         group = COT.get_group_number(qoi) if COT.is_group_response(qoi) else None
-        cot = COT.INTROGEN if group is None else COT.group_response(group)
+        cot = self._reply_cot(
+            COT.INTROGEN if group is None else COT.group_response(group)
+        )
 
         # IEC 104 限制: VSQ 低7位最大127，APDU最大253字节
         # 实际安全批次大小（考虑APDU长度限制）— 使用类属性常量
@@ -909,7 +930,7 @@ class SlaveEngine(EngineBase):
         # 确认
         asdu_ack = ASDU(
             type_id=TypeID.C_CI_NA_1, sq=False, num=1,
-            cot=COT.ACTCON, common_addr=self._common_addr,
+            cot=self._reply_cot(COT.ACTCON), common_addr=self._common_addr,
         )
         asdu_ack.objects.append(asdu.objects[0])
         await self._send_i_frame(state, asdu_ack.encode())
@@ -918,9 +939,9 @@ class SlaveEngine(EngineBase):
         #   组号 0 → 37 (累计量总请求); 组号 1-4 → 38-41 (第1-4组请求)
         group = qcc & 0x07
         if 1 <= group <= 4:
-            cot = COT.counter_group_response(group)
+            cot = self._reply_cot(COT.counter_group_response(group))
         else:
-            cot = COT.COUNTER_REQ
+            cot = self._reply_cot(COT.COUNTER_REQ)
 
         # 发送电度数据 - 使用正确的类型 M_IT_NA_1 (累计量)
 
@@ -943,7 +964,7 @@ class SlaveEngine(EngineBase):
         # 结束
         asdu_term = ASDU(
             type_id=TypeID.C_CI_NA_1, sq=False, num=1,
-            cot=COT.ACTTERM, common_addr=self._common_addr,
+            cot=self._reply_cot(COT.ACTTERM), common_addr=self._common_addr,
         )
         asdu_term.objects.append(asdu.objects[0])
         await self._send_i_frame(state, asdu_term.encode())
@@ -960,7 +981,10 @@ class SlaveEngine(EngineBase):
         elif asdu.objects and isinstance(asdu.objects[0].data, CP56Time2a):
             received_time = asdu.objects[0].data
 
-        ack = ASDUBuilder.build_clock_sync_ack(self._common_addr, time_tag=received_time)
+        ack = ASDUBuilder.build_clock_sync_ack(
+            self._common_addr, time_tag=received_time,
+            cot=self._reply_cot(COT.ACTCON),
+        )
         await self._send_i_frame(state, ack)
 
         self._fire_event(SlaveEvent.CLOCK_SYNC_RECEIVED, {
@@ -1670,7 +1694,7 @@ class SlaveEngine(EngineBase):
         """
         ack_asdu = ASDU(
             type_id=type_id, sq=False, num=1,
-            cot=cot, pn=pn, common_addr=self._common_addr,
+            cot=self._reply_cot(cot), pn=pn, common_addr=self._common_addr,
         )
         ack_asdu.objects.append(obj)
         return ack_asdu.encode()
