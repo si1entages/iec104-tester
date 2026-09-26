@@ -76,6 +76,7 @@ class EngineSession:
             host=host, port=port, common_addr=addr,
             auto_start=True, auto_gi=False, reconnect=reconnect,
             reconnect_interval=5.0,
+            point_table=getattr(points, "table", None),
         )
         eng.set_event_callback(self._hook_master)
         eng.set_raw_frame_callback(self._hook_frame_master)
@@ -188,8 +189,13 @@ class EngineSession:
             await eng.single_command(int(ioa), bool(state), select, 0)
         return {"ok": True}
 
-    async def send_setpoint(self, ioa: int, value: float) -> dict:
-        await self.require_master().setpoint_shortfloat(int(ioa), float(value), False)
+    async def send_setpoint(self, ioa: int, value: float, select: bool = False) -> dict:
+        """发送设定点 (短浮点).
+
+        ``select=False`` (默认) 表示"不强制选择阶段"——引擎会依据点表 SBO 配置
+        决定是否自动两段式下发；``select=True`` 则显式只发选择帧。
+        """
+        await self.require_master().setpoint_shortfloat(int(ioa), float(value), select)
         return {"ok": True}
 
     async def parameter_command(self, kind: str, ioa: int, value: float, qualifier: int = 1) -> dict:

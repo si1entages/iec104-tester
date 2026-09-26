@@ -136,8 +136,8 @@ class EngineBridge:
     async def send_yk(self, ioa: int, state: int | bool, select: bool = False, double: bool = False) -> dict:
         return await self._cmd(self.session.send_yk(ioa, state, select, double))
 
-    async def send_setpoint(self, ioa: int, value: float) -> dict:
-        return await self._cmd(self.session.send_setpoint(ioa, value))
+    async def send_setpoint(self, ioa: int, value: float, select: bool = False) -> dict:
+        return await self._cmd(self.session.send_setpoint(ioa, value, select))
 
     async def parameter_command(self, kind: str, ioa: int, value: float, qualifier: int = 1) -> dict:
         return await self._cmd(self.session.parameter_command(kind, ioa, value, qualifier))

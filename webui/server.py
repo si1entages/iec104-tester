@@ -93,7 +93,9 @@ def create_app(bridge: EngineBridge) -> web.Application:
             value = float(value)
         except (TypeError, ValueError):
             return web.json_response({"ok": False, "error": "invalid value"}, status=400)
-        return web.json_response(await bridge.send_setpoint(ioa, value))
+        return web.json_response(await bridge.send_setpoint(
+            ioa, value, bool(body.get("select", False)),
+        ))
 
     async def api_clock(request: web.Request) -> web.Response:
         return web.json_response(await bridge.clock_sync())

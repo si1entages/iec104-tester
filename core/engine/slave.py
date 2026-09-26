@@ -1024,6 +1024,29 @@ class SlaveEngine(EngineBase):
         asdu_ack.objects.append(asdu.objects[0])
         await self._send_i_frame(state, asdu_ack.encode())
 
+    def _command_requires_sbo(self, ioa: int, *, is_setpoint: bool = False) -> bool:
+        """判定指定 IOA 的遥控命令是否需要 SBO (选择-执行) 过程.
+
+        来源为子站自身点表:
+        - 遥控点 (YK): ``YkPointDef.select_before_execute`` (YAML ``sbo`` 字段)
+        - 设点对应的遥测点 (YC) 无该字段, 默认按 False (直发执行) 处理
+
+        Args:
+            ioa: 信息对象地址。
+            is_setpoint: 是否为设点(遥调)命令。设点在点表中对应遥测点，
+                因此回落顺序为 YK → YC，且无点表定义时默认 False。
+
+        Returns:
+            True 表示需要 SBO (未选择则拒绝)；False 表示可直接执行。
+        """
+        yk_point = self._point_table.get_yk(ioa)
+        if yk_point is not None:
+            return bool(yk_point.select_before_execute)
+
+        # 设点命令: 对应的 YC 点无 sbo 字段, 默认直发执行 (False);
+        # 未在遥控点表中定义的其它命令: 保持现有严格 SBO 行为 (True), 不破坏既有用例
+        return not is_setpoint
+
     async def _handle_single_command(self, state: _ClientState, asdu: ASDU) -> None:
         """处理单命令."""
         await self._apply_command_delay()
@@ -1051,6 +1074,18 @@ class SlaveEngine(EngineBase):
                 # 回复选择确认
                 await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTCON, obj))
                 logger.info(f"Single Command SELECT ACK: IOA={obj.ioa}")
+            elif not self._command_requires_sbo(obj.ioa):
+                # 直发执行点 (sbo=false)：无需预先选择，直接执行
+                state.selected_commands.pop(obj.ioa, None)
+                # 回复执行确认
+                await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTCON, obj))
+
+                # 更新数据
+                self._data_store.update_yk(obj.ioa, "execute", cmd.state)
+
+                # 发送激活终止
+                await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTTERM, obj))
+                logger.info(f"Single Command DIRECT EXECUTE (sbo=false): IOA={obj.ioa}")
             else:
                 # 执行命令：先验证是否已选择
                 if obj.ioa in state.selected_commands:
@@ -1094,6 +1129,15 @@ class SlaveEngine(EngineBase):
                 # 回复选择确认
                 await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTCON, obj))
                 logger.info(f"Double Command SELECT ACK: IOA={obj.ioa}")
+            elif not self._command_requires_sbo(obj.ioa):
+                # 直发执行点 (sbo=false)：无需预先选择，直接执行
+                state.selected_commands.pop(obj.ioa, None)
+                # 回复执行确认
+                await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTCON, obj))
+
+                # 发送激活终止
+                await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTTERM, obj))
+                logger.info(f"Double Command DIRECT EXECUTE (sbo=false): IOA={obj.ioa}")
             else:
                 # 执行命令：先验证是否已选择
                 if obj.ioa in state.selected_commands:
@@ -1135,6 +1179,15 @@ class SlaveEngine(EngineBase):
                 # 回复选择确认
                 await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTCON, obj))
                 logger.info(f"Setpoint Command SELECT ACK: IOA={obj.ioa}")
+            elif not self._command_requires_sbo(obj.ioa, is_setpoint=True):
+                # 直发执行点 (sbo=false / 无 sbo 字段的 YC 点)：直接执行
+                state.selected_commands.pop(obj.ioa, None)
+                # 回复执行确认
+                await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTCON, obj))
+
+                # 发送激活终止
+                await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTTERM, obj))
+                logger.info(f"Setpoint Command DIRECT EXECUTE (sbo=false): IOA={obj.ioa}")
             else:
                 # 执行命令：先验证是否已选择
                 if obj.ioa in state.selected_commands:

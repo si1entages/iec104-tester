@@ -22,6 +22,7 @@ from typing import Any
 
 from ..data.data_store import RealtimeDB
 from ..data.history import HistoryDB
+from ..data.point_table import PointTable
 from ..protocol.apci import APCI, APCICodec
 from ..protocol.asdu import ASDU, ASDUBuilder
 from ..protocol.file_transfer import FileTransferMaster, FileTransferState
@@ -95,6 +96,7 @@ class MasterEngine(EngineBase):
         reconnect: bool = True,
         reconnect_interval: float = 5.0,
         history_db: HistoryDB | None = None,
+        point_table: PointTable | None = None,
     ):
         super().__init__()
         self._host = host
@@ -119,6 +121,13 @@ class MasterEngine(EngineBase):
 
         # 数据存储
         self._data_store = RealtimeDB()
+
+        # 点表（可选）：用于查询遥控点的 SBO (选择-执行) 配置。
+        # 为 None 时不启用自动两段式，保持既有单帧发送语义。
+        self._point_table: PointTable | None = point_table
+
+        # 命令确认（ACTCON）等待：IOA → Future，由 _process_command_ack 唤醒。
+        self._pending_acks: dict[int, asyncio.Future] = {}
 
         # 历史数据库
         self._history_db = history_db
@@ -199,6 +208,19 @@ class MasterEngine(EngineBase):
     @property
     def history_db(self) -> HistoryDB | None:
         return self._history_db
+
+    @property
+    def point_table(self) -> PointTable | None:
+        """当前点表引用（供 SBO 查询使用），未设置时为 None."""
+        return self._point_table
+
+    def set_point_table(self, point_table: PointTable | None) -> None:
+        """设置点表引用.
+
+        设置后，遥控/设点命令在发送前会查询该 IOA 的 ``select_before_execute``，
+        对 SBO 点位自动执行"选择-执行"两段式下发。
+        """
+        self._point_table = point_table
 
     # ── 回调设置 ──────────────────────────────────────────────────
 
@@ -370,9 +392,113 @@ class MasterEngine(EngineBase):
 
     # ── 遥控操作 ──────────────────────────────────────────────────
 
+    def _sbo_required(self, ioa: int, kind: str) -> bool:
+        """判断指定 IOA 的遥控/设点命令是否需要"选择-执行"(SBO) 两段式.
+
+        语义与子站 ``SlaveEngine._command_requires_sbo`` 严格对称，保证主/子站
+        两侧判定一致:
+
+        - 若该 IOA 在 **YK 点表**中: 返回其 ``select_before_execute``
+          （YAML ``sbo`` 字段）。这一判定对遥控与设点**一致** —— 因为 IEC 104
+          中遥控/设点可共享同一 IOA 地址空间，子站对设点命令同样会先查 YK 表。
+        - 若该 IOA 不在 YK 点表中: 设点 (yc) 返回 False（直发执行，向后兼容，
+          与子站 ``is_setpoint=True`` 的回落一致）；遥控 (yk) 亦返回 False
+          （主站侧未配置点表定义时不强制 SBO，避免影响既有调用方）。
+
+        Args:
+            ioa: 信息对象地址。
+            kind: "yk"=遥控命令；"yc"=设点(遥调)命令。两者共用同一 YK 点表查询，
+                仅当未命中 YK 点时行为一致（均 False）。
+        Returns:
+            仅当已注入点表且该 IOA 命中 YK 点表、``select_before_execute`` 为
+            True 时返回 True。
+
+        Note:
+            **已知边界差异（有意保留，勿当缺陷"修复"）**：对点表中
+            *不存在* 的 IOA 下发 **遥控** 命令时，本方法返回 False（主站直发
+            执行），而子站 ``_command_requires_sbo(ioa, is_setpoint=False)``
+            返回 True（要求 SBO），子站会回 ``ACTCON(PN=1)`` 拒绝。理由：
+
+            1. 正常运维不会对未定义点下发遥控，该路径非实际使用场景；
+            2. 子站保守拒绝是安全行为（未知点不动作）；
+            3. 若把主站侧改为 True，会改变"未注入点表/点表无该点"时既有调用
+               方的行为（如测试中 IOA=100/200），引入回归风险。
+
+            该差异仅存在于"未命中 YK 点表 + 遥控"组合；"设点"组合两侧一致
+            （均 False）。
+        """
+        if self._point_table is None:
+            return False
+        yk_point = self._point_table.get_yk(ioa)
+        if yk_point is not None:
+            return bool(yk_point.select_before_execute)
+        # 未命中 YK 点表: 遥控与设点均不强制 SBO (设点回落同子站语义)
+        return False
+
+    async def _wait_select_ack(self, ioa: int, timeout: float) -> bool:
+        """等待指定 IOA 的选择阶段确认 (ACTCON).
+
+        由于 ``_resolve_pending_ack`` 仅在 ACTCON 时唤醒等待，本方法拿到的结果
+        一定是 ACTCON 语义；此处再次校验 COT 以防未来实现变更。
+
+        并发安全: 同一 IOA 上若已有未完成的等待，先取消旧的等待再登记本次，
+        避免 ``_pending_acks`` 被静默覆盖导致旧等待悬挂；清理时只删除属于自己
+        的 Future（``is fut`` 判定），不误删他人登记。
+
+        Args:
+            ioa: 信息对象地址
+            timeout: 等待超时（秒）
+        Returns:
+            True=收到肯定确认 (PN=0)；False=收到否定确认或超时（调用方须中止执行）。
+        """
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future = loop.create_future()
+        # 并发覆盖防护: 取消同一 IOA 上残留的旧等待
+        old = self._pending_acks.get(ioa)
+        if old is not None and not old.done():
+            logger.warning(f"SBO: concurrent wait on IOA={ioa}, cancelling stale waiter")
+            old.cancel()
+        self._pending_acks[ioa] = fut
+        try:
+            pn, cot = await asyncio.wait_for(fut, timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning(f"SBO select timeout: IOA={ioa} no ACTCON within {timeout}s")
+            return False
+        except asyncio.CancelledError:
+            # 同一 IOA 上被更新的等待取代（旧等待被 cancel），视为未确认
+            logger.warning(f"SBO select superseded by newer wait: IOA={ioa}")
+            return False
+        finally:
+            # 只删除自己登记的 Future，避免误删并发场景下他人替换后的登记
+            if self._pending_acks.get(ioa) is fut:
+                self._pending_acks.pop(ioa, None)
+        if cot != COT.ACTCON or pn:
+            logger.warning(f"SBO select rejected: IOA={ioa} pn={pn} cot={cot}")
+            return False
+        return True
+
     async def single_command(self, ioa: int, state: bool,
                               select: bool = False, qu: int = 0) -> None:
-        """发送单命令 (选择/执行)."""
+        """发送单命令 (选择/执行).
+
+        当点表已设置且该 IOA 配置为 SBO (``select_before_execute=True``)、
+        且调用方未显式要求 ``select=True`` 时，自动执行两段式：先发选择并等待
+        肯定确认 (ACTCON, PN=0)，成功后再发执行；选择被拒或超时则中止，
+        绝不继续发送执行帧。
+        """
+        if not select and self._sbo_required(ioa, "yk"):
+            await self._send_single_command_raw(ioa, state, select=True, qu=qu)
+            acked = await self._wait_select_ack(ioa, self._t1)
+            if not acked:
+                raise RuntimeError(
+                    f"SBO select failed for single command IOA={ioa} "
+                    f"(rejected or timed out); execute not sent"
+                )
+        await self._send_single_command_raw(ioa, state, select=select, qu=qu)
+
+    async def _send_single_command_raw(self, ioa: int, state: bool,
+                                        select: bool, qu: int) -> None:
+        """发送单命令单帧（不做 SBO 决策）."""
         asdu_data = ASDUBuilder.build_single_command(
             self._common_addr, ioa, state, select, qu
         )
@@ -388,7 +514,23 @@ class MasterEngine(EngineBase):
 
     async def double_command(self, ioa: int, state: int,
                               select: bool = False, qu: int = 0) -> None:
-        """发送双命令."""
+        """发送双命令 (选择/执行).
+
+        对 SBO 点位自动两段式下发，语义同 ``single_command``。
+        """
+        if not select and self._sbo_required(ioa, "yk"):
+            await self._send_double_command_raw(ioa, state, select=True, qu=qu)
+            acked = await self._wait_select_ack(ioa, self._t1)
+            if not acked:
+                raise RuntimeError(
+                    f"SBO select failed for double command IOA={ioa} "
+                    f"(rejected or timed out); execute not sent"
+                )
+        await self._send_double_command_raw(ioa, state, select=select, qu=qu)
+
+    async def _send_double_command_raw(self, ioa: int, state: int,
+                                        select: bool, qu: int) -> None:
+        """发送双命令单帧（不做 SBO 决策）."""
         asdu_data = ASDUBuilder.build_double_command(
             self._common_addr, ioa, state, select, qu
         )
@@ -399,7 +541,29 @@ class MasterEngine(EngineBase):
 
     async def setpoint_normalized(self, ioa: int, value: float,
                                     select: bool = False) -> None:
-        """发送归一化设点命令."""
+        """发送归一化设点命令 (选择/执行).
+
+        当点表已设置且该 IOA 命中 YK 点表并配置为 SBO
+        (``select_before_execute=True``) 时，自动执行两段式：先发选择并等待肯定
+        确认 (ACTCON, PN=0)，成功后再发执行；选择被拒或超时则中止，绝不继续发送
+        执行帧。与子站 ``_command_requires_sbo(is_setpoint=True)`` 语义对称。
+
+        该 IOA 未在 YK 点表中时按直发执行处理（向后兼容），亦可通过 ``select``
+        显式传参覆盖。
+        """
+        if not select and self._sbo_required(ioa, "yc"):
+            await self._send_setpoint_normalized_raw(ioa, value, select=True)
+            acked = await self._wait_select_ack(ioa, self._t1)
+            if not acked:
+                raise RuntimeError(
+                    f"SBO select failed for setpoint IOA={ioa} "
+                    f"(rejected or timed out); execute not sent"
+                )
+        await self._send_setpoint_normalized_raw(ioa, value, select=select)
+
+    async def _send_setpoint_normalized_raw(self, ioa: int, value: float,
+                                             select: bool) -> None:
+        """发送归一化设点单帧（不做 SBO 决策）."""
         asdu_data = ASDUBuilder.build_setpoint_normalized(
             self._common_addr, ioa, value, select
         )
@@ -410,7 +574,24 @@ class MasterEngine(EngineBase):
 
     async def setpoint_shortfloat(self, ioa: int, value: float,
                                     select: bool = False) -> None:
-        """发送短浮点设点命令."""
+        """发送短浮点设点命令 (选择/执行).
+
+        与 ``setpoint_normalized`` 语义一致：命中 YK 点表且 SBO 配置为 True 时
+        自动两段式下发；否则直发执行（向后兼容），可用 ``select`` 显式覆盖。
+        """
+        if not select and self._sbo_required(ioa, "yc"):
+            await self._send_setpoint_shortfloat_raw(ioa, value, select=True)
+            acked = await self._wait_select_ack(ioa, self._t1)
+            if not acked:
+                raise RuntimeError(
+                    f"SBO select failed for setpoint IOA={ioa} "
+                    f"(rejected or timed out); execute not sent"
+                )
+        await self._send_setpoint_shortfloat_raw(ioa, value, select=select)
+
+    async def _send_setpoint_shortfloat_raw(self, ioa: int, value: float,
+                                             select: bool) -> None:
+        """发送短浮点设点单帧（不做 SBO 决策）."""
         asdu_data = ASDUBuilder.build_setpoint_shortfloat(
             self._common_addr, ioa, value, select
         )
@@ -429,6 +610,19 @@ class MasterEngine(EngineBase):
             select: True=选择, False=执行
             qu: 限定词 (0-31)
         """
+        if not select and self._sbo_required(ioa, "yk"):
+            await self._send_regulating_step_raw(ioa, state, select=True, qu=qu)
+            acked = await self._wait_select_ack(ioa, self._t1)
+            if not acked:
+                raise RuntimeError(
+                    f"SBO select failed for regulating step IOA={ioa} "
+                    f"(rejected or timed out); execute not sent"
+                )
+        await self._send_regulating_step_raw(ioa, state, select=select, qu=qu)
+
+    async def _send_regulating_step_raw(self, ioa: int, state: int,
+                                         select: bool, qu: int) -> None:
+        """发送升降命令单帧（不做 SBO 决策）."""
         asdu_data = ASDUBuilder.build_regulating_step_command(
             self._common_addr, ioa, state, select, qu
         )
@@ -446,11 +640,27 @@ class MasterEngine(EngineBase):
                                select: bool = False) -> None:
         """发送标度化设点命令 (C_SE_NB_1).
 
+        命中 YK 点表且 SBO 配置为 True 时自动两段式下发；否则直发执行，可用
+        ``select`` 显式覆盖。
+
         Args:
             ioa: 信息对象地址
             value: 标度化值 (-32768..+32767)
             select: True=选择, False=执行
         """
+        if not select and self._sbo_required(ioa, "yc"):
+            await self._send_setpoint_scaled_raw(ioa, value, select=True)
+            acked = await self._wait_select_ack(ioa, self._t1)
+            if not acked:
+                raise RuntimeError(
+                    f"SBO select failed for setpoint IOA={ioa} "
+                    f"(rejected or timed out); execute not sent"
+                )
+        await self._send_setpoint_scaled_raw(ioa, value, select=select)
+
+    async def _send_setpoint_scaled_raw(self, ioa: int, value: int,
+                                         select: bool) -> None:
+        """发送标度化设点单帧（不做 SBO 决策）."""
         asdu_data = ASDUBuilder.build_setpoint_scaled(
             self._common_addr, ioa, value, select
         )
@@ -1209,12 +1419,30 @@ class MasterEngine(EngineBase):
                 else:
                     logger.info(f"Command ACK: type={asdu.type_id} IOA={obj.ioa}")
                     self._data_store.update_yk(obj.ioa, "ack")
+                # 唤醒等待该 IOA 命令确认的两段式下发逻辑
+                self._resolve_pending_ack(obj.ioa, pn=pn, cot=cot)
             elif cot == COT.DEACTCON:
                 logger.info(f"Command DEACTCON: type={asdu.type_id} IOA={obj.ioa}")
+                self._resolve_pending_ack(obj.ioa, pn=pn, cot=cot)
             elif cot == COT.ACTTERM:
                 logger.info(f"Command ACTTERM: type={asdu.type_id} IOA={obj.ioa}")
+                self._resolve_pending_ack(obj.ioa, pn=pn, cot=cot)
             else:
                 logger.warning(f"Command with COT={cot}")
+
+    def _resolve_pending_ack(self, ioa: int, pn: bool, cot: int) -> None:
+        """唤醒正在等待指定 IOA 命令确认的协程.
+
+        竞态防护: 只有 ACTCON（激活确认）才唤醒 SBO 选择等待。ACTTERM/DEACTCON
+        等后续帧可能是上一条命令的滞后帧，若用来唤醒本次选择等待，会导致
+        ``cot != ACTCON`` 被误判为"选择被拒"，从而偶发遥控失败。故此处直接忽略
+        非 ACTCON 帧，等待者拿到的一定是 ACTCON 语义。
+        """
+        if cot != COT.ACTCON:
+            return
+        fut = self._pending_acks.get(ioa)
+        if fut is not None and not fut.done():
+            fut.set_result((pn, cot))
 
     def _process_step_position(self, asdu: ASDU) -> None:
         """处理步位置信息."""

@@ -90,3 +90,6 @@ config.local.yaml
 
 # WorkBuddy workspace data (local only)
 .workbuddy/
+
+# QA verification scratch scripts (process artifacts, not deliverables)
+qa_verify/
