@@ -12,7 +12,6 @@ authors = [
 dependencies = [
     "PyYAML>=6.0",
     "aiohttp>=3.9",
-    "pywebview>=5.0",
 ]
 
 [project.optional-dependencies]
@@ -22,6 +21,7 @@ build = [
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
+    "ruff>=0.6",
 ]
 
 [project.scripts]
@@ -33,3 +33,36 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["core*", "webui*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["venv", "build/dist", "test_reports"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "SIM", # flake8-simplify
+]
+ignore = [
+    "E501",   # line too long — 协议构造代码行宽不固定，交由 formatter
+    "SIM105", # try/except/pass 有时是有意为之的降级
+    "SIM102", # 嵌套 if 合并 — 协议分支代码拆开更可读
+    "SIM108", # 三元表达式强制 — if/else 块在协议代码中更清晰
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 测试中断言显式布尔比较、嵌套 with 是常见且可读的写法
+"tests/**" = ["E712", "SIM117"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["core", "webui"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

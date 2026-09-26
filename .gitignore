@@ -87,3 +87,6 @@ config.local.yaml
 
 # Executables
 *.exe
+
+# WorkBuddy workspace data (local only)
+.workbuddy/
