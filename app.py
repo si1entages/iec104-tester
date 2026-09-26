@@ -76,13 +76,17 @@ def _open_browser_when_ready(
     threading.Thread(target=_probe, daemon=True).start()
 
 
-def run_web(role: str, http_port: int | None = None, open_browser: bool = True) -> None:
+def run_web(role: str, http_port: int | None = None, open_browser: bool = True,
+            point_table=None) -> None:
     """启动 Web 服务（阻塞）并在就绪后打开浏览器.
 
     Args:
         role: 运行角色，"master"（主站）或 "slave"（子站）.
         http_port: HTTP 端口；为 None 时按角色取默认端口（主站 8765 / 子站 8766）.
         open_browser: True 时在端口就绪后自动打开默认浏览器；False 时仅打印地址.
+        point_table: 已加载的 ``PointTable``；为 None 时 Web 层自行生成演示点表.
+            ``cli()`` 会把 ``--point-table`` / 配置文件加载出的点表传入，
+            否则该参数指定的点表会被静默丢弃。
     """
     from webui.server import run_server
 
@@ -99,7 +103,7 @@ def run_web(role: str, http_port: int | None = None, open_browser: bool = True) 
     print("关闭此窗口或按 Ctrl+C 停止服务", flush=True)
 
     try:
-        run_server(role, "127.0.0.1", port)
+        run_server(role, "127.0.0.1", port, point_table=point_table)
     except KeyboardInterrupt:
         pass
 
@@ -240,7 +244,8 @@ def cli(default_role: str | None = None) -> int:
 
         # Web UI 模式（主站/子站）
         role = "slave" if config.mode == "slave" else "master"
-        run_web(role, args.http_port, open_browser=not args.no_browser)
+        run_web(role, args.http_port, open_browser=not args.no_browser,
+                point_table=point_table)
         return 0
     finally:
         # 保证异常路径也会关闭历史数据库

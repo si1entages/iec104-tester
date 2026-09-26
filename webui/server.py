@@ -12,6 +12,8 @@ from .bridge import EngineBridge
 
 logger = logging.getLogger("iec104.webui")
 STATIC = Path(__file__).parent / "static"
+# 项目资源目录（图标等）：webui/ 的上一级 resources/
+RESOURCES = Path(__file__).parent.parent / "resources"
 
 
 def create_app(bridge: EngineBridge) -> web.Application:
@@ -20,6 +22,13 @@ def create_app(bridge: EngineBridge) -> web.Application:
     async def index(request: web.Request) -> web.Response:
         page = "master.html" if bridge.role == "master" else "slave.html"
         return web.FileResponse(STATIC / page)
+
+    async def favicon(request: web.Request) -> web.Response:
+        """返回项目图标，避免浏览器请求 /favicon.ico 时 404."""
+        icon = RESOURCES / "icon.svg"
+        if not icon.exists():
+            return web.Response(status=404)
+        return web.FileResponse(icon, headers={"Content-Type": "image/svg+xml"})
 
     async def api_status(request: web.Request) -> web.Response:
         return web.json_response(bridge.status())
@@ -330,11 +339,14 @@ def create_app(bridge: EngineBridge) -> web.Application:
     app.router.add_post("/api/slave/sim", api_slave_sim)
     app.router.add_get("/ws", ws_feed)
     app.router.add_static("/static/", STATIC, show_index=False)
+    app.router.add_get("/favicon.ico", favicon)
+    app.router.add_get("/favicon.svg", favicon)
     return app
 
 
-async def _run(role: str, host: str = "127.0.0.1", port: int = 8765) -> None:
-    bridge = EngineBridge(role)
+async def _run(role: str, host: str = "127.0.0.1", port: int = 8765,
+               point_table=None) -> None:
+    bridge = EngineBridge(role, point_table=point_table)
     bridge.ensure_demo_points()
     app = create_app(bridge)
     runner = web.AppRunner(app)
@@ -349,9 +361,10 @@ async def _run(role: str, host: str = "127.0.0.1", port: int = 8765) -> None:
         await runner.cleanup()
 
 
-def run_server(role: str, host: str = "127.0.0.1", port: int = 8765) -> None:
+def run_server(role: str, host: str = "127.0.0.1", port: int = 8765,
+               point_table=None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     try:
-        asyncio.run(_run(role, host, port))
+        asyncio.run(_run(role, host, port, point_table=point_table))
     except KeyboardInterrupt:
         pass

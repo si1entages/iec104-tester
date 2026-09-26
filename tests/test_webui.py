@@ -435,3 +435,82 @@ def test_master_html_qoi_behavioural():
     )
     assert proc.returncode == 0, f"stdout={proc.stdout}\nstderr={proc.stderr}"
     assert "OK" in proc.stdout
+
+
+# ── favicon 路由 ──────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_favicon_routes_served(master_client):
+    """浏览器会请求 /favicon.ico，此前返回 404；现应返回 SVG 图标."""
+    client, _ = master_client
+    for path in ("/favicon.ico", "/favicon.svg"):
+        r = await client.get(path)
+        assert r.status == 200, f"{path} -> {r.status}"
+        ctype = r.headers.get("Content-Type", "")
+        assert "svg" in ctype, f"{path} Content-Type={ctype}"
+        body = await r.text()
+        assert "<svg" in body
+
+
+@pytest.mark.asyncio
+async def test_html_declares_icon(master_client):
+    """页面 <head> 需声明图标，否则浏览器仍走默认 404 探测."""
+    client, _ = master_client
+    r = await client.get("/")
+    html = await r.text()
+    assert 'rel="icon"' in html
+    assert "/favicon.svg" in html
+
+
+# ── CLI 点表传递到 Web 会话 ────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_bridge_accepts_external_point_table():
+    """EngineBridge 传入外部点表后，不得再生成演示点表覆盖它."""
+    from core.data.point_table import PointTable
+
+    table = PointTable()
+    table.load_yaml(str(Path(__file__).parent.parent / "configs" / "demo_points.yaml"))
+    before = table.yx_count
+
+    bridge = EngineBridge("master", point_table=table)
+    bridge.ensure_demo_points()          # 不应覆盖
+    assert bridge.point_table is table
+    assert bridge.point_table.yx_count == before
+    # demo_points.yaml 有 4 个显式 sbo=true 的遥控点
+    yk = bridge.point_table.get_all_yk()
+    assert len(yk) == 4
+    assert all(p.select_before_execute for p in yk)
+    await bridge.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_bridge_without_table_generates_demo():
+    """不传点表时保持原行为：自动生成演示点表."""
+    bridge = EngineBridge("master")
+    bridge.ensure_demo_points()
+    assert bridge.point_table.yx_count > 0
+    assert bridge.points.count > 0
+    await bridge.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_web_server_threads_point_table_to_engine():
+    """--point-table 传递链末端：bridge 点表须注入主站引擎用于 SBO 决策."""
+    from core.data.point_table import PointTable
+
+    table = PointTable()
+    table.load_yaml(str(Path(__file__).parent.parent / "configs" / "demo_points.yaml"))
+    bridge = EngineBridge("master", point_table=table)
+    bridge.ensure_demo_points()
+    app = create_app(bridge)
+    client = TestClient(TestServer(app))
+    await client.start_server()
+    try:
+        r = await client.get("/api/points")
+        pts = (await r.json())["points"]
+        yk_ioas = sorted(p["ioa"] for p in pts if p["type"] == "YK")
+        assert yk_ioas == [2001, 2002, 2003, 2004], yk_ioas
+    finally:
+        await bridge.shutdown()
+        await client.close()

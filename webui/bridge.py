@@ -18,13 +18,13 @@ logger = logging.getLogger("iec104.webui")
 class EngineBridge:
     """在独立 asyncio 循环上运行主站或子站引擎，并向 UI 推送事件."""
 
-    def __init__(self, role: str = "master"):
+    def __init__(self, role: str = "master", point_table: PointTable | None = None):
         assert role in ("master", "slave")
         self.role = role
         self.config = AppConfig()
         self.config.mode = role
         self.bus = EventBus()
-        self.points = PointService()
+        self.points = PointService(point_table)
         self.point_table: PointTable = self.points.table
         self.session = EngineSession(
             role, self.config,
@@ -67,6 +67,12 @@ class EngineBridge:
         })
 
     def ensure_demo_points(self) -> None:
+        """点表为空时生成演示点表.
+
+        若 bridge 由外部传入点表（``--point-table`` / 配置文件），
+        ``PointService.ensure_demo`` 只在 ``yx_count == 0`` 时才生成，
+        因此不会覆盖用户点表。
+        """
         n = 50 if self.role == "slave" else 20
         self.points.ensure_demo(
             yx=n, yc=max(10, n // 2), yk=8, ym=5,

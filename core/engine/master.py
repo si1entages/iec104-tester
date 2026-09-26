@@ -538,6 +538,10 @@ class MasterEngine(EngineBase):
 
         action = "SELECT" if select else "EXECUTE"
         logger.info(f"Double Command: IOA={ioa} {action} state={state}")
+        self._fire_event(MasterEvent.COMMAND_SENT, {
+            "type": "double_command", "ioa": ioa,
+            "state": state, "select": select
+        })
 
     async def setpoint_normalized(self, ioa: int, value: float,
                                     select: bool = False) -> None:
@@ -571,6 +575,10 @@ class MasterEngine(EngineBase):
 
         action = "SELECT" if select else "EXECUTE"
         logger.info(f"Setpoint Normalized: IOA={ioa} {action} value={value}")
+        self._fire_event(MasterEvent.COMMAND_SENT, {
+            "type": "setpoint_normalized", "ioa": ioa,
+            "value": value, "select": select
+        })
 
     async def setpoint_shortfloat(self, ioa: int, value: float,
                                     select: bool = False) -> None:
@@ -599,6 +607,10 @@ class MasterEngine(EngineBase):
 
         action = "SELECT" if select else "EXECUTE"
         logger.info(f"Setpoint ShortFloat: IOA={ioa} {action} value={value}")
+        self._fire_event(MasterEvent.COMMAND_SENT, {
+            "type": "setpoint_shortfloat", "ioa": ioa,
+            "value": value, "select": select
+        })
 
     async def regulating_step_command(self, ioa: int, state: int,
                                        select: bool = False, qu: int = 0) -> None:
