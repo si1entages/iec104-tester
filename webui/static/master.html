@@ -87,10 +87,38 @@
         <div class="row">
           <button class="btn" id="yk-off">遥控分</button>
           <button class="btn primary" id="yk-on">遥控合</button>
+          <button class="btn" id="yk-dc-off">双命令分</button>
+          <button class="btn primary" id="yk-dc-on">双命令合</button>
+        </div>
+        <div class="row">
+          <label><input id="cmd-with-time" type="checkbox" /> 带时标 CP56 (C_*_TA/TB/TC_1)</label>
         </div>
         <div class="row">
           <input id="sp-val" type="number" step="0.01" value="0" class="grow" />
+          <select id="sp-kind" style="width:96px">
+            <option value="short_float">短浮点 C_SE_NC</option>
+            <option value="normalized">归一化 C_SE_NA</option>
+            <option value="scaled">标度化 C_SE_NB</option>
+          </select>
           <button class="btn primary" id="sp-send">设点</button>
+        </div>
+        <div class="row">
+          <button class="btn" id="step-down">降一步</button>
+          <button class="btn" id="step-up">升一步</button>
+          <span class="muted">升降 C_RC_NA_1</span>
+        </div>
+      </div>
+      <div class="card">
+        <h4>高级命令</h4>
+        <div class="row">
+          <span class="muted">比特串</span>
+          <input id="bo-val" type="number" value="0" class="grow" />
+          <button class="btn" id="bo-send">下发 C_BO</button>
+        </div>
+        <div class="row">
+          <span class="muted">延时获得</span>
+          <input id="cd-ms" type="number" value="500" class="grow" />
+          <button class="btn" id="cd-send">下发 C_CD</button>
         </div>
       </div>
       <div class="card">
@@ -112,18 +140,41 @@
   </main>
 
   <section class="bottom" id="bottom">
-    <div class="bottom-tabs"><span class="muted">报文 / 事件</span></div>
-    <div class="bottom-body">
+    <div class="bottom-tabs">
+      <span class="muted">报文 / 事件 / 日志</span>
+      <span class="log-tools">
+        <select id="log-level" title="最低级别">
+          <option value="DEBUG">DEBUG+</option>
+          <option value="INFO">INFO+</option>
+          <option value="WARNING">WARNING+</option>
+          <option value="ERROR">ERROR+</option>
+        </select>
+        <select id="log-category">
+          <option value="all">全部类别</option>
+          <option value="connection">连接</option>
+          <option value="protocol">协议</option>
+          <option value="command">命令</option>
+          <option value="data">数据</option>
+          <option value="ui">界面</option>
+          <option value="system">系统</option>
+        </select>
+        <input id="log-q" placeholder="关键字过滤" class="grow" />
+        <button class="btn" id="log-clear">清屏</button>
+        <button class="btn" id="log-export">导出</button>
+      </span>
+    </div>
+    <div class="bottom-body three">
       <div class="feed" id="feed-frames" role="log" aria-label="报文流"></div>
       <div class="feed" id="feed-events" role="log" aria-label="事件流"></div>
+      <div class="feed" id="feed-logs" role="log" aria-label="日志流"></div>
     </div>
   </section>
 
   <footer class="statusbar">
-    <span id="st-conn">未连接</span>
-    <span id="st-traffic">TX 0 / RX 0</span>
-    <span id="st-seq">VS/VR -/-</span>
-    <span id="st-points">点 0</span>
+    <span id="st-conn">状态 未连接</span>
+    <span id="st-traffic">报文 TX 0 / RX 0</span>
+    <span id="st-seq">序号 VS/VR -/- 窗口 -</span>
+    <span id="st-points">点数 0</span>
   </footer>
 </div>
 <script src="/static/js/app.js"></script>
@@ -151,6 +202,7 @@ $("#btn-conn").onclick = async () => {
     $("#btn-disc").disabled = false;
     for (const id of ["#btn-gi", "#btn-ci", "#btn-clock", "#btn-reset", "#btn-test"]) $(id).disabled = false;
   }
+  IEC104.requestRefresh();   // 立刻按服务端真实状态对齐（含 already running 等分支）
 };
 $("#btn-disc").onclick = async () => {
   await api("/api/master/stop");
@@ -158,6 +210,7 @@ $("#btn-disc").onclick = async () => {
   $("#btn-disc").disabled = true;
   for (const id of ["#btn-gi", "#btn-ci", "#btn-clock", "#btn-reset", "#btn-test"]) $(id).disabled = true;
   toast("已断开");
+  IEC104.requestRefresh();
 };
 $("#btn-local").onclick = () => { $("#host").value = "127.0.0.1"; $("#btn-conn").click(); };
 $("#btn-gi").onclick = async () => {
@@ -227,15 +280,45 @@ $("#import-yaml").onchange = async (e) => {
 };
 $("#yk-on").onclick = () => {
   const ioa = +$("#cmd-ioa").value;
-  api("/api/master/yk", { ioa, state: 1 }).then((r) => toast(r.ok ? "合命令已发" : r.error));
+  api("/api/master/yk", { ioa, state: 1, with_time: $("#cmd-with-time").checked })
+    .then((r) => toast(r.ok ? "合命令已发" : r.error));
 };
 $("#yk-off").onclick = () => {
   const ioa = +$("#cmd-ioa").value;
-  api("/api/master/yk", { ioa, state: 0 }).then((r) => toast(r.ok ? "分命令已发" : r.error));
+  api("/api/master/yk", { ioa, state: 0, with_time: $("#cmd-with-time").checked })
+    .then((r) => toast(r.ok ? "分命令已发" : r.error));
+};
+$("#yk-dc-on").onclick = () => {
+  const ioa = +$("#cmd-ioa").value;
+  api("/api/master/yk", { ioa, state: 2, double: true, with_time: $("#cmd-with-time").checked })
+    .then((r) => toast(r.ok ? "双命令合已发" : r.error));
+};
+$("#yk-dc-off").onclick = () => {
+  const ioa = +$("#cmd-ioa").value;
+  api("/api/master/yk", { ioa, state: 1, double: true, with_time: $("#cmd-with-time").checked })
+    .then((r) => toast(r.ok ? "双命令分已发" : r.error));
+};
+$("#step-up").onclick = () => {
+  const ioa = +$("#cmd-ioa").value;
+  api("/api/master/step", { ioa, state: 2 }).then((r) => toast(r.ok ? "升一步已发" : r.error));
+};
+$("#step-down").onclick = () => {
+  const ioa = +$("#cmd-ioa").value;
+  api("/api/master/step", { ioa, state: 1 }).then((r) => toast(r.ok ? "降一步已发" : r.error));
+};
+$("#bo-send").onclick = () => {
+  const ioa = +$("#cmd-ioa").value, value = +$("#bo-val").value;
+  api("/api/master/bitstring", { ioa, value }).then((r) => toast(r.ok ? "比特串已发" : r.error));
+};
+$("#cd-send").onclick = () => {
+  const delay = +$("#cd-ms").value;
+  api("/api/master/delay", { delay_ms: delay }).then((r) => toast(r.ok ? "延时获得已发" : r.error));
 };
 $("#sp-send").onclick = () => {
   const ioa = +$("#cmd-ioa").value, value = +$("#sp-val").value;
-  api("/api/master/setpoint", { ioa, value }).then((r) => toast(r.ok ? "设点已发" : r.error));
+  api("/api/master/setpoint", {
+    ioa, value, kind: $("#sp-kind").value, with_time: $("#cmd-with-time").checked,
+  }).then((r) => toast(r.ok ? "设点已发" : r.error));
 };
 </script>
 </body>

@@ -491,6 +491,94 @@ async def test_wrong_cot_api_path(slave_client):
 
 
 @pytest.mark.asyncio
+async def test_stop_without_engine_still_notifies_clients(slave_client):
+    """空操作分支也必须广播事件.
+
+    否则"以为还连着"的页面点「断开/停止」后收不到任何推送，永远停在旧状态，
+    表现为「按钮能点，点了没效果」（实机反馈过的缺陷）。
+    """
+    client, bridge = slave_client
+    q = bridge.subscribe()
+    try:
+        r = await client.post("/api/slave/stop")
+        assert (await r.json())["ok"] is True
+        assert not q.empty(), "未广播任何事件，客户端无法重新对齐状态"
+        assert q.get_nowait()["kind"] == "event"
+    finally:
+        bridge.unsubscribe(q)
+
+
+@pytest.mark.asyncio
+async def test_start_twice_notifies_on_already_running(slave_client):
+    """重复启动（already running）也要广播，让页面把按钮对齐到真实状态."""
+    client, bridge = slave_client
+    port = _free_port()
+    body = {"host": "127.0.0.1", "port": port, "addr": 1}
+    assert (await (await client.post("/api/slave/start", json=body)).json())["ok"] is True
+    try:
+        q = bridge.subscribe()
+        try:
+            r = await client.post("/api/slave/start", json=body)
+            res = await r.json()
+            assert res["ok"] is False and "already" in res["error"]
+            assert not q.empty(), "already running 分支未广播事件"
+        finally:
+            bridge.unsubscribe(q)
+    finally:
+        await client.post("/api/slave/stop")
+
+
+@pytest.mark.asyncio
+async def test_status_started_flag_tracks_session(slave_client):
+    """`status.started` 必须如实反映会话是否已启动.
+
+    前端用它同步「启动监听/停止」（主站为「连接/断开」）的可用状态：页面刷新后
+    若引擎仍在运行而按钮停在初始 disabled，用户就会"点不了停止/断开"
+    （实机反馈过的缺陷）。
+    """
+    client, _ = slave_client
+    assert (await (await client.get("/api/status")).json())["started"] is False
+
+    port = _free_port()
+    r = await client.post("/api/slave/start", json={"host": "127.0.0.1", "port": port, "addr": 1})
+    assert (await r.json())["ok"] is True
+    try:
+        st = await (await client.get("/api/status")).json()
+        assert st["started"] is True and st["running"] is True
+    finally:
+        await client.post("/api/slave/stop")
+
+    st = await (await client.get("/api/status")).json()
+    assert st["started"] is False and st["running"] is False
+
+
+@pytest.mark.asyncio
+async def test_pages_and_static_disable_heuristic_cache(slave_client):
+    """页面与 app.js 必须带 no-cache，否则前端修复会被浏览器启发式缓存挡住."""
+    client, _ = slave_client
+    for path in ("/", "/static/js/app.js"):
+        r = await client.get(path)
+        assert r.status == 200, f"{path} -> {r.status}"
+        cc = r.headers.get("Cache-Control", "")
+        assert "no-cache" in cc, f"{path} Cache-Control={cc!r}"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="需要 node 执行前端沙箱脚本")
+def test_frontend_inline_scripts_wire_buttons_and_live_refresh():
+    """真跑前端脚本（Node 沙箱）：按钮必须绑上 onclick，WS 报文必须触发刷新.
+
+    背景：`app.js` 曾未把 `$` 暴露到 window，两页内联脚本首句即 ReferenceError，
+    所有按钮静默失效、点值只能靠刷新页面更新——Python 端 HTML 字符串断言看不到这类问题。
+    """
+    script = Path(__file__).parent.parent / "qa_verify" / "qa_webui_dom.mjs"
+    proc = subprocess.run(
+        [shutil.which("node"), str(script)],
+        capture_output=True, text=True, encoding="utf-8", timeout=60,
+    )
+    assert proc.returncode == 0, f"前端沙箱验证失败:\n{proc.stdout}\n{proc.stderr}"
+
+
+@pytest.mark.asyncio
 async def test_slave_page_exposes_wrong_cot_control(slave_client):
     """子站页需提供「返回错误COT」开关并与 API 字段名一致（防止 UI 与后端脱节）."""
     client, _ = slave_client

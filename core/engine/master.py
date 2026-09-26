@@ -1129,6 +1129,15 @@ class MasterEngine(EngineBase):
             )
             return
 
+        # ── 试验报文 (COT bit7: T=1) ──
+        # 标准要求试验报文不得作为真实数据使用：监控方向（1-40/70/71）直接丢弃，
+        # 不入实时库/历史库；命令与系统方向的应答仍继续处理（测试命令需回显 T 位）。
+        if asdu.test and 1 <= int(type_id) <= 71:
+            logger.info(
+                f"Test message (T=1) skipped for data store: type={type_id}, cot={cot}"
+            )
+            return
+
         # 总召唤
         if type_id == TypeID.C_IC_NA_1:
             if cot == COT.ACTCON:
@@ -1181,8 +1190,8 @@ class MasterEngine(EngineBase):
         elif type_id in (TypeID.M_ME_NC_1, TypeID.M_ME_TC_1, TypeID.M_ME_TF_1):
             self._process_short_float(asdu)
 
-        # 累计量
-        elif type_id in (TypeID.M_IT_NA_1, TypeID.M_IT_TB_1):
+        # 累计量（含 CP24 短时标变体 M_IT_TA_1 —— 漏掉会把真机的 CP24 电度静默丢弃）
+        elif type_id in (TypeID.M_IT_NA_1, TypeID.M_IT_TA_1, TypeID.M_IT_TB_1):
             self._process_counter(asdu)
 
         # 继电保护事件

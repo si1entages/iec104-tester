@@ -134,8 +134,19 @@ class EngineSession:
             await self.stop_slave()
 
     def status_fields(self) -> dict:
-        st: dict[str, Any] = {}
+        """状态字段.
+
+        ``started`` 表示会话是否已有引擎（连接中/已连接/监听中/连接失败都算），
+        前端据此同步「连接/断开」「启动监听/停止」按钮的可用状态 ——
+        只用 ``running`` 会导致"引擎还在、按钮却禁用"，用户无法断开。
+        """
+        st: dict[str, Any] = {"started": self.engine is not None}
         if not self.engine:
+            # 引擎已不存在：必须显式 running=False。
+            # 否则会回落到 bridge._status 里残留的 running=True，
+            # 产生 running=true + started=false 的矛盾快照——
+            # 前端状态栏显示"运行中"，按钮却按"未启动"渲染。
+            st["running"] = False
             return st
         if self.role == "master":
             st["state"] = str(self.engine.state)
@@ -181,21 +192,65 @@ class EngineSession:
         await self.require_master().read_command(int(ioa))
         return {"ok": True}
 
-    async def send_yk(self, ioa: int, state: Any, select: bool = False, double: bool = False) -> dict:
+    async def send_yk(self, ioa: int, state: Any, select: bool = False,
+                      double: bool = False, with_time: bool = False) -> dict:
+        """遥控：单命令 (C_SC) / 双命令 (C_DC)，可选带时标变体 (C_SC_TA_1 / C_DC_TA_1)."""
         eng = self.require_master()
+        ioa, state = int(ioa), int(state)
         if double:
-            await eng.double_command(int(ioa), int(state), select, 0)
+            if with_time:
+                await eng.double_command_with_time(ioa, state, select, 0)
+            else:
+                await eng.double_command(ioa, state, select, 0)
         else:
-            await eng.single_command(int(ioa), bool(state), select, 0)
+            if with_time:
+                await eng.single_command_with_time(ioa, bool(state), select)
+            else:
+                await eng.single_command(ioa, bool(state), select, 0)
         return {"ok": True}
 
-    async def send_setpoint(self, ioa: int, value: float, select: bool = False) -> dict:
-        """发送设定点 (短浮点).
+    async def send_step_command(self, ioa: int, state: int, select: bool = False) -> dict:
+        """升降命令 (C_RC_NA_1)：state 1=降一步, 2=升一步."""
+        await self.require_master().regulating_step_command(int(ioa), int(state), select, 0)
+        return {"ok": True}
 
-        ``select=False`` (默认) 表示"不强制选择阶段"——引擎会依据点表 SBO 配置
-        决定是否自动两段式下发；``select=True`` 则显式只发选择帧。
+    async def send_bitstring(self, ioa: int, value: int) -> dict:
+        """32 比特串命令 (C_BO_NA_1)."""
+        await self.require_master().bitstring_command(int(ioa), int(value))
+        return {"ok": True}
+
+    async def send_delay_request(self, delay_ms: int) -> dict:
+        """延时获得命令 (C_CD_NA_1)."""
+        await self.require_master().delay_command(int(delay_ms))
+        return {"ok": True}
+
+    async def send_setpoint(self, ioa: int, value: float, select: bool = False,
+                             kind: str = "short_float", with_time: bool = False) -> dict:
+        """发送设点命令.
+
+        Args:
+            kind: short_float(C_SE_NC_1) / normalized(C_SE_NA_1) / scaled(C_SE_NB_1)
+            with_time: True → 带时标变体 (C_SE_TC_1 / C_SE_TD? → 归一化无此组合时回落)
+            select: True=只发选择帧；False=按点表 SBO 配置决定是否两段式
         """
-        await self.require_master().setpoint_shortfloat(int(ioa), float(value), select)
+        eng = self.require_master()
+        ioa, value = int(ioa), float(value)
+        kind = (kind or "short_float").lower()
+        if kind in ("normalized", "na"):
+            if with_time:
+                await eng.setpoint_normalized_with_time(ioa, value, select)
+            else:
+                await eng.setpoint_normalized(ioa, value, select)
+        elif kind in ("scaled", "nb"):
+            if with_time:
+                await eng.setpoint_scaled_with_time(ioa, int(value), select)
+            else:
+                await eng.setpoint_scaled(ioa, int(value), select)
+        else:
+            if with_time:
+                await eng.setpoint_shortfloat_with_time(ioa, value, select)
+            else:
+                await eng.setpoint_shortfloat(ioa, value, select)
         return {"ok": True}
 
     async def parameter_command(self, kind: str, ioa: int, value: float, qualifier: int = 1) -> dict:
@@ -250,7 +305,6 @@ class EngineSession:
 
     async def slave_set_yx(self, ioa: int, value: bool) -> dict:
         eng = self.require_slave()
-        eng.data_store.update_yx(int(ioa), value)
         await eng.send_spontaneous_yx(int(ioa), value)
         return {"ok": True}
 
@@ -258,4 +312,26 @@ class EngineSession:
         eng = self.require_slave()
         eng.data_store.update_yc(int(ioa), value)
         await eng.send_spontaneous_yc(int(ioa), float(value))
+        return {"ok": True}
+
+    async def slave_set_ym(self, ioa: int, value: int) -> dict:
+        """累计量置数并自发上送 (M_IT_TB_1, COT=3)."""
+        eng = self.require_slave()
+        await eng.send_spontaneous_ym(int(ioa), int(value))
+        return {"ok": True}
+
+    async def slave_protection_event(self, ioa: int, event_value: int = 1,
+                                      with_time: bool = True) -> dict:
+        """模拟继电保护设备事件上送 (M_EP_TD_1 / M_EP_TA_1, COT=3)."""
+        eng = self.require_slave()
+        await eng.send_protection_event(int(ioa), int(event_value), with_time=with_time)
+        return {"ok": True}
+
+    async def slave_group_single_point(self, ioa: int, states: list) -> dict:
+        """模拟带状态检出的成组单点信息上送 (M_PS_NA_1, COT=3)."""
+        eng = self.require_slave()
+        points = [(bool(int(v)), True) for v in (states or [])][:8]
+        if not points:
+            return {"ok": False, "error": "states 为空"}
+        await eng.send_group_single_point(int(ioa), points)
         return {"ok": True}

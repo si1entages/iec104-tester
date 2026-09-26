@@ -24,7 +24,7 @@ from typing import Any
 
 from ..data.data_store import RealtimeDB
 from ..data.history import HistoryDB
-from ..data.point_table import PointTable
+from ..data.point_table import PointTable, YxType
 from ..protocol.apci import APCI, APCICodec
 from ..protocol.asdu import ASDU, ASDUBuilder, InformationObject
 from ..protocol.file_transfer import FileTransferSlave
@@ -41,7 +41,6 @@ from ..protocol.types import (
     FileReadyAck,
     FileSegment,
     FileSelectCallGet,
-    InitializationEnd,
     LastSection,
     QualityDescriptor,
     RegulatingStepCommand,
@@ -144,6 +143,36 @@ class ResponseBehavior:
         return self.gi_delay > 0 or self.command_delay > 0 or self.data_delay > 0
 
 
+def _split_contiguous(batch: list[tuple], max_per_frame: int) -> list[list[tuple]]:
+    """把批量点拆分为「IOA 连续」的若干帧数据.
+
+    SQ=1 的序列帧只在帧内发送**第一个**对象的 IOA，其余对象 IOA 由 +1 推得
+    （见 ``ASDU.encode``），因此只有 IOA 连续的点才能打包进同一帧。
+
+    实测缺陷：点表 YX={1, 2001, 2002} 曾被打包成一帧 SQ=1（首 IOA=1，num=3），
+    主站按标准解出 IOA=1/2/3 —— 2001/2002 的遥信被静默错址写入 2/3。
+    本函数按 IOA 升序切分连续段，并对每段再做 ``max_per_frame`` 限长。
+
+    Args:
+        batch: [(ioa, ...), ...]，元素仅要求首项为 IOA。
+        max_per_frame: 单帧最大对象数（受 APDU 253 字节约束）。
+
+    Returns:
+        帧数据列表，每段可直接喂给 ``build_*_sequence``。
+    """
+    ordered = sorted(batch, key=lambda item: item[0])
+    chunks: list[list[tuple]] = []
+    current: list[tuple] = []
+    for item in ordered:
+        if current and (item[0] != current[-1][0] + 1 or len(current) >= max_per_frame):
+            chunks.append(current)
+            current = []
+        current.append(item)
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 class SlaveEngine(EngineBase):
     """IEC 104 子站引擎.
 
@@ -170,6 +199,9 @@ class SlaveEngine(EngineBase):
 
     # 错误 COT 注入的偏移量（确定性，便于断言）
     _WRONG_COT_OFFSET: int = 1
+
+    # 延时获得命令 (C_CD_NA_1) 允许的最大延时应答时间，防止恶意/异常值长时间挂起连接
+    _MAX_DELAY_MS: int = 10_000
 
     def __init__(
         self,
@@ -611,14 +643,14 @@ class SlaveEngine(EngineBase):
     # ── ASDU 处理 ──────────────────────────────────────────────────
 
     async def _send_initialization_end(self, state: _ClientState) -> None:
-        """发送初始化结束报文 (M_EI_NA_1)."""
-        asdu = ASDU(
-            type_id=TypeID.M_EI_NA_1, sq=False, num=1,
-            cot=COT.INIT, common_addr=self._common_addr,
+        """发送初始化结束报文 (M_EI_NA_1).
+
+        使用协议层构造器（原为内联手搓 ASDU，构造逻辑不统一）。
+        """
+        asdu_data = ASDUBuilder.build_initialization_end(
+            self._common_addr, cot=COT.INIT, cause=2,   # cause=2: 远方复位
         )
-        init_end = InitializationEnd(cause=2)  # 远方复位
-        asdu.objects.append(InformationObject(ioa=0, data=init_end))
-        await self._send_i_frame(state, asdu.encode())
+        await self._send_i_frame(state, asdu_data)
         logger.info(f"Initialization End sent to {state.conn.name}")
 
     def _process_asdu(self, state: _ClientState, asdu: ASDU) -> None:
@@ -809,6 +841,14 @@ class SlaveEngine(EngineBase):
 
         qoi 为收到的标准限定词: 20=站召唤; 21-36=第1-16组召唤。
         组号 = qoi - 20；响应 COT 采用标准值 (20 或 21-36)。
+
+        打包约束: SQ=1 只发送帧内首个 IOA，故必须先按 IOA 连续段切分
+        （``_split_contiguous``），否则接收方会按 +1 推出错误的 IOA。
+
+        范围说明: 召唤应答只上送**当前值**（M_SP_NA_1 / M_DP_NA_1 / M_ME_NC_1 /
+        M_IT_NA_1）。带时标的 SOE（M_SP_TB_1, COT=3）属突发上送，由
+        ``send_spontaneous_yx`` 在变位发生时发送；此处不应重复上送，
+        否则同一遥信会在召唤里出现两次且类型不符合标准。
         """
         group = COT.get_group_number(qoi) if COT.is_group_response(qoi) else None
         cot = self._reply_cot(
@@ -818,37 +858,35 @@ class SlaveEngine(EngineBase):
         # IEC 104 限制: VSQ 低7位最大127，APDU最大253字节
         # 实际安全批次大小（考虑APDU长度限制）— 使用类属性常量
 
-        # ── 单点遥信打包发送 ──
+        # ── 遥信打包发送（单点/双点按**点表声明**分流，每点只上送一次）──
         yx_points = self._point_table.get_all_yx()
         if group is not None:
             yx_points = self._point_table.get_yx_by_group(group)
 
         yx_batch = []
+        dp_batch = []
         for p in yx_points:
             if not p.enabled:
                 continue
             yx_data = self._data_store.get_yx(p.ioa)
-            if yx_data:
-                yx_batch.append((p.ioa, yx_data.value, self._apply_quality(yx_data.quality.to_int())))
+            if yx_data is None:
+                continue
+            quality = self._apply_quality(yx_data.quality.to_int())
+            if p.point_type == YxType.DOUBLE:
+                # 双点状态 0/1/2/3 均为合法取值（1=分, 2=合, 0/3=非确定态），
+                # 必须原样上送 —— 用真值判断（`if yx_data.double_state`）会漏掉状态 0
+                dp_batch.append((p.ioa, int(yx_data.double_state), quality))
+            else:
+                yx_batch.append((p.ioa, yx_data.value, quality))
 
-        for i in range(0, len(yx_batch), self._MAX_SP_PER_FRAME):
-            chunk = yx_batch[i:i + self._MAX_SP_PER_FRAME]
+        for chunk in _split_contiguous(yx_batch, self._MAX_SP_PER_FRAME):
             asdu_data = ASDUBuilder.build_single_point_sequence(
                 self._common_addr, chunk, cot=cot
             )
             await self._send_i_frame(state, asdu_data)
 
         # ── 双点遥信打包发送 ──
-        dp_batch = []
-        for p in yx_points:
-            if not p.enabled:
-                continue
-            yx_data = self._data_store.get_yx(p.ioa)
-            if yx_data and yx_data.double_state:
-                dp_batch.append((p.ioa, yx_data.double_state, yx_data.quality.to_int()))
-
-        for i in range(0, len(dp_batch), self._MAX_DP_PER_FRAME):
-            chunk = dp_batch[i:i + self._MAX_DP_PER_FRAME]
+        for chunk in _split_contiguous(dp_batch, self._MAX_DP_PER_FRAME):
             # 使用ASDUBuilder构建双点遥信序列
             asdu = ASDU(
                 type_id=TypeID.M_DP_NA_1,
@@ -875,8 +913,7 @@ class SlaveEngine(EngineBase):
             if yc_data:
                 yc_batch.append((p.ioa, yc_data.value, self._apply_quality(yc_data.quality.to_int())))
 
-        for i in range(0, len(yc_batch), self._MAX_MV_PER_FRAME):
-            chunk = yc_batch[i:i + self._MAX_MV_PER_FRAME]
+        for chunk in _split_contiguous(yc_batch, self._MAX_MV_PER_FRAME):
             asdu_data = ASDUBuilder.build_short_float_sequence(
                 self._common_addr, chunk, cot=cot
             )
@@ -895,31 +932,10 @@ class SlaveEngine(EngineBase):
             if ym_data:
                 ym_batch.append((p.ioa, ym_data.value, ym_data.quality.to_int(), 0))
 
-        for i in range(0, len(ym_batch), self._MAX_IT_PER_FRAME):
-            chunk = ym_batch[i:i + self._MAX_IT_PER_FRAME]
+        for chunk in _split_contiguous(ym_batch, self._MAX_IT_PER_FRAME):
             asdu_data = ASDUBuilder.build_counter_sequence(
                 self._common_addr, chunk, cot=cot
             )
-            await self._send_i_frame(state, asdu_data)
-
-        # ── 带时标的单点遥信 (SOE) 发送 ──
-        MAX_SP_TB_PER_FRAME = 30  # 带时标单点: 每对象1+7=8字节
-
-        soe_batch = []
-        for p in yx_points:
-            if not p.enabled:
-                continue
-            yx_data = self._data_store.get_yx(p.ioa)
-            if yx_data and yx_data.change_count > 0:
-                soe_batch.append((p.ioa, yx_data.value, self._apply_quality(yx_data.quality.to_int())))
-
-        for i in range(0, len(soe_batch), MAX_SP_TB_PER_FRAME):
-            chunk = soe_batch[i:i + MAX_SP_TB_PER_FRAME]
-            asdu_data = ASDUBuilder.build_single_point_sequence(
-                self._common_addr, chunk, cot=cot
-            )
-            # 注意：这里需要使用带时标的类型，但ASDUBuilder.build_single_point_sequence不支持
-            # 实际实现中需要创建新的Builder方法或手动构建
             await self._send_i_frame(state, asdu_data)
 
     async def _handle_counter_interrogation(self, state: _ClientState, asdu: ASDU) -> None:
@@ -953,9 +969,8 @@ class SlaveEngine(EngineBase):
             if ym_data:
                 ym_batch.append((p.ioa, ym_data.value, ym_data.quality.to_int(), 0))
 
-        # 分批打包发送
-        for i in range(0, len(ym_batch), self._MAX_IT_PER_FRAME):
-            chunk = ym_batch[i:i + self._MAX_IT_PER_FRAME]
+        # 分批打包发送（SQ=1 要求帧内 IOA 连续）
+        for chunk in _split_contiguous(ym_batch, self._MAX_IT_PER_FRAME):
             asdu_data = ASDUBuilder.build_counter_sequence(
                 self._common_addr, chunk, cot=cot
             )
@@ -1027,6 +1042,11 @@ class SlaveEngine(EngineBase):
             await self._send_i_frame(state, asdu_data)
             return
 
+        # 点表无此 IOA：按标准回送 COT=45（未知信息对象地址），而不是静默丢弃
+        logger.info(f"Read Command for unknown IOA={ioa} → reply COT=45")
+        await self._send_standard_error(state, asdu.type_id, COT.UNKNOWN_IOA,
+                                        self._common_addr)
+
     async def _handle_reset_process(self, state: _ClientState, asdu: ASDU) -> None:
         """处理复位进程."""
         logger.info(f"Reset Process from {state.conn.name}")
@@ -1039,11 +1059,15 @@ class SlaveEngine(EngineBase):
         await self._send_i_frame(state, asdu_ack.encode())
 
     async def _handle_test_command(self, state: _ClientState, asdu: ASDU) -> None:
-        """处理测试命令."""
-        logger.info(f"Test Command from {state.conn.name}")
+        """处理测试命令.
+
+        按标准回显 T 试验位（COT bit7）：主站以 T=1 下发测试命令时，应答必须同样置位，
+        否则一致性测试会判为未正确响应试验报文。
+        """
+        logger.info(f"Test Command from {state.conn.name} (T={int(asdu.test)})")
         asdu_ack = ASDU(
             type_id=asdu.type_id, sq=False, num=1,
-            cot=COT.ACTCON, common_addr=self._common_addr,
+            cot=COT.ACTCON, test=asdu.test, common_addr=self._common_addr,
         )
         asdu_ack.objects.append(asdu.objects[0])
         await self._send_i_frame(state, asdu_ack.encode())
@@ -1109,6 +1133,8 @@ class SlaveEngine(EngineBase):
 
                 # 发送激活终止
                 await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTTERM, obj))
+                # 真机语义：遥控成功后同 IOA 遥信变位并主动上送
+                await self._reflect_command_result(obj.ioa, single=bool(cmd.state))
                 logger.info(f"Single Command DIRECT EXECUTE (sbo=false): IOA={obj.ioa}")
             else:
                 # 执行命令：先验证是否已选择
@@ -1123,6 +1149,8 @@ class SlaveEngine(EngineBase):
 
                     # 发送激活终止
                     await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTTERM, obj))
+                    # 真机语义：遥控成功后同 IOA 遥信变位并主动上送
+                    await self._reflect_command_result(obj.ioa, single=bool(cmd.state))
                 else:
                     # 未选择，回复否定确认 (COT bit6 P/N=1)
                     await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTCON, obj, pn=True))
@@ -1159,8 +1187,13 @@ class SlaveEngine(EngineBase):
                 # 回复执行确认
                 await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTCON, obj))
 
+                # 更新数据
+                self._data_store.update_yk(obj.ioa, "execute", cmd.state)
+
                 # 发送激活终止
                 await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTTERM, obj))
+                # 真机语义：遥控成功后同 IOA 遥信变位并主动上送
+                await self._reflect_command_result(obj.ioa, double_state=int(cmd.state))
                 logger.info(f"Double Command DIRECT EXECUTE (sbo=false): IOA={obj.ioa}")
             else:
                 # 执行命令：先验证是否已选择
@@ -1170,8 +1203,13 @@ class SlaveEngine(EngineBase):
                     # 回复执行确认
                     await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTCON, obj))
 
+                    # 更新数据
+                    self._data_store.update_yk(obj.ioa, "execute", cmd.state)
+
                     # 发送激活终止
                     await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTTERM, obj))
+                    # 真机语义：遥控成功后同 IOA 遥信变位并主动上送
+                    await self._reflect_command_result(obj.ioa, double_state=int(cmd.state))
                 else:
                     # 未选择，回复否定确认 (COT bit6 P/N=1)
                     await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTCON, obj, pn=True))
@@ -1189,7 +1227,9 @@ class SlaveEngine(EngineBase):
         if not asdu.objects:
             return
         obj = asdu.objects[0]
-        logger.info(f"Setpoint Command from {state.conn.name}: IOA={obj.ioa}")
+        # 设点目标值（归一化/标度化/短浮点均有 .value）
+        setpoint_value = getattr(obj.data, "value", None)
+        logger.info(f"Setpoint Command from {state.conn.name}: IOA={obj.ioa} value={setpoint_value}")
 
         if asdu.cot == COT.ACT:
             # 检查是否是选择命令
@@ -1211,6 +1251,9 @@ class SlaveEngine(EngineBase):
 
                 # 发送激活终止
                 await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTTERM, obj))
+                # 真机语义：遥调成功后同 IOA 遥测更新并主动上送
+                if setpoint_value is not None:
+                    await self._reflect_command_result(obj.ioa, yc_value=float(setpoint_value))
                 logger.info(f"Setpoint Command DIRECT EXECUTE (sbo=false): IOA={obj.ioa}")
             else:
                 # 执行命令：先验证是否已选择
@@ -1222,6 +1265,9 @@ class SlaveEngine(EngineBase):
 
                     # 发送激活终止
                     await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTTERM, obj))
+                    # 真机语义：遥调成功后同 IOA 遥测更新并主动上送
+                    if setpoint_value is not None:
+                        await self._reflect_command_result(obj.ioa, yc_value=float(setpoint_value))
                 else:
                     # 未选择，回复否定确认 (COT bit6 P/N=1)
                     await self._send_i_frame(state, self._build_command_ack(asdu.type_id, COT.ACTCON, obj, pn=True))
@@ -1235,7 +1281,12 @@ class SlaveEngine(EngineBase):
             logger.info(f"Setpoint Command DEACTCON: IOA={obj.ioa}")
 
     async def _handle_regulating_command(self, state: _ClientState, asdu: ASDU) -> None:
-        """处理升降命令."""
+        """处理升降命令.
+
+        说明（与遥控/遥调的联动策略不同，属有意为之）：升降命令改变的是**调节步位置**
+        （真机上为 M_ST_NA_1 步位置或档位），不是遥信位置；本工具点表未建模步位置点，
+        故不做联动上送。若后续需要，应新增步位置点类型与对应的自发上送路径。
+        """
         if not asdu.objects:
             return
         obj = asdu.objects[0]
@@ -1302,18 +1353,21 @@ class SlaveEngine(EngineBase):
             logger.info(f"Bitstring Command DEACTCON: IOA={obj.ioa}")
 
     async def _handle_delay_command(self, state: _ClientState, asdu: ASDU) -> None:
-        """处理延时获得命令."""
+        """处理延时获得命令 (C_CD_NA_1).
+
+        真机语义：主站在命令中给出期望延时，子站**按该延时**推迟应答并回显实际延时
+        （原实现固定回 100ms 示例值，与请求无关）。
+        """
         logger.info(f"Delay Command from {state.conn.name}")
-        # 延时获得命令是主站向子站请求延时信息
-        # 子站收到后应以突发(COT=SPONT)方式回复延时值
         if asdu.cot == COT.ACT and asdu.objects:
-            # 计算延时值（这里使用固定值，实际应用中应计算实际延时）
-            delay_ms = 100  # 示例延时值
-            asdu_data = ASDUBuilder.build_delay_command(
-                self._common_addr, delay_ms
-            )
+            data = asdu.objects[0].data
+            requested = int(getattr(data, "delay_ms", 0) or 0)
+            applied = max(0, min(requested, self._MAX_DELAY_MS))
+            if applied:
+                await asyncio.sleep(applied / 1000.0)
+            asdu_data = ASDUBuilder.build_delay_command(self._common_addr, applied)
             await self._send_i_frame(state, asdu_data)
-            logger.info(f"Delay Response sent: delay={delay_ms}ms")
+            logger.info(f"Delay Response sent: requested={requested}ms applied={applied}ms")
 
     async def _handle_parameter_command(self, state: _ClientState, asdu: ASDU) -> None:
         """处理参数命令.
@@ -1416,9 +1470,68 @@ class SlaveEngine(EngineBase):
 
     # ── 数据变化上送 ──────────────────────────────────────────────
 
+    async def _reflect_command_result(self, ioa: int, *,
+                                      single: bool | None = None,
+                                      double_state: int | None = None,
+                                      yc_value: float | None = None) -> bool:
+        """把命令执行结果联动到被控点并自发上送（**以真机为准**）.
+
+        真机语义：
+        - 遥控执行成功后，同 IOA 的遥信立即变位并带时标上送（COT=3, SOE）；
+        - 遥调/设点执行成功后，同 IOA 的遥测更新并上报（COT=3）；
+        - 上送类型由**点表声明**决定：单点遥信 → M_SP_TB_1，双点遥信 → M_DP_TB_1；
+        - 点表没有该点、或值未发生变化时不上送（真机不做无变化的冗余上送）。
+
+        上送受 ``spontaneous_enabled`` 约束（关闭时仍更新实时库，供召唤使用）。
+
+        Args:
+            ioa: 被控点 IOA（与命令 IOA 相同）。
+            single: 单命令目标状态（True=合）。
+            double_state: 双命令目标状态（1=分, 2=合）。
+            yc_value: 设点目标值（工程值）。
+
+        Returns:
+            True 表示已完成联动（值有变化或被更新）。
+        """
+        if yc_value is not None:
+            if self._point_table.get_yc(ioa) is None:
+                logger.debug(f"Command feedback: YC IOA={ioa} 不在点表，跳过联动")
+                return False
+            current_yc = self._data_store.get_yc(ioa)
+            if current_yc is not None and abs(float(current_yc.value) - float(yc_value)) < 1e-9:
+                return False
+            await self.send_spontaneous_yc(ioa, float(yc_value))
+            return True
+
+        point = self._point_table.get_yx(ioa)
+        if point is None:
+            logger.debug(f"Command feedback: YX IOA={ioa} 不在点表，跳过联动")
+            return False
+        current = self._data_store.get_yx(ioa)
+
+        if double_state is not None and point.point_type == YxType.DOUBLE:
+            if current is not None and current.double_state == int(double_state):
+                return False
+            await self.send_spontaneous_dp(ioa, int(double_state))
+            return True
+
+        value = bool(single) if single is not None else (double_state == 2)
+        if current is not None and bool(current.value) == value:
+            return False
+        await self.send_spontaneous_yx(ioa, value)
+        return True
+
     async def send_spontaneous_yx(self, ioa: int, value: bool,
                                     quality: int = 0) -> None:
-        """自发上送遥信变化."""
+        """自发上送遥信变化.
+
+        若该 IOA 在点表中声明为**双点**，则按真机语义转成双点上送
+        （M_DP_TB_1，状态 2=合/1=分），避免双点遥信以单点类型上送造成类型错配。
+        """
+        point = self._point_table.get_yx(ioa)
+        if point is not None and point.point_type == YxType.DOUBLE:
+            await self.send_spontaneous_dp(ioa, 2 if value else 1)
+            return
         self._data_store.update_yx(ioa, value, QualityDescriptor(quality))
 
         if not self._spontaneous_enabled:
@@ -1482,6 +1595,37 @@ class SlaveEngine(EngineBase):
         asdu_data = ASDUBuilder.build_step_position(
             self._common_addr, ioa, value, quality,
             cot=COT.SPONT, with_time=True
+        )
+        await self._broadcast_i_frame(asdu_data)
+
+    async def send_protection_event(self, ioa: int, event_value: int = 1,
+                                     with_time: bool = True, quality: int = 0) -> None:
+        """模拟继电保护设备事件上送 (M_EP_TD_1 / M_EP_TA_1, COT=3).
+
+        说明：点表未建模继保事件点，本方法为**测试注入**用途——直接广播报文，
+        不落实时库（主站侧按 M_EP_* 类型自行处理/展示）。
+        """
+        if not self._spontaneous_enabled:
+            return
+        asdu_data = ASDUBuilder.build_protection_event(
+            self._common_addr, ioa, event_value, quality,
+            with_time=with_time, cot=COT.SPONT,
+        )
+        await self._broadcast_i_frame(asdu_data)
+
+    async def send_group_single_point(self, ioa: int,
+                                       points: list[tuple[bool, bool]],
+                                       with_time: bool = False) -> None:
+        """模拟带状态检出的成组单点信息上送 (M_PS_NA_1 / M_PS_TB_1, COT=3).
+
+        同上，属测试注入：每点 (状态, 检出位)，最多 8 点，不落实时库。
+        注意：M_PS_* 信息体本身不含品质描述词。
+        """
+        if not self._spontaneous_enabled:
+            return
+        asdu_data = ASDUBuilder.build_group_single_point(
+            self._common_addr, ioa, points,
+            cot=COT.SPONT, with_time=with_time,
         )
         await self._broadcast_i_frame(asdu_data)
 

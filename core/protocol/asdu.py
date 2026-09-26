@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
 from .constants import (
+    MAX_ASDU_LENGTH,
     VSQ_NUM_MASK,
     VSQ_SQ_BIT,
 )
@@ -26,6 +27,7 @@ from .types import (
     CounterValue,
     CP24Time2a,
     CP56Time2a,
+    DelayCommand,
     DirectoryEntry,
     DoubleCommand,
     DoublePoint,
@@ -78,6 +80,7 @@ class ASDU:
     num: int = 1                # 信息对象数量
     cot: int = COT.SPONT        # 传送原因 (bit0-5: 原因码)
     pn: bool = False            # 否定确认标志 (COT bit6): False=肯定, True=否定
+    test: bool = False          # 试验标志 (COT bit7): True=试验报文，非真实数据
     origin_addr: int = 0        # 发起地址
     common_addr: int = 1        # 公共地址 (站地址)
     objects: list[InformationObject] = field(default_factory=list)
@@ -115,7 +118,12 @@ class ASDU:
             TypeID.M_ME_NA_1: (3, lambda d: NormalizedValue.from_bytes(d)),
             TypeID.M_ME_TA_1: (3, lambda d: NormalizedValue.from_bytes(d)),
             TypeID.M_ME_TD_1: (3, lambda d: NormalizedValue.from_bytes(d)),
-            TypeID.M_ME_ND_1: (2, lambda d: NormalizedValue.from_bytes(d)),
+            # M_ME_ND_1 不带品质描述词：仅 2 字节 NVA。
+            # 安全性来源：解码器只拿到 2 字节切片，而 NormalizedValue.from_bytes
+            # 有长度保护（len(data) > offset+2 才读品质），故品质恒为 GOOD、
+            # 不会读到下一对象首字节。显式补 0 品质字节使语义更直白，并防止
+            # 将来去掉该保护时被污染。
+            TypeID.M_ME_ND_1: (2, lambda d: NormalizedValue.from_bytes(d[:2] + b"\x00")),
 
             # ── 标度化值 ──
             TypeID.M_ME_NB_1: (3, lambda d: ScaledValue.from_bytes(d)),
@@ -157,7 +165,8 @@ class ASDU:
             TypeID.C_CS_NA_1: (7, lambda d: ClockSyncCommand.from_bytes(d)),  # 时钟同步
             TypeID.C_TS_NA_1: (2, lambda d: d),      # 测试命令
             TypeID.C_RP_NA_1: (1, lambda d: d),      # 复位进程
-            TypeID.C_CD_NA_1: (2, lambda d: d),      # 延时获得
+            # 延时获得：解成 DelayCommand（原为原始字节，导致子站读不到 delay_ms）
+            TypeID.C_CD_NA_1: (2, lambda d: DelayCommand.from_bytes(d)),
             TypeID.C_TS_TA_1: (9, lambda d: d),      # 带时标测试
 
             # ── 步位置（带时标）──
@@ -247,8 +256,8 @@ class ASDU:
         buf.append(vsq)
 
         # COT (2 bytes: cause + origin)
-        # bit0-5: 传送原因码; bit6: P/N 否定确认; bit7: T 测试位 (本实现不使用)
-        cot_byte = (self.cot & 0x3F) | (0x40 if self.pn else 0)
+        # bit0-5: 传送原因码; bit6: P/N 否定确认; bit7: T 测试位
+        cot_byte = (self.cot & 0x3F) | (0x40 if self.pn else 0) | (0x80 if self.test else 0)
         buf.append(cot_byte)
         buf.append(self.origin_addr & 0xFF)
 
@@ -273,6 +282,12 @@ class ASDU:
             if obj.time_tag is not None:
                 buf.extend(obj.time_tag.to_bytes())
 
+        # 长度上限：ASDU 最大 253 字节（APDU 255 - APCI 2 字节的 0x68/长度域）
+        if len(buf) > MAX_ASDU_LENGTH:
+            raise ValueError(
+                f"ASDU too long: {len(buf)} bytes > {MAX_ASDU_LENGTH} "
+                f"(type={self.type_id}, num={self.num}, sq={self.sq})"
+            )
         return bytes(buf)
 
     def _encode_data(self, data: Any, type_id: TypeID | None = None) -> bytes:
@@ -320,6 +335,7 @@ class ASDU:
         # COT (bit0-5: 原因码, bit6: P/N 否定确认, bit7: T 测试位)
         cot_byte = data[pos]
         pn = bool(cot_byte & 0x40)
+        test = bool(cot_byte & 0x80)
         cot = cot_byte & 0x3F
         pos += 1
         origin_addr = data[pos]
@@ -339,6 +355,7 @@ class ASDU:
             num=num,
             cot=cot,
             pn=pn,
+            test=test,
             origin_addr=origin_addr,
             common_addr=common_addr,
         )
@@ -406,6 +423,7 @@ class ASDU:
 
         cot_byte = data[pos]
         pn = bool(cot_byte & 0x40)
+        test = bool(cot_byte & 0x80)
         cot = cot_byte & 0x3F
         pos += 1
         origin_addr = data[pos]
@@ -422,6 +440,7 @@ class ASDU:
             num=num,
             cot=cot,
             pn=pn,
+            test=test,
             origin_addr=origin_addr,
             common_addr=common_addr,
         )
@@ -721,6 +740,33 @@ class ASDUBuilder:
             obj.time_tag = CP56Time2a.now()
         asdu.objects.append(obj)
         return asdu.encode()
+
+    @staticmethod
+    def build_scaled_value(common_addr: int, ioa: int, value: int,
+                            quality: int = 0, cot: int = COT.SPONT,
+                            with_time: bool = False,
+                            time_tag: CP56Time2a | None = None) -> bytes:
+        """构造标度化遥测 (M_ME_NB_1 或带 CP56 时标的 M_ME_TE_1).
+
+        与前两个遥测构造器（归一化 / 短浮点）保持对称，补齐 CP56 时标变体。
+        """
+        type_id = TypeID.M_ME_TE_1 if with_time else TypeID.M_ME_NB_1
+        asdu = ASDU(type_id=type_id, sq=False, num=1, cot=cot,
+                    common_addr=common_addr)
+        sv = ScaledValue(value=value, quality=QualityDescriptor(quality))
+        obj = InformationObject(ioa=ioa, data=sv)
+        if with_time:
+            obj.time_tag = time_tag if time_tag is not None else CP56Time2a.now()
+        asdu.objects.append(obj)
+        return asdu.encode()
+
+    @staticmethod
+    def build_initialization_end(common_addr: int, cot: int = COT.INIT,
+                                  cause: int = 0) -> bytes:
+        """构造初始化结束 (M_EI_NA_1 = 70，子站 STARTDT 激活后上送)."""
+        return ASDUBuilder._single_object_asdu(
+            TypeID.M_EI_NA_1, common_addr, 0,
+            InitializationEnd(cause=cause), cot)
 
     @staticmethod
     def build_single_command(common_addr: int, ioa: int, state: bool,
@@ -1038,7 +1084,8 @@ class ASDUBuilder:
     def build_delay_command(common_addr: int, delay_ms: int) -> bytes:
         """构造延时获得命令 (C_CD_NA_1)."""
         asdu = ASDU(type_id=TypeID.C_CD_NA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
-        asdu.objects.append(InformationObject(ioa=0, data=bytes([delay_ms & 0xFF, (delay_ms >> 8) & 0xFF])))
+        asdu.objects.append(InformationObject(
+            ioa=0, data=DelayCommand(ioa=0, delay_ms=delay_ms)))
         return asdu.encode()
 
     @staticmethod
@@ -1342,6 +1389,233 @@ class ASDUBuilder:
                               section_length=section_length, status=status)
         asdu.objects.append(InformationObject(ioa=ioa, data=sra))
         return asdu.encode()
+
+    # ══════════════════════════════════════════════════════════════
+    #  带时标测量值/状态量 — 覆盖 CP24Time2a（短时标）与 CP56Time2a
+    #
+    #  IEC 60870-5-104 的完整类型表含两类时标变体：…_TA_1/TB_1/TC_1 用 CP24
+    #  （3 字节短时标，源自 101），…_TB_1/TD_1/TE_1/TF_1 用 CP56（7 字节）。
+    #  本工具两种都能**解析**，故构造侧也必须齐备，否则无法模拟对端行为。
+    # ══════════════════════════════════════════════════════════════
+
+    @staticmethod
+    def _single_object_asdu(type_id: TypeID, common_addr: int, ioa: int, data: Any,
+                            cot: int = COT.SPONT, time_tag: Any = None,
+                            pn: bool = False) -> bytes:
+        """构造仅含 1 个信息对象、可选时标的 ASDU（内部复用）."""
+        asdu = ASDU(type_id=type_id, sq=False, num=1, cot=cot, pn=pn,
+                    common_addr=common_addr)
+        obj = InformationObject(ioa=ioa, data=data)
+        if time_tag is not None:
+            obj.time_tag = time_tag
+        asdu.objects.append(obj)
+        return asdu.encode()
+
+    @staticmethod
+    def build_single_point_cp24(common_addr: int, ioa: int, value: bool,
+                                 quality: int = 0, cot: int = COT.SPONT,
+                                 time_tag: CP24Time2a | None = None) -> bytes:
+        """构造带 CP24 短时标的单点遥信 (M_SP_TA_1 = 2)."""
+        return ASDUBuilder._single_object_asdu(
+            TypeID.M_SP_TA_1, common_addr, ioa,
+            SinglePoint(value=value, quality=QualityDescriptor(quality)), cot,
+            time_tag if time_tag is not None else CP24Time2a.now(),
+        )
+
+    @staticmethod
+    def build_double_point_cp24(common_addr: int, ioa: int, value: int,
+                                 quality: int = 0, cot: int = COT.SPONT,
+                                 time_tag: CP24Time2a | None = None) -> bytes:
+        """构造带 CP24 短时标的双点遥信 (M_DP_TA_1 = 4)."""
+        return ASDUBuilder._single_object_asdu(
+            TypeID.M_DP_TA_1, common_addr, ioa,
+            DoublePoint(value=value, quality=QualityDescriptor(quality)), cot,
+            time_tag if time_tag is not None else CP24Time2a.now(),
+        )
+
+    @staticmethod
+    def build_step_position_cp24(common_addr: int, ioa: int, value: int,
+                                  quality: int = 0, transient: bool = False,
+                                  cot: int = COT.SPONT,
+                                  time_tag: CP24Time2a | None = None) -> bytes:
+        """构造带 CP24 短时标的步位置信息 (M_ST_TA_1 = 6)."""
+        return ASDUBuilder._single_object_asdu(
+            TypeID.M_ST_TA_1, common_addr, ioa,
+            StepPosition(value=value, quality=QualityDescriptor(quality),
+                         transient=transient), cot,
+            time_tag if time_tag is not None else CP24Time2a.now(),
+        )
+
+    @staticmethod
+    def build_bitstring_cp24(common_addr: int, ioa: int, value: int,
+                              cot: int = COT.SPONT,
+                              time_tag: CP24Time2a | None = None) -> bytes:
+        """构造带 CP24 短时标的 32 位比特串 (M_BO_TA_1 = 8).
+
+        注意：比特串信息（M_BO_*）按标准**不带品质描述词**，故无 quality 参数。
+        """
+        return ASDUBuilder._single_object_asdu(
+            TypeID.M_BO_TA_1, common_addr, ioa, BitString32(value=value), cot,
+            time_tag if time_tag is not None else CP24Time2a.now(),
+        )
+
+    @staticmethod
+    def build_normalized_cp24(common_addr: int, ioa: int, value: float,
+                               quality: int = 0, cot: int = COT.SPONT,
+                               time_tag: CP24Time2a | None = None) -> bytes:
+        """构造带 CP24 短时标的归一化测量值 (M_ME_TA_1 = 10)."""
+        return ASDUBuilder._single_object_asdu(
+            TypeID.M_ME_TA_1, common_addr, ioa,
+            NormalizedValue(value=value, quality=QualityDescriptor(quality)), cot,
+            time_tag if time_tag is not None else CP24Time2a.now(),
+        )
+
+    @staticmethod
+    def build_scaled_cp24(common_addr: int, ioa: int, value: int,
+                           quality: int = 0, cot: int = COT.SPONT,
+                           time_tag: CP24Time2a | None = None) -> bytes:
+        """构造带 CP24 短时标的标度化测量值 (M_ME_TB_1 = 12)."""
+        return ASDUBuilder._single_object_asdu(
+            TypeID.M_ME_TB_1, common_addr, ioa,
+            ScaledValue(value=value, quality=QualityDescriptor(quality)), cot,
+            time_tag if time_tag is not None else CP24Time2a.now(),
+        )
+
+    @staticmethod
+    def build_short_float_cp24(common_addr: int, ioa: int, value: float,
+                                quality: int = 0, cot: int = COT.SPONT,
+                                time_tag: CP24Time2a | None = None) -> bytes:
+        """构造带 CP24 短时标的短浮点测量值 (M_ME_TC_1 = 14)."""
+        return ASDUBuilder._single_object_asdu(
+            TypeID.M_ME_TC_1, common_addr, ioa,
+            ShortFloat(value=value, quality=QualityDescriptor(quality)), cot,
+            time_tag if time_tag is not None else CP24Time2a.now(),
+        )
+
+    @staticmethod
+    def build_counter_cp24(common_addr: int, ioa: int, value: int,
+                            quality: int = 0, sequence: int = 0,
+                            cot: int = COT.SPONT,
+                            time_tag: CP24Time2a | None = None) -> bytes:
+        """构造带 CP24 短时标的累计量 (M_IT_TA_1 = 16)."""
+        return ASDUBuilder._single_object_asdu(
+            TypeID.M_IT_TA_1, common_addr, ioa,
+            CounterValue(value=value, quality=QualityDescriptor(quality),
+                         sequence=sequence), cot,
+            time_tag if time_tag is not None else CP24Time2a.now(),
+        )
+
+    # ── 继电保护设备事件（M_EP_*）──────────────────────────────────
+
+    @staticmethod
+    def build_protection_event(common_addr: int, ioa: int, event_value: int,
+                                quality: int = 0, elapsed_time: int = 0,
+                                group_start_info: int = 0, group_output_info: int = 0,
+                                cot: int = COT.SPONT,
+                                time_tag: CP24Time2a | CP56Time2a | None = None,
+                                with_time: bool = True) -> bytes:
+        """构造继电保护设备事件.
+
+        Args:
+            with_time: True → CP56Time2a 变体 (M_EP_TD_1 = 38)；
+                False → CP24Time2a 变体 (M_EP_TA_1 = 17)。
+            event_value: 16 位事件值（保护动作/启动/输出电路的状态位）。
+        """
+        if with_time:
+            type_id = TypeID.M_EP_TD_1
+            tag = time_tag if time_tag is not None else CP56Time2a.now()
+        else:
+            type_id = TypeID.M_EP_TA_1
+            tag = time_tag if time_tag is not None else CP24Time2a.now()
+        ev = ProtectionEvent(
+            ioa=ioa, event_value=event_value,
+            quality=QualityDescriptor(quality), elapsed_time=elapsed_time,
+            group_start_info=group_start_info, group_output_info=group_output_info,
+        )
+        return ASDUBuilder._single_object_asdu(
+            type_id, common_addr, ioa, ev, cot, tag)
+
+    @staticmethod
+    def build_protection_events_start(common_addr: int, ioa: int,
+                                       group_start_info: int, elapsed_time: int = 0,
+                                       quality: int = 0, event_value: int = 0,
+                                       cot: int = COT.SPONT,
+                                       time_tag: CP24Time2a | CP56Time2a | None = None,
+                                       with_time: bool = True) -> bytes:
+        """构造继电保护设备成组启动事件 (M_EP_TE_1 = 39 / M_EP_TB_1 = 18)."""
+        type_id = TypeID.M_EP_TE_1 if with_time else TypeID.M_EP_TB_1
+        tag = (time_tag if time_tag is not None
+               else (CP56Time2a.now() if with_time else CP24Time2a.now()))
+        ev = ProtectionEvent(
+            ioa=ioa, event_value=event_value, quality=QualityDescriptor(quality),
+            elapsed_time=elapsed_time, group_start_info=group_start_info,
+        )
+        return ASDUBuilder._single_object_asdu(type_id, common_addr, ioa, ev, cot, tag)
+
+    @staticmethod
+    def build_protection_events_output(common_addr: int, ioa: int,
+                                        group_output_info: int,
+                                        quality: int = 0, event_value: int = 0,
+                                        cot: int = COT.SPONT,
+                                        time_tag: CP24Time2a | CP56Time2a | None = None,
+                                        with_time: bool = True) -> bytes:
+        """构造继电保护设备成组输出电路信息 (M_EP_TF_1 = 40 / M_EP_TC_1 = 19)."""
+        type_id = TypeID.M_EP_TF_1 if with_time else TypeID.M_EP_TC_1
+        tag = (time_tag if time_tag is not None
+               else (CP56Time2a.now() if with_time else CP24Time2a.now()))
+        ev = ProtectionEvent(
+            ioa=ioa, event_value=event_value, quality=QualityDescriptor(quality),
+            group_output_info=group_output_info,
+        )
+        return ASDUBuilder._single_object_asdu(type_id, common_addr, ioa, ev, cot, tag)
+
+    # ── 成组单点信息（带状态检出）──────────────────────────────────
+
+    @staticmethod
+    def build_group_single_point(common_addr: int, ioa: int,
+                                  points: list[tuple[bool, bool]],
+                                  cot: int = COT.SPONT,
+                                  time_tag: CP56Time2a | None = None,
+                                  with_time: bool = False) -> bytes:
+        """构造带状态检出的成组单点信息.
+
+        Args:
+            points: [(状态, 状态检出), ...] 最多 8 个。
+            with_time: True → M_PS_TB_1 (71, 带 CP56 时标)；False → M_PS_NA_1 (20)。
+        """
+        gsp = GroupSinglePointWithStatus(ioa=ioa, points=list(points)[:8])
+        if with_time and time_tag is None:
+            time_tag = CP56Time2a.now()      # M_PS_TB_1 必须带 CP56 时标
+        return ASDUBuilder._single_object_asdu(
+            TypeID.M_PS_TB_1 if with_time else TypeID.M_PS_NA_1,
+            common_addr, ioa, gsp, cot, time_tag,
+        )
+
+    @staticmethod
+    def build_normalized_no_quality(common_addr: int, ioa: int, value: float,
+                                     cot: int = COT.SPONT) -> bytes:
+        """构造不带品质描述词的归一化测量值 (M_ME_ND_1 = 21)."""
+        nv = NormalizedValue(value=value)
+        return ASDUBuilder._single_object_asdu(
+            TypeID.M_ME_ND_1, common_addr, ioa, nv, cot)
+
+    @staticmethod
+    def build_parameter_no_quality(common_addr: int, ioa: int, value: float,
+                                    cot: int = COT.ACT) -> bytes:
+        """构造不带品质的参数-归一化 (P_ME_ND_1 = 109)."""
+        return ASDUBuilder._single_object_asdu(
+            TypeID.P_ME_ND_1, common_addr, ioa,
+            ParameterCommandNormalizedNoQuality(ioa=ioa, value=value), cot)
+
+    @staticmethod
+    def build_test_command_bit_pattern(common_addr: int, pattern_low: int = 0x55,
+                                        pattern_high: int = 0xAA,
+                                        cot: int = COT.ACT) -> bytes:
+        """构造位模式测试命令 (C_TS_NB_1 = 108，IEC 60870-5-101)."""
+        return ASDUBuilder._single_object_asdu(
+            TypeID.C_TS_NB_1, common_addr, 0,
+            TestCommandBitPattern(test_pattern_low=pattern_low,
+                                  test_pattern_high=pattern_high), cot)
 
 
 # ═══════════════════════════════════════════════════════════════════

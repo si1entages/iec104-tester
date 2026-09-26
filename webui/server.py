@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import time
 from pathlib import Path
 
 from aiohttp import WSMsgType, web
@@ -16,12 +18,48 @@ STATIC = Path(__file__).parent / "static"
 RESOURCES = Path(__file__).parent.parent / "resources"
 
 
+@web.middleware
+async def no_cache_pages(request: web.Request, handler) -> web.Response:
+    """页面与静态资源禁止启发式缓存.
+
+    浏览器对没有 Cache-Control 的静态文件会按 Last-Modified 启发式缓存，
+    前端修复（如按钮失效）可能长时间不生效，表现为"改了没用/要手动强刷"。
+    本工具只在局域网调试使用，全部走协商缓存（no-cache 表示必须回源校验）。
+    """
+    resp = await handler(request)
+    if request.path == "/" or request.path.startswith("/static/"):
+        resp.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return resp
+
+
 def create_app(bridge: EngineBridge) -> web.Application:
-    app = web.Application()
+    app = web.Application(middlewares=[no_cache_pages])
+
+    def _asset_version() -> str:
+        """静态资源版本号 = 关键前端文件的最新 mtime（内容一变，URL 即变）."""
+        latest = 0
+        for rel in ("js/app.js", "css/app.css", "master.html", "slave.html"):
+            p = STATIC / rel
+            if p.exists():
+                latest = max(latest, int(p.stat().st_mtime))
+        return str(latest)
 
     async def index(request: web.Request) -> web.Response:
         page = "master.html" if bridge.role == "master" else "slave.html"
-        return web.FileResponse(STATIC / page)
+        html = (STATIC / page).read_text(encoding="utf-8")
+
+        # 缓存击穿：给静态资源引用追加版本号。浏览器即使缓存了旧 HTML，
+        # 也会因为 URL 变化而拉取新的 app.js / app.css（配合 no-cache 双保险）。
+        v = _asset_version()
+        html = html.replace("app.js", f"app.js?v={v}").replace("app.css", f"app.css?v={v}")
+
+        # 构建时间戳：让用户能直接确认跑的是不是新版本前端
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(int(v)))
+        html = html.replace(
+            "</body>",
+            f'<script>window.IEC104_BUILD = "{stamp}";</script>\n</body>',
+        )
+        return web.Response(text=html, content_type="text/html", charset="utf-8")
 
     async def favicon(request: web.Request) -> web.Response:
         """返回项目图标，避免浏览器请求 /favicon.ico 时 404."""
@@ -87,7 +125,45 @@ def create_app(bridge: EngineBridge) -> web.Application:
         return web.json_response(await bridge.send_yk(
             ioa, body.get("state", 0),
             bool(body.get("select", False)), bool(body.get("double", False)),
+            bool(body.get("with_time", False)),
         ))
+
+    async def api_step(request: web.Request) -> web.Response:
+        """升降命令 (C_RC_NA_1)：state 1=降一步, 2=升一步."""
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        ioa = body.get("ioa")
+        state = body.get("state")
+        if not isinstance(ioa, int) or ioa < 0 or state not in (1, 2):
+            return web.json_response(
+                {"ok": False, "error": "invalid ioa/state (state 须为 1 或 2)"}, status=400)
+        return web.json_response(await bridge.send_step_command(
+            ioa, state, bool(body.get("select", False))))
+
+    async def api_bitstring(request: web.Request) -> web.Response:
+        """32 比特串命令 (C_BO_NA_1)."""
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        ioa, value = body.get("ioa"), body.get("value")
+        if not isinstance(ioa, int) or ioa < 0 or not isinstance(value, int) or value < 0:
+            return web.json_response({"ok": False, "error": "invalid ioa/value"}, status=400)
+        return web.json_response(await bridge.send_bitstring(ioa, value))
+
+    async def api_delay(request: web.Request) -> web.Response:
+        """延时获得命令 (C_CD_NA_1)."""
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        delay = body.get("delay_ms")
+        if not isinstance(delay, int) or delay < 0 or delay > 60000:
+            return web.json_response(
+                {"ok": False, "error": "invalid delay_ms (0-60000)"}, status=400)
+        return web.json_response(await bridge.send_delay_request(delay))
 
     async def api_sp(request: web.Request) -> web.Response:
         try:
@@ -104,6 +180,8 @@ def create_app(bridge: EngineBridge) -> web.Application:
             return web.json_response({"ok": False, "error": "invalid value"}, status=400)
         return web.json_response(await bridge.send_setpoint(
             ioa, value, bool(body.get("select", False)),
+            str(body.get("kind", "short_float") or "short_float"),
+            bool(body.get("with_time", False)),
         ))
 
     async def api_clock(request: web.Request) -> web.Response:
@@ -211,6 +289,72 @@ def create_app(bridge: EngineBridge) -> web.Application:
             return web.json_response({"ok": False, "error": "invalid body"}, status=400)
         return web.json_response(await bridge.set_response(body))
 
+    async def api_slave_ym(request: web.Request) -> web.Response:
+        """累计量置数并自发上送 (M_IT_TB_1, COT=3)."""
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        ioa, value = body.get("ioa"), body.get("value")
+        if not isinstance(ioa, int) or ioa < 0 or not isinstance(value, int):
+            return web.json_response({"ok": False, "error": "invalid ioa/value"}, status=400)
+        return web.json_response(await bridge.slave_set_ym(ioa, value))
+
+    async def api_slave_ep(request: web.Request) -> web.Response:
+        """模拟继电保护设备事件上送 (M_EP_TD_1 / M_EP_TA_1, COT=3)."""
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        ioa = body.get("ioa")
+        if not isinstance(ioa, int) or ioa < 0:
+            return web.json_response({"ok": False, "error": "invalid ioa"}, status=400)
+        event_value = body.get("event_value", 1)
+        if not isinstance(event_value, int) or not (0 <= event_value <= 0xFFFF):
+            return web.json_response({"ok": False, "error": "invalid event_value"}, status=400)
+        return web.json_response(await bridge.slave_protection_event(
+            ioa, event_value, bool(body.get("with_time", True))))
+
+    async def api_slave_ps(request: web.Request) -> web.Response:
+        """模拟带状态检出的成组单点信息上送 (M_PS_NA_1, COT=3).
+
+        states: 长度 1-8 的 0/1 数组，[状态, 检出位] 各占一个字节。
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        ioa = body.get("ioa")
+        states = body.get("states")
+        if not isinstance(ioa, int) or ioa < 0:
+            return web.json_response({"ok": False, "error": "invalid ioa"}, status=400)
+        if (not isinstance(states, list) or not states
+                or len(states) > 8 or not all(isinstance(v, int) and v in (0, 1) for v in states)):
+            return web.json_response(
+                {"ok": False, "error": "invalid states (须为 1-8 个 0/1)"}, status=400)
+        return web.json_response(await bridge.slave_group_single_point(ioa, states))
+
+    async def api_logs(request: web.Request) -> web.Response:
+        """结构化日志查询: ?level_min=WARNING&category=connection&q=xxx&limit=200."""
+        rows = bridge.query_logs(
+            level_min=request.query.get("level_min", "DEBUG"),
+            source=request.query.get("source") or None,
+            category=request.query.get("category") or None,
+            contains=request.query.get("q") or None,
+            limit=min(int(request.query.get("limit", 200) or 200), 2000),
+        )
+        return web.json_response({"ok": True, "logs": rows,
+                                  "stats": bridge.log_stats()})
+
+    async def api_logs_export(request: web.Request) -> web.Response:
+        """导出全部内存日志为 JSONL 下载."""
+        rows = bridge.query_logs(limit=100000, newest_first=False)
+        payload = "\n".join(json.dumps(r, ensure_ascii=False) for r in rows)
+        name = f"iec104_{bridge.role}_logs.jsonl"
+        return web.Response(
+            body=payload, content_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
     async def api_slave_sim(request: web.Request) -> web.Response:
         try:
             body = await request.json()
@@ -280,6 +424,7 @@ def create_app(bridge: EngineBridge) -> web.Application:
             "status": bridge.status(),
             "frames": bridge.recent("frame", 50),
             "events": bridge.recent("event", 50),
+            "logs": bridge.recent_logs(80),
         }})
         try:
             while True:
@@ -319,6 +464,9 @@ def create_app(bridge: EngineBridge) -> web.Application:
     app.router.add_post("/api/master/gi", api_gi)
     app.router.add_post("/api/master/yk", api_yk)
     app.router.add_post("/api/master/setpoint", api_sp)
+    app.router.add_post("/api/master/step", api_step)
+    app.router.add_post("/api/master/bitstring", api_bitstring)
+    app.router.add_post("/api/master/delay", api_delay)
     app.router.add_post("/api/master/clock", api_clock)
     app.router.add_post("/api/master/ci", api_ci)
     app.router.add_post("/api/master/reset", api_reset)
@@ -330,11 +478,16 @@ def create_app(bridge: EngineBridge) -> web.Application:
     app.router.add_post("/api/points/yaml", api_points_yaml_put)
     app.router.add_get("/api/export/points.csv", api_export_csv)
     app.router.add_get("/api/export/session.json", api_export_session)
+    app.router.add_get("/api/logs", api_logs)
+    app.router.add_get("/api/logs/export", api_logs_export)
     app.router.add_post("/api/points/batch", api_points_batch)
     app.router.add_post("/api/slave/start", api_slave_start)
     app.router.add_post("/api/slave/stop", api_slave_stop)
     app.router.add_post("/api/slave/yx", api_slave_yx)
     app.router.add_post("/api/slave/yc", api_slave_yc)
+    app.router.add_post("/api/slave/ym", api_slave_ym)
+    app.router.add_post("/api/slave/ep", api_slave_ep)
+    app.router.add_post("/api/slave/ps", api_slave_ps)
     app.router.add_post("/api/slave/response", api_slave_response)
     app.router.add_post("/api/slave/sim", api_slave_sim)
     app.router.add_get("/ws", ws_feed)
@@ -345,8 +498,8 @@ def create_app(bridge: EngineBridge) -> web.Application:
 
 
 async def _run(role: str, host: str = "127.0.0.1", port: int = 8765,
-               point_table=None) -> None:
-    bridge = EngineBridge(role, point_table=point_table)
+               point_table=None, connection: dict | None = None) -> None:
+    bridge = EngineBridge(role, point_table=point_table, connection=connection)
     bridge.ensure_demo_points()
     app = create_app(bridge)
     runner = web.AppRunner(app)
@@ -362,9 +515,9 @@ async def _run(role: str, host: str = "127.0.0.1", port: int = 8765,
 
 
 def run_server(role: str, host: str = "127.0.0.1", port: int = 8765,
-               point_table=None) -> None:
+               point_table=None, connection: dict | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     try:
-        asyncio.run(_run(role, host, port, point_table=point_table))
+        asyncio.run(_run(role, host, port, point_table=point_table, connection=connection))
     except KeyboardInterrupt:
         pass

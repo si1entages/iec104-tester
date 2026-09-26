@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/WebUI-aiohttp-41CD52" alt="Web UI">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/IEC--104-Complete-brightgreen.svg" alt="IEC 104">
-  <img src="https://img.shields.io/badge/Tests-405-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-451-brightgreen.svg" alt="Tests">
 </p>
 
 ---
@@ -28,6 +28,13 @@
 - STARTDT/STOPDT/TESTFR 状态机；CP24Time2a / CP56Time2a；品质描述词
 - 文件传输；参数命令；时标与品质
 
+### 界面（Web UI，浅色工业风）
+
+- 按 **ISA-101 高性能 HMI** 惯例设计：中性浅灰底、颜色只用于状态与类型标签、扁平无装饰、字段带标签
+- 数据表全边框 + 表头吸顶 + 统一左对齐 + 数值等宽（tabular-nums），便于逐格比读
+- 按钮可用性由服务端状态驱动，禁用态显式灰化；点值经 WebSocket 实时刷新（无需手动刷新页面）
+- 主站/子站各一个页面，两个标签页即可联调
+
 ### 主站（Web UI + `core/engine/master.py`）
 
 - 连接管理、断线重连
@@ -41,6 +48,7 @@
 - TCP 多客户端监听；系统命令响应；DEACT；SOE/自发上送
 - 可编辑点表（点 YX 切换、改 YC 自发上送）
 - **响应注入**（延迟、丢帧、损坏、不响应、品质、**错误 COT**）
+- **命令联动**（真机语义：遥控→同 IOA 遥信变位、遥调→同 IOA 遥测更新，带时标 COT=3 上送）
 - 数据模拟（手动/自动）；YAML 点表
 
 ### 多站 / 录制 / 模拟（CLI）
@@ -51,7 +59,10 @@
 
 ### 测试
 
-- 单元 + 集成：`pytest tests/`（**405**，含 Web API 与协议符合性用例）
+- 单元 + 集成：`pytest tests/`（**451**，含 Web API、协议符合性、类型覆盖与机制层用例）
+- 全流程验收：`python qa_verify/qa_full_flow.py [--shots]`（从零复位→启动→系统/控制命令→参数文件→模拟→注入→点表→多客户端→前端→关停重连，可选截图）
+- 前端：`node qa_verify/qa_webui_dom.mjs`（Node 沙箱真跑页面脚本：按钮绑定 + 按钮状态同步 + WS 实时刷新 + CSS 覆盖检查）
+- 真机联调：`python qa_verify/qa_joint_debug.py`（对运行中的主/子站逐项下发并逐帧核对）
 - 一致性：`tests/conformance/test_conformance.py`（42 用例）
 - 脚本：`run_tests.py tests/scripts/`（YAML 动作 + 断言）
 

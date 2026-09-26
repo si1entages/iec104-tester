@@ -73,6 +73,28 @@
           <label><input id="sim-on" type="checkbox" /> 自动变化</label>
           <button class="btn" id="btn-sim">应用</button>
         </div>
+        <div class="row">
+          <span class="muted">累计量</span>
+          <input id="ym-ioa" type="number" value="3001" style="width:74px" />
+          <input id="ym-val" type="number" value="0" style="width:74px" />
+          <button class="btn" id="btn-ym">置值上送</button>
+        </div>
+      </div>
+      <div class="card">
+        <h4>测试报文注入</h4>
+        <div class="row">
+          <span class="muted">继保事件</span>
+          <input id="ep-ioa" type="number" value="5001" style="width:74px" />
+          <input id="ep-val" type="number" value="1" style="width:60px" />
+          <button class="btn" id="btn-ep">上送 M_EP</button>
+        </div>
+        <div class="row">
+          <span class="muted">成组单点</span>
+          <input id="ps-ioa" type="number" value="5101" style="width:74px" />
+          <input id="ps-states" class="grow" placeholder="状态位 1,0,1" />
+          <button class="btn" id="btn-ps">上送 M_PS</button>
+        </div>
+        <div class="muted">均为 COT=3 带时标突发报文，用于验证主站对非常规来报的处理。</div>
       </div>
       <div class="card">
         <h4>批量操作</h4>
@@ -98,19 +120,42 @@
   </main>
 
   <section class="bottom" id="bottom">
-    <div class="bottom-tabs"><span class="muted">报文 / 事件</span></div>
-    <div class="bottom-body">
+    <div class="bottom-tabs">
+      <span class="muted">报文 / 事件 / 日志</span>
+      <span class="log-tools">
+        <select id="log-level" title="最低级别">
+          <option value="DEBUG">DEBUG+</option>
+          <option value="INFO">INFO+</option>
+          <option value="WARNING">WARNING+</option>
+          <option value="ERROR">ERROR+</option>
+        </select>
+        <select id="log-category">
+          <option value="all">全部类别</option>
+          <option value="connection">连接</option>
+          <option value="protocol">协议</option>
+          <option value="command">命令</option>
+          <option value="data">数据</option>
+          <option value="ui">界面</option>
+          <option value="system">系统</option>
+        </select>
+        <input id="log-q" placeholder="关键字过滤" class="grow" />
+        <button class="btn" id="log-clear">清屏</button>
+        <button class="btn" id="log-export">导出</button>
+      </span>
+    </div>
+    <div class="bottom-body three">
       <div class="feed" id="feed-frames" role="log" aria-label="报文流"></div>
       <div class="feed" id="feed-events" role="log" aria-label="事件流"></div>
+      <div class="feed" id="feed-logs" role="log" aria-label="日志流"></div>
     </div>
   </section>
 
   <footer class="statusbar">
-    <span id="st-conn">未连接</span>
-    <span id="st-traffic">TX 0 / RX 0</span>
-    <span id="st-seq">VS/VR -/-</span>
-    <span id="st-points">点 0</span>
-    <span id="st-clients"></span>
+    <span id="st-conn">状态 未连接</span>
+    <span id="st-traffic">报文 TX 0 / RX 0</span>
+    <span id="st-seq">序号 VS/VR -/- 窗口 -</span>
+    <span id="st-points">点数 0</span>
+    <span id="st-clients-bar">客户端 0</span>
   </footer>
 </div>
 <script src="/static/js/app.js"></script>
@@ -128,12 +173,14 @@ $("#btn-start").onclick = async () => {
     $("#btn-start").disabled = true;
     $("#btn-stop").disabled = false;
   }
+  IEC104.requestRefresh();   // 立刻按服务端真实状态对齐（含 already running 等分支）
 };
 $("#btn-stop").onclick = async () => {
   await api("/api/slave/stop");
   $("#btn-start").disabled = false;
   $("#btn-stop").disabled = true;
   toast("已停止");
+  IEC104.requestRefresh();
 };
 $("#btn-resp").onclick = async () => {
   const r = await api("/api/slave/response", {
@@ -164,6 +211,26 @@ function batch(action) {
 $("#batch-en").onclick = () => batch("enable");
 $("#batch-dis").onclick = () => batch("disable");
 $("#batch-grp").onclick = () => batch("group");
+$("#btn-ym").onclick = async () => {
+  const r = await api("/api/slave/ym", {
+    ioa: +$("#ym-ioa").value, value: +$("#ym-val").value,
+  });
+  toast(r.ok ? `累计量 ${$("#ym-ioa").value} → ${$("#ym-val").value}` : r.error || "失败");
+  if (r.ok) IEC104.refreshPoints();
+};
+$("#btn-ep").onclick = async () => {
+  const r = await api("/api/slave/ep", {
+    ioa: +$("#ep-ioa").value, event_value: +$("#ep-val").value, with_time: true,
+  });
+  toast(r.ok ? "继保事件已上送 (M_EP_TD_1)" : r.error || "失败");
+};
+$("#btn-ps").onclick = async () => {
+  const states = $("#ps-states").value.split(/[,\s]+/).map(Number)
+    .filter((v) => v === 0 || v === 1);
+  if (!states.length) { toast("状态位须为 0/1，如 1,0,1"); return; }
+  const r = await api("/api/slave/ps", { ioa: +$("#ps-ioa").value, states });
+  toast(r.ok ? `成组单点已上送 (${states.length} 点)` : r.error || "失败");
+};
 </script>
 </body>
 </html>

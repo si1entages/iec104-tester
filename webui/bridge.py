@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from core.config import AppConfig
 from core.data.point_table import PointTable
+from core.logging_manager import LogManager
 
 from .events import EventBus
 from .points import PointService
@@ -18,11 +20,24 @@ logger = logging.getLogger("iec104.webui")
 class EngineBridge:
     """在独立 asyncio 循环上运行主站或子站引擎，并向 UI 推送事件."""
 
-    def __init__(self, role: str = "master", point_table: PointTable | None = None):
+    def __init__(self, role: str = "master", point_table: PointTable | None = None,
+                 connection: dict | None = None):
         assert role in ("master", "slave")
         self.role = role
         self.config = AppConfig()
         self.config.mode = role
+        # CLI --host/--port/--addr 透传：否则 Web 层用默认 2404，
+        # UI 上点「启动监听/连接」会忽略命令行给出的真实端口
+        conn = self.config.connection
+        for key, value in (connection or {}).items():
+            if value is None:
+                continue
+            if key == "addr":
+                conn.common_addr = int(value)
+            elif key in ("host",):
+                conn.host = str(value)
+            elif key == "port":
+                conn.port = int(value)
         self.bus = EventBus()
         self.points = PointService(point_table)
         self.point_table: PointTable = self.points.table
@@ -33,6 +48,34 @@ class EngineBridge:
         )
         self.loop = None
         self._status: dict[str, Any] = {"role": role, "running": False}
+
+        # 结构化日志：内存环形缓冲 + JSONL 会话文件 + WS 推送；
+        # 并把既有 iec104.* 引擎日志桥接进来（引擎侧零改动）
+        self.logs = LogManager(source=role, log_dir=Path("logs"))
+        self.logs.attach_python_logging()
+        self.logs.subscribe(self._on_log_entry)
+
+    def _on_log_entry(self, entry) -> None:
+        self.bus.publish("log", {
+            "ts": entry.ts, "level": entry.level, "source": entry.source,
+            "category": entry.category, "message": entry.message,
+            "data": entry.data,
+        })
+
+    def query_logs(self, *, level_min: str = "DEBUG", source: str | None = None,
+                   category: str | None = None, contains: str | None = None,
+                   limit: int = 200, newest_first: bool = True) -> list[dict]:
+        return [e.to_dict() for e in self.logs.query(
+            level_min=level_min, source=source, category=category,
+            contains=contains, limit=limit, newest_first=newest_first)]
+
+    def log_stats(self) -> dict:
+        st = self.logs.stats()
+        st["source"] = self.logs.source
+        return st
+
+    def recent_logs(self, limit: int = 50) -> list[dict]:
+        return [e.to_dict() for e in self.logs.query(limit=limit, newest_first=False)]
 
     # ── 兼容旧属性 ────────────────────────────────────────────────
 
@@ -85,24 +128,46 @@ class EngineBridge:
     def status(self) -> dict:
         st = dict(self._status)
         st.update(self.session.status_fields())
+        # 引擎未启动时也必须给出配置里的连接参数——否则前端输入框回落到
+        # HTML 默认值 2404，用户点「启动监听」会把子站悄悄搬到另一个端口，
+        # 主站（按原端口重连）就永远连不上。
+        st.setdefault("host", self.config.connection.host)
+        st.setdefault("port", self.config.connection.port)
+        st.setdefault("addr", self.config.connection.common_addr)
         st["points"] = self.points.count
         st["dropped"] = self.bus.dropped
         return st
+
+    def _notify_ui(self, msg: str) -> None:
+        """广播一条 UI 事件.
+
+        前端收到任何 event 都会向服务端要一次状态快照，因此**每个会改变状态的
+        分支都必须广播**，包括"本来就已经是该状态"的空操作分支。否则页面会停在
+        旧状态上，用户看到的就是「按钮能点，点了没效果」。
+        """
+        self.bus.publish("event", {"type": "ui", "data": {"msg": msg}})
 
     async def start_master(self, host: str, port: int, addr: int, reconnect: bool = True) -> dict:
         self.ensure_demo_points()
         r = await self.session.start_master(host, port, addr, reconnect, self.points)
         if r.get("ok"):
             self._status.update({"running": True, "host": host, "port": port})
-            self.bus.publish("event", {"type": "ui", "data": {"msg": f"连接中 {host}:{port}"}})
+            self._notify_ui(f"连接中 {host}:{port}")
+        else:
+            # 例如 already running：也要广播，让页面把按钮对齐到真实状态
+            self._notify_ui(r.get("error", "启动失败"))
         return r
 
     async def stop_master(self) -> dict:
+        # 先清标志再停引擎：engine 置 None 之后、stop 完成之前，任何 refresh
+        # 快照都不得再报告 running=true（否则前端出现"运行中"+按钮按未启动渲染的矛盾态）
+        self._status["running"] = False
         if not self.session.engine:
+            # 服务端本来就没在连：仍广播，让"以为还连着"的页面立刻对齐
+            self._notify_ui("未连接")
             return {"ok": True}
         r = await self.session.stop_master()
-        self._status["running"] = False
-        self.bus.publish("event", {"type": "ui", "data": {"msg": "已断开"}})
+        self._notify_ui("已断开")
         return r
 
     async def start_slave(self, host: str, port: int, addr: int) -> dict:
@@ -110,15 +175,19 @@ class EngineBridge:
         r = await self.session.start_slave(host, port, addr, self.points)
         if r.get("ok"):
             self._status.update({"running": True, "host": host, "port": port})
-            self.bus.publish("event", {"type": "ui", "data": {"msg": f"监听 {host}:{port}"}})
+            self._notify_ui(f"监听 {host}:{port}")
+        else:
+            self._notify_ui(r.get("error", "启动失败"))
         return r
 
     async def stop_slave(self) -> dict:
+        # 同 stop_master：先清标志，杜绝停止过程中的矛盾快照
+        self._status["running"] = False
         if not self.session.engine:
+            self._notify_ui("未监听")
             return {"ok": True}
         r = await self.session.stop_slave()
-        self._status["running"] = False
-        self.bus.publish("event", {"type": "ui", "data": {"msg": "已停止监听"}})
+        self._notify_ui("已停止监听")
         return r
 
     async def general_interrogation(self, qoi: int = 20) -> dict:
@@ -139,11 +208,22 @@ class EngineBridge:
     async def read_command(self, ioa: int) -> dict:
         return await self._cmd(self.session.read_command(ioa))
 
-    async def send_yk(self, ioa: int, state: int | bool, select: bool = False, double: bool = False) -> dict:
-        return await self._cmd(self.session.send_yk(ioa, state, select, double))
+    async def send_yk(self, ioa: int, state: int | bool, select: bool = False,
+                      double: bool = False, with_time: bool = False) -> dict:
+        return await self._cmd(self.session.send_yk(ioa, state, select, double, with_time))
 
-    async def send_setpoint(self, ioa: int, value: float, select: bool = False) -> dict:
-        return await self._cmd(self.session.send_setpoint(ioa, value, select))
+    async def send_step_command(self, ioa: int, state: int, select: bool = False) -> dict:
+        return await self._cmd(self.session.send_step_command(ioa, state, select))
+
+    async def send_bitstring(self, ioa: int, value: int) -> dict:
+        return await self._cmd(self.session.send_bitstring(ioa, value))
+
+    async def send_delay_request(self, delay_ms: int) -> dict:
+        return await self._cmd(self.session.send_delay_request(delay_ms))
+
+    async def send_setpoint(self, ioa: int, value: float, select: bool = False,
+                             kind: str = "short_float", with_time: bool = False) -> dict:
+        return await self._cmd(self.session.send_setpoint(ioa, value, select, kind, with_time))
 
     async def parameter_command(self, kind: str, ioa: int, value: float, qualifier: int = 1) -> dict:
         return await self._cmd(self.session.parameter_command(kind, ioa, value, qualifier))
@@ -168,6 +248,16 @@ class EngineBridge:
 
     async def slave_set_yc(self, ioa: int, value: float) -> dict:
         return await self._cmd(self.session.slave_set_yc(ioa, value))
+
+    async def slave_set_ym(self, ioa: int, value: int) -> dict:
+        return await self._cmd(self.session.slave_set_ym(ioa, value))
+
+    async def slave_protection_event(self, ioa: int, event_value: int = 1,
+                                      with_time: bool = True) -> dict:
+        return await self._cmd(self.session.slave_protection_event(ioa, event_value, with_time))
+
+    async def slave_group_single_point(self, ioa: int, states: list) -> dict:
+        return await self._cmd(self.session.slave_group_single_point(ioa, states))
 
     def export_points_csv(self) -> str:
         return self.points.export_csv(self.engine)
