@@ -10,9 +10,10 @@
 - 报文解析与分发
 
 本模块保留 ``MasterEngine`` 的编排与**公开 API**（薄门面）；连接/状态/重连/
-帧接收/定时器逻辑见 ``master_session.MasterSession``，命令构建与 ASDU 解码
-分发见 ``master_protocol.MasterProtocolHandler``。二者以组合方式持有，全部
-共享状态仍由本类持有，公开方法签名与行为保持不变。
+帧接收/定时器逻辑见 ``master_session.MasterSession``，命令构建与单帧下发见
+``master_commands.MasterCommandHandler``，I 帧 ASDU 解析分发与文件传输见
+``master_protocol.MasterProtocolHandler``。三者以组合方式持有，全部共享状态
+仍由本类持有，公开方法签名与行为保持不变。
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ from ..protocol.state_machine import ConnectionStateMachine, TimerType
 from ..protocol.types import COT, CP56Time2a
 from ..transport.connection import ConnectionStats, TCPClient
 from .base import EngineBase
+from .master_commands import MasterCommandHandler
 from .master_protocol import MasterEvent, MasterProtocolHandler
 from .master_session import MasterSession
 from .scheduler import TaskScheduler
@@ -86,6 +88,7 @@ class MasterEngine(EngineBase):
 
         # 组合组件（构造期注入引擎引用；仅保存引用，不读取尚未初始化的状态）
         self._session = MasterSession(self)
+        self._commands = MasterCommandHandler(self)
         self._protocol = MasterProtocolHandler(self)
 
         self._host = host
@@ -295,105 +298,105 @@ class MasterEngine(EngineBase):
 
     async def _await_send_window(self) -> None:
         """等待发送窗口可用（最多 t1）— 与子站行为对称."""
-        await self._protocol.await_send_window()
+        await self._commands.await_send_window()
 
     async def _send_command_asdu(self, asdu_data: bytes) -> None:
         """发送命令 ASDU — 公共封装（状态检查 + 序列号 + 编码 + 发送）."""
-        await self._protocol.send_command_asdu(asdu_data)
+        await self._commands.send_command_asdu(asdu_data)
 
     async def general_interrogation(self, qoi: int = 20) -> None:
         """发送总召唤命令."""
-        await self._protocol.general_interrogation(qoi)
+        await self._commands.general_interrogation(qoi)
 
     async def counter_interrogation(self, qcc: int = 0) -> None:
         """发送累计量召唤命令."""
-        await self._protocol.counter_interrogation(qcc)
+        await self._commands.counter_interrogation(qcc)
 
     async def clock_sync(self, time_tag: CP56Time2a | None = None) -> None:
         """发送时钟同步命令."""
-        await self._protocol.clock_sync(time_tag)
+        await self._commands.clock_sync(time_tag)
 
     async def reset_process(self, qrp: int = 1) -> None:
         """发送复位进程命令."""
-        await self._protocol.reset_process(qrp)
+        await self._commands.reset_process(qrp)
 
     async def send_test_command(self) -> None:
         """发送测试命令."""
-        await self._protocol.send_test_command()
+        await self._commands.send_test_command()
 
     # ── 遥控操作 ──────────────────────────────────────────────────
 
     def _sbo_required(self, ioa: int, kind: str) -> bool:
         """判断指定 IOA 的遥控/设点命令是否需要"选择-执行"(SBO) 两段式."""
-        return self._protocol.sbo_required(ioa, kind)
+        return self._commands.sbo_required(ioa, kind)
 
     async def _wait_select_ack(self, ioa: int, timeout: float) -> bool:
         """等待指定 IOA 的选择阶段确认 (ACTCON)."""
-        return await self._protocol.wait_select_ack(ioa, timeout)
+        return await self._commands.wait_select_ack(ioa, timeout)
 
     async def single_command(self, ioa: int, state: bool,
                               select: bool = False, qu: int = 0) -> None:
         """发送单命令 (选择/执行)."""
-        await self._protocol.single_command(ioa, state, select=select, qu=qu)
+        await self._commands.single_command(ioa, state, select=select, qu=qu)
 
     async def _send_single_command_raw(self, ioa: int, state: bool,
                                         select: bool, qu: int) -> None:
         """发送单命令单帧（不做 SBO 决策）."""
-        await self._protocol.send_single_command_raw(ioa, state, select=select, qu=qu)
+        await self._commands.send_single_command_raw(ioa, state, select=select, qu=qu)
 
     async def double_command(self, ioa: int, state: int,
                               select: bool = False, qu: int = 0) -> None:
         """发送双命令 (选择/执行)."""
-        await self._protocol.double_command(ioa, state, select=select, qu=qu)
+        await self._commands.double_command(ioa, state, select=select, qu=qu)
 
     async def _send_double_command_raw(self, ioa: int, state: int,
                                         select: bool, qu: int) -> None:
         """发送双命令单帧（不做 SBO 决策）."""
-        await self._protocol.send_double_command_raw(ioa, state, select=select, qu=qu)
+        await self._commands.send_double_command_raw(ioa, state, select=select, qu=qu)
 
     async def setpoint_normalized(self, ioa: int, value: float,
                                     select: bool = False) -> None:
         """发送归一化设点命令 (选择/执行)."""
-        await self._protocol.setpoint_normalized(ioa, value, select=select)
+        await self._commands.setpoint_normalized(ioa, value, select=select)
 
     async def _send_setpoint_normalized_raw(self, ioa: int, value: float,
                                              select: bool) -> None:
         """发送归一化设点单帧（不做 SBO 决策）."""
-        await self._protocol.send_setpoint_normalized_raw(ioa, value, select=select)
+        await self._commands.send_setpoint_normalized_raw(ioa, value, select=select)
 
     async def setpoint_shortfloat(self, ioa: int, value: float,
                                     select: bool = False) -> None:
         """发送短浮点设点命令 (选择/执行)."""
-        await self._protocol.setpoint_shortfloat(ioa, value, select=select)
+        await self._commands.setpoint_shortfloat(ioa, value, select=select)
 
     async def _send_setpoint_shortfloat_raw(self, ioa: int, value: float,
                                              select: bool) -> None:
         """发送短浮点设点单帧（不做 SBO 决策）."""
-        await self._protocol.send_setpoint_shortfloat_raw(ioa, value, select=select)
+        await self._commands.send_setpoint_shortfloat_raw(ioa, value, select=select)
 
     async def regulating_step_command(self, ioa: int, state: int,
                                        select: bool = False, qu: int = 0) -> None:
         """发送升降命令 (C_RC_NA_1)."""
-        await self._protocol.regulating_step_command(ioa, state, select=select, qu=qu)
+        await self._commands.regulating_step_command(ioa, state, select=select, qu=qu)
 
     async def _send_regulating_step_raw(self, ioa: int, state: int,
                                          select: bool, qu: int) -> None:
         """发送升降命令单帧（不做 SBO 决策）."""
-        await self._protocol.send_regulating_step_raw(ioa, state, select=select, qu=qu)
+        await self._commands.send_regulating_step_raw(ioa, state, select=select, qu=qu)
 
     async def setpoint_scaled(self, ioa: int, value: int,
                                select: bool = False) -> None:
         """发送标度化设点命令 (C_SE_NB_1)."""
-        await self._protocol.setpoint_scaled(ioa, value, select=select)
+        await self._commands.setpoint_scaled(ioa, value, select=select)
 
     async def _send_setpoint_scaled_raw(self, ioa: int, value: int,
                                          select: bool) -> None:
         """发送标度化设点单帧（不做 SBO 决策）."""
-        await self._protocol.send_setpoint_scaled_raw(ioa, value, select=select)
+        await self._commands.send_setpoint_scaled_raw(ioa, value, select=select)
 
     async def bitstring_command(self, ioa: int, value: int) -> None:
         """发送比特串命令 (C_BO_NA_1)."""
-        await self._protocol.bitstring_command(ioa, value)
+        await self._commands.bitstring_command(ioa, value)
 
     # ── 带时标 CP56Time2a 的控制命令 (TypeID 58-64) ────────────────
 
@@ -401,7 +404,7 @@ class MasterEngine(EngineBase):
                                         select: bool = False, qu: int = 0,
                                         time_tag: CP56Time2a | None = None) -> None:
         """发送带时标单命令 (C_SC_TA_1)."""
-        await self._protocol.single_command_with_time(
+        await self._commands.single_command_with_time(
             ioa, state, select=select, qu=qu, time_tag=time_tag
         )
 
@@ -409,7 +412,7 @@ class MasterEngine(EngineBase):
                                         select: bool = False, qu: int = 0,
                                         time_tag: CP56Time2a | None = None) -> None:
         """发送带时标双命令 (C_DC_TA_1)."""
-        await self._protocol.double_command_with_time(
+        await self._commands.double_command_with_time(
             ioa, state, select=select, qu=qu, time_tag=time_tag
         )
 
@@ -417,7 +420,7 @@ class MasterEngine(EngineBase):
                                                  select: bool = False, qu: int = 0,
                                                  time_tag: CP56Time2a | None = None) -> None:
         """发送带时标升降命令 (C_RC_TA_1)."""
-        await self._protocol.regulating_step_command_with_time(
+        await self._commands.regulating_step_command_with_time(
             ioa, state, select=select, qu=qu, time_tag=time_tag
         )
 
@@ -425,7 +428,7 @@ class MasterEngine(EngineBase):
                                              select: bool = False,
                                              time_tag: CP56Time2a | None = None) -> None:
         """发送带时标归一化设点命令 (C_SE_TA_1)."""
-        await self._protocol.setpoint_normalized_with_time(
+        await self._commands.setpoint_normalized_with_time(
             ioa, value, select=select, time_tag=time_tag
         )
 
@@ -433,7 +436,7 @@ class MasterEngine(EngineBase):
                                          select: bool = False,
                                          time_tag: CP56Time2a | None = None) -> None:
         """发送带时标标度化设点命令 (C_SE_TB_1)."""
-        await self._protocol.setpoint_scaled_with_time(
+        await self._commands.setpoint_scaled_with_time(
             ioa, value, select=select, time_tag=time_tag
         )
 
@@ -441,47 +444,47 @@ class MasterEngine(EngineBase):
                                              select: bool = False,
                                              time_tag: CP56Time2a | None = None) -> None:
         """发送带时标短浮点设点命令 (C_SE_TC_1)."""
-        await self._protocol.setpoint_shortfloat_with_time(
+        await self._commands.setpoint_shortfloat_with_time(
             ioa, value, select=select, time_tag=time_tag
         )
 
     async def bitstring_command_with_time(self, ioa: int, value: int,
                                            time_tag: CP56Time2a | None = None) -> None:
         """发送带时标比特串命令 (C_BO_TA_1)."""
-        await self._protocol.bitstring_command_with_time(ioa, value, time_tag)
+        await self._commands.bitstring_command_with_time(ioa, value, time_tag)
 
     async def read_command(self, ioa: int) -> None:
         """发送读命令 (C_RD_NA_1)."""
-        await self._protocol.read_command(ioa)
+        await self._commands.read_command(ioa)
 
     async def delay_command(self, delay_ms: int) -> None:
         """发送延时获得命令 (C_CD_NA_1)."""
-        await self._protocol.delay_command(delay_ms)
+        await self._commands.delay_command(delay_ms)
 
     async def test_command_with_time(self, time_tag: CP56Time2a | None = None) -> None:
         """发送带时标测试命令 (C_TS_TA_1)."""
-        await self._protocol.test_command_with_time(time_tag)
+        await self._commands.test_command_with_time(time_tag)
 
     # ── 参数命令 ──────────────────────────────────────────────────
 
     async def parameter_normalized(self, ioa: int, value: float,
                                     param_change: int = 0) -> None:
         """发送测量值参数-归一化 (P_ME_NA_1)."""
-        await self._protocol.parameter_normalized(ioa, value, param_change)
+        await self._commands.parameter_normalized(ioa, value, param_change)
 
     async def parameter_scaled(self, ioa: int, value: int,
                                 param_change: int = 0) -> None:
         """发送测量值参数-标度化 (P_ME_NB_1)."""
-        await self._protocol.parameter_scaled(ioa, value, param_change)
+        await self._commands.parameter_scaled(ioa, value, param_change)
 
     async def parameter_float(self, ioa: int, value: float,
                                param_change: int = 0) -> None:
         """发送测量值参数-短浮点 (P_ME_NC_1)."""
-        await self._protocol.parameter_float(ioa, value, param_change)
+        await self._commands.parameter_float(ioa, value, param_change)
 
     async def parameter_activation(self, ioa: int, qualifier: int = 1) -> None:
         """发送参数激活 (P_AC_NA_1)."""
-        await self._protocol.parameter_activation(ioa, qualifier)
+        await self._commands.parameter_activation(ioa, qualifier)
 
     # ── 文件传输命令 ──────────────────────────────────────────────
 
