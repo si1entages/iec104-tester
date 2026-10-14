@@ -92,6 +92,7 @@ class TestRunner:
         result = TestResult(
             script_name=script.name,
             script_path=script.path,
+            description=script.description,
             status=TestStatus.RUNNING,
             start_time=time.time(),
         )

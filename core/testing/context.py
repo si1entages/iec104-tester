@@ -54,6 +54,7 @@ class TestResult:
     end_time: float = 0.0
     steps: list[StepResult] = field(default_factory=list)
     error_message: str = ""
+    description: str = ""  # 脚本描述（来自 TestScript.description），供报告副标题展示
 
     @property
     def duration_s(self) -> float:
