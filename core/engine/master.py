@@ -20,8 +20,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections import deque
 from collections.abc import Callable
+from dataclasses import dataclass, replace
+from enum import Enum
 from typing import Any
 
 from ..data.data_store import RealtimeDB
@@ -43,9 +46,40 @@ from .scheduler import TaskScheduler
 logger = logging.getLogger("iec104.master")
 
 # 兼容旧导入路径：MasterEvent 仍可从 core.engine.master 导入
-__all__ = ["MasterEngine", "MasterEvent"]
+__all__ = ["MasterEngine", "MasterEvent", "ParameterState", "ParameterResult"]
 
 EventCallback = Callable[[MasterEvent, dict[str, Any]], None]
+
+
+class ParameterResult(Enum):
+    """参数命令在主站侧的单一维度（装载 / 激活）结果."""
+
+    UNKNOWN = "unknown"        # 未下发过，或下发失败后回退
+    PENDING = "pending"        # 已下发，等待应答
+    OK = "ok"                  # 收到激活确认 (ACTCON, PN=0)
+    TERMINATED = "terminated"  # 收到激活终止 (ACTTERM)
+    REJECTED = "rejected"      # 收到否定确认 (ACTCON, PN=1)
+    TIMEOUT = "timeout"        # t1 内未收到任何应答
+
+
+@dataclass
+class ParameterState:
+    """单个参数的主站侧状态快照（装载 + 激活，供 Web UI / REST 查询）.
+
+    - **装载 (load)**：``P_ME_NA_1`` / ``P_ME_NB_1`` / ``P_ME_NC_1``（参数值下发）
+    - **激活 (activation)**：``P_AC_NA_1``（参数激活 / 去激活）
+
+    ``*_updated_at`` 为 ``time.monotonic()`` 时间戳（与 ``_last_clock_sync_sent_time``
+    一致，适合算时长/间隔，不用于向用户展示绝对时间）。
+    """
+
+    ioa: int
+    load_result: ParameterResult = ParameterResult.UNKNOWN
+    load_cot: int | None = None
+    load_updated_at: float | None = None
+    activation_result: ParameterResult = ParameterResult.UNKNOWN
+    activation_cot: int | None = None
+    activation_updated_at: float | None = None
 
 
 class MasterEngine(EngineBase):
@@ -124,6 +158,11 @@ class MasterEngine(EngineBase):
 
         # 命令确认（ACTCON）等待：IOA → Future，由 _resolve_pending_ack 唤醒。
         self._pending_acks: dict[int, asyncio.Future] = {}
+
+        # 参数命令状态跟踪：IOA → 装载/激活结果快照（T08）
+        self._parameter_states: dict[int, ParameterState] = {}
+        # 参数应答等待：(IOA, "load"/"activation") → Future，与 SBO 同一机制
+        self._pending_parameter_acks: dict[tuple[int, str], asyncio.Future] = {}
 
         # 历史数据库
         self._history_db = history_db
@@ -465,26 +504,154 @@ class MasterEngine(EngineBase):
         """发送带时标测试命令 (C_TS_TA_1)."""
         await self._commands.test_command_with_time(time_tag)
 
-    # ── 参数命令 ──────────────────────────────────────────────────
+    # ── 参数命令（含主站侧装载/激活状态跟踪）───────────────────────
 
     async def parameter_normalized(self, ioa: int, value: float,
                                     param_change: int = 0) -> None:
-        """发送测量值参数-归一化 (P_ME_NA_1)."""
-        await self._commands.parameter_normalized(ioa, value, param_change)
+        """发送测量值参数-归一化 (P_ME_NA_1)，并跟踪其装载结果."""
+        await self._send_tracked_parameter(
+            "load", ioa, self._commands.parameter_normalized, ioa, value, param_change
+        )
 
     async def parameter_scaled(self, ioa: int, value: int,
                                 param_change: int = 0) -> None:
-        """发送测量值参数-标度化 (P_ME_NB_1)."""
-        await self._commands.parameter_scaled(ioa, value, param_change)
+        """发送测量值参数-标度化 (P_ME_NB_1)，并跟踪其装载结果."""
+        await self._send_tracked_parameter(
+            "load", ioa, self._commands.parameter_scaled, ioa, value, param_change
+        )
 
     async def parameter_float(self, ioa: int, value: float,
                                param_change: int = 0) -> None:
-        """发送测量值参数-短浮点 (P_ME_NC_1)."""
-        await self._commands.parameter_float(ioa, value, param_change)
+        """发送测量值参数-短浮点 (P_ME_NC_1)，并跟踪其装载结果."""
+        await self._send_tracked_parameter(
+            "load", ioa, self._commands.parameter_float, ioa, value, param_change
+        )
 
     async def parameter_activation(self, ioa: int, qualifier: int = 1) -> None:
-        """发送参数激活 (P_AC_NA_1)."""
-        await self._commands.parameter_activation(ioa, qualifier)
+        """发送参数激活 (P_AC_NA_1)，并跟踪其激活结果."""
+        await self._send_tracked_parameter(
+            "activation", ioa, self._commands.parameter_activation, ioa, qualifier
+        )
+
+    # ── 参数状态查询（公开 API，供 Web UI / REST 后续接线）─────────
+
+    def get_parameter_state(self, ioa: int) -> ParameterState | None:
+        """查询单个参数的装载/激活状态快照.
+
+        返回的是**快照副本**（修改返回值不会影响引擎内部状态）；
+        该 IOA 从未下发过参数命令时返回 ``None``。
+        """
+        state = self._parameter_states.get(ioa)
+        return replace(state) if state is not None else None
+
+    def parameter_states(self) -> dict[int, ParameterState]:
+        """返回全部已跟踪参数的状态快照（键 = IOA，值为快照副本）."""
+        return {ioa: replace(state) for ioa, state in self._parameter_states.items()}
+
+    # ── 参数状态跟踪内部实现（与 SBO 同一机制与超时语义）──────────
+
+    async def _send_tracked_parameter(self, kind: str, ioa: int,
+                                       sender: Callable, *args) -> None:
+        """下发参数命令并跟踪结果；**不阻塞调用方**（既有非阻塞语义不变）.
+
+        与 SBO 的 ``_wait_select_ack`` 使用同一套机制与超时语义：登记 Future →
+        ``asyncio.wait_for(t1)`` → 超时记 ``TIMEOUT``。区别仅在于等待放在后台
+        任务中执行，故调用方的延迟与异常行为与改动前完全一致（参数命令应答
+        属可观测性信息，不应把设备是否应答变成调用方的阻塞点）。
+        """
+        self._set_parameter_result(ioa, kind, ParameterResult.PENDING, None)
+        waiter = self._spawn(self._wait_parameter_ack(ioa, kind, self._t1))
+        try:
+            await sender(*args)
+        except Exception:
+            # 下发失败：撤销等待并回退状态，避免把"从未发出"误记为超时
+            if waiter is not None:
+                waiter.cancel()
+            self._set_parameter_result(ioa, kind, ParameterResult.UNKNOWN, None)
+            raise
+
+    async def _wait_parameter_ack(self, ioa: int, kind: str, timeout: float) -> bool:
+        """等待参数命令的激活确认 (ACTCON) — 与 ``_wait_select_ack`` 同语义.
+
+        并发安全同 SBO：同一 (IOA, 类型) 上已有未完成等待时先取消旧的；清理时
+        只删除属于自己的 Future（``is fut`` 判定），不误删他人登记。
+
+        Returns:
+            True=收到肯定确认 (PN=0)；False=否定确认或超时（状态已由
+            ``_record_parameter_ack`` / ``_record_parameter_timeout`` 记录）。
+        """
+        key = (ioa, kind)
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future = loop.create_future()
+        old = self._pending_parameter_acks.get(key)
+        if old is not None and not old.done():
+            logger.warning(
+                f"Parameter: concurrent wait on IOA={ioa} kind={kind}, "
+                f"cancelling stale waiter"
+            )
+            old.cancel()
+        self._pending_parameter_acks[key] = fut
+        try:
+            pn, cot = await asyncio.wait_for(fut, timeout=timeout)
+        except asyncio.TimeoutError:
+            self._record_parameter_timeout(ioa, kind)
+            return False
+        except asyncio.CancelledError:
+            return False
+        finally:
+            if self._pending_parameter_acks.get(key) is fut:
+                self._pending_parameter_acks.pop(key, None)
+        return not pn
+
+    def _set_parameter_result(self, ioa: int, kind: str,
+                               result: ParameterResult, cot: int | None) -> None:
+        """写入某参数某一维（load/activation）的结果与时间戳."""
+        state = self._parameter_states.get(ioa)
+        if state is None:
+            state = ParameterState(ioa=ioa)
+            self._parameter_states[ioa] = state
+        now = time.monotonic()
+        if kind == "activation":
+            state.activation_result = result
+            state.activation_cot = cot
+            state.activation_updated_at = now
+        else:
+            state.load_result = result
+            state.load_cot = cot
+            state.load_updated_at = now
+
+    def _record_parameter_ack(self, ioa: int, kind: str, cot: int, pn: bool) -> None:
+        """记录参数命令应答（由 ``MasterProtocolHandler.process_parameter_ack`` 调用）.
+
+        与 SBO 一致：**仅 ACTCON 唤醒等待者**——ACTTERM 可能是上一条命令的滞后帧，
+        若用它唤醒本次等待会把"肯定确认"误判为超时（SBO 侧同类竞态的修复经验）。
+        ACTTERM/DEACTCON 仅更新已记录的状态。
+        """
+        if cot == COT.ACTCON:
+            fut = self._pending_parameter_acks.get((ioa, kind))
+            if fut is not None and not fut.done():
+                fut.set_result((pn, cot))
+            result = ParameterResult.REJECTED if pn else ParameterResult.OK
+        elif cot == COT.ACTTERM:
+            result = ParameterResult.TERMINATED
+        elif cot == COT.DEACTCON:
+            # 参数去激活确认：调用方要求去激活（qualifier=2）时的正常完成
+            result = ParameterResult.OK
+        else:
+            # 其它 COT（如 SPONT/INTROGEN）不是参数命令应答语义，只记日志
+            logger.debug(f"Parameter ACK with unexpected COT={cot}: IOA={ioa}")
+            return
+        self._set_parameter_result(ioa, kind, result, cot)
+
+    def _record_parameter_timeout(self, ioa: int, kind: str) -> None:
+        """t1 内未收到应答 → 记 TIMEOUT；已有终态（OK/REJECTED/TERMINATED）不被覆盖."""
+        state = self._parameter_states.get(ioa)
+        if state is None:
+            return
+        current = state.activation_result if kind == "activation" else state.load_result
+        if current is not ParameterResult.PENDING:
+            return
+        self._set_parameter_result(ioa, kind, ParameterResult.TIMEOUT, None)
 
     # ── 文件传输命令 ──────────────────────────────────────────────
 

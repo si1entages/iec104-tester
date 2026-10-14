@@ -359,10 +359,10 @@ class MasterProtocolHandler:
             if cot == COT.INIT and e._auto_gi_on_init_end:
                 e._spawn(e._session.regi_after_init())
 
-        # 参数命令确认
+        # 参数命令确认（装载/激活结果跟踪，见 process_parameter_ack）
         elif type_id in (TypeID.P_ME_NA_1, TypeID.P_ME_NB_1, TypeID.P_ME_NC_1,
                           TypeID.P_ME_ND_1, TypeID.P_AC_NA_1):
-            logger.info(f"Parameter Command ACK: type={type_id}, COT={cot}")
+            self.process_parameter_ack(asdu)
 
         # 文件传输
         elif type_id in (TypeID.F_FR_NA_1, TypeID.F_SR_NA_1, TypeID.F_SC_NA_1,
@@ -621,6 +621,29 @@ class MasterProtocolHandler:
                 e._resolve_pending_ack(obj.ioa, pn=pn, cot=cot)
             else:
                 logger.warning(f"Command with COT={cot}")
+
+    def process_parameter_ack(self, asdu: ASDU) -> None:
+        """处理参数命令应答 (P_ME_*/P_AC_NA_1)，跟踪装载 / 激活结果.
+
+        主站侧需区分并记录：激活确认 (ACTCON)、激活终止 (ACTTERM)、
+        否定确认 (PN=1)、以及应答超时未回（超时由 ``MasterEngine`` 侧与 SBO
+        同一机制的应答等待判定并写入状态）。
+
+        - P_ME_NA_1 / P_ME_NB_1 / P_ME_NC_1 / P_ME_ND_1 → 记入 ``load`` 维度
+        - P_AC_NA_1 → 记入 ``activation`` 维度
+        """
+        e = self._engine
+        cot = asdu.cot
+        pn = asdu.pn
+        kind = "activation" if asdu.type_id == TypeID.P_AC_NA_1 else "load"
+        for obj in asdu.objects:
+            logger.info(
+                f"Parameter Command ACK: type={asdu.type_id} IOA={obj.ioa} "
+                f"COT={cot} pn={pn}"
+            )
+            e._record_parameter_ack(obj.ioa, kind, cot, pn)
+        if not asdu.objects:
+            logger.info(f"Parameter Command ACK: type={asdu.type_id} COT={cot} (no objects)")
 
     def process_step_position(self, asdu: ASDU) -> None:
         """处理步位置信息."""
