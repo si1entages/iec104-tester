@@ -55,7 +55,7 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 ### 编码风格
 - 协议层: 纯同步 struct.pack/unpack，无 async，无 GUI 依赖
 - 引擎层: asyncio，通过 core/transport 管理 TCP 连接
-- GUI 层已移除 PySide6；界面为 webui/（HTML/CSS + aiohttp），纯 web 形态——浏览器是唯一 UI，无桌面壳（pywebview 已移除）
+- GUI 层已移除（原桌面框架）；界面为 webui/（HTML/CSS + aiohttp），纯 web 形态——浏览器是唯一 UI，无桌面壳
 - 入口层 app.py 提供统一 Web 入口 `run_web()`：启动服务后台线程轮询端口就绪后再打开浏览器；`--no-browser` 关闭自动打开
 - 后台任务: 引擎层统一用 `_spawn()` 创建，保留任务引用并记录异常
 - 响应注入: `ResponseBehavior` 承载延迟/丢帧/损坏/不响应/品质/错误 COT；错误 COT 由 `SlaveEngine._reply_cot()` 统一处理（应答 COT +1，配置项 `errors.wrong_cot`）
@@ -65,7 +65,7 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - UI 风格: 浅色工业风（ISA-101 高性能 HMI）——中性浅灰底、颜色只用于状态与类型标签、扁平无装饰、禁用态显式灰化、字段带标签；点表全边框 + 表头/单元格统一左对齐 + 数值等宽
 - 状态一致性: 任何会改变服务端状态的分支（含"已是该状态"的空操作）都必须广播事件，前端据此重新对齐；前端另加 5s 兜底轮询，保证最终一致
 - 帧格式必须字节级对照标准: APCICodec 编码端曾把 S 帧 SS 的 bit0 置 1，自家解码 `>> 1` 掩掉后互通自洽，真机按标准校验直接断开。编码与解码要**独立对照标准**，不能只对拍
-- 真机兼容性: 部分装置每次连接都发 EI 并高频推流，收到主站 I 帧会断开——自动重 GI 默认关（`auto_gi_on_init_end`）；对这类装置用 `qa_verify/qa_real_device.py` 做只读验证
+- 真机兼容性: 部分装置每次连接都发 EI 并高频推流，收到主站 I 帧会断开——自动重 GI 默认关（`auto_gi_on_init_end`）；对这类装置用 `tests/e2e/qa_real_device.py` 做只读验证
 - IOA 一律按**十进制**表示与存储（点表 YAML/界面/实时库）；标准不规定遥信遥测的 IOA 范围，地址规划是项目约定——写点表时注意别把十六进制字面量当十进制（0x4001=16385≠4001）
 - 遥测不刷新先查**设备是否自发上送**：实测有真机只回总召唤数据（静默 70s 零遥测帧），此时用周期总召，不要误判为主站解析/更新问题
 - 协议完整性: `TypeID` 枚举里**每个类型都必须同时有解码注册与 ASDUBuilder 构造器**（否则就是"能解不能发"的半实现）；新增类型时用 `tests/test_protocol_type_coverage.py` 的护栏用例兜底
@@ -87,7 +87,7 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - [x] MultiStationManager 共享事件循环稳定性验证
 - [x] 修复 slave/master/transport stop 时 wait_closed 挂起（加超时）
 - [x] Web UI：apps/web_master + apps/web_slave 瘦入口，统一走 app.py `cli()`
-- [x] 纯 web 形态：移除 pywebview 桌面壳 / `--no-shell` / web_lab 一键联调；浏览器自动打开
+- [x] 纯 web 形态：移除桌面壳 / `--no-shell` / web_lab 一键联调；浏览器自动打开
 - [x] Web API：组召唤/复位/测试/读/参数/文件 + 点表 YAML/CSV/会话导出
 - [x] PyInstaller 脚本 build/build_all.py（iec104-master / iec104-slave）
 - [x] wrong_cot 注入落到 ASDU 构建（子站应答 COT 整体 +1，含 Web UI 开关）
@@ -101,12 +101,12 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - [x] 修「断开/停止」点不了：按钮可用性改由服务端状态驱动（`status.started`），刷新页面后与后端保持一致
 - [x] 修「按钮可点但没效果」：状态变更的空操作分支也必须广播事件（`bridge._notify_ui`），前端操作后立即 + 每 5s 兜底对齐状态
 - [x] Web UI 改浅色工业风（ISA-101 高性能 HMI 范式）：点表全边框·统一左对齐·等宽数值、禁用态显式灰化、状态栏字段带标签
-- [x] 全流程验收脚本 `qa_verify/qa_full_flow.py`（12 项：复位→启动→系统命令→控制→参数文件→模拟→注入→点表→多客户端→前端→关停重连）
+- [x] 全流程验收脚本 `tests/e2e/qa_full_flow.py`（12 项：复位→启动→系统命令→控制→参数文件→模拟→注入→点表→多客户端→前端→关停重连）
 - [x] 修 S 帧 SS 字段 bit0 被置 1（`encode_s | 0x01`）：自测互通掩盖、真机收到即断开（`tests/test_apci_s_frame.py` 字节级断言）
 - [x] 修 t1 超时后永不重连（`_on_timer_expired` 误用 `client.stop()`，改 `disconnect()`）
 - [x] 主站点表导入（YAML/CSV/JSON，`/api/points/import` + UI「导入点表」按钮，与导出 CSV 回环兼容）
 - [x] 初始化结束(M_EI_NA_1)联动：日志释义「当地电源合上」等；自动重 GI 可配置（`auto_gi_on_init_end`，默认关——实测部分真机收主站 I 帧即断开）
-- [x] 真机功能测试脚本 `qa_verify/qa_real_device.py`（对运行中的主站跑只读类功能矩阵）
+- [x] 真机功能测试脚本 `tests/e2e/qa_real_device.py`（对运行中的主站跑只读类功能矩阵）
 - [x] 主站点位自学习（`auto_add_points` 默认开）：按报文解析结果自动补定义表点位（遥信/遥测/遥脉），解决"真机点位不在定义表导致界面无值"
 - [x] 周期总召唤（`gi_interval`，默认 0=关；UI「周期总召(秒)」）：对"从不自发上送遥测、只有总召才回数据"的真机是必要手段（实测 20s 间隔 → 80 个遥测点 45s 内全刷新）
 - [x] 结构化日志模块 `core/logging_manager.py`：分级/分类/来源，内存环形缓冲 + JSONL 会话文件（轮转）+ Python logging 桥 + Web「日志」面板（过滤/搜索/导出）

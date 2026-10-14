@@ -9,11 +9,11 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/WebUI-aiohttp-41CD52" alt="Web UI">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/IEC--104-Complete-brightgreen.svg" alt="IEC 104">
-  <img src="https://img.shields.io/badge/Tests-482-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-489-brightgreen.svg" alt="Tests">
 </p>
 
 ---
@@ -59,10 +59,10 @@
 
 ### 测试
 
-- 单元 + 集成：`pytest tests/`（**482**，含 Web API、协议符合性、类型覆盖与日志模块用例）
-- 全流程验收：`python qa_verify/qa_full_flow.py [--shots]`（从零复位→启动→系统/控制命令→参数文件→模拟→注入→点表→多客户端→前端→关停重连，可选截图）
-- 前端：`node qa_verify/qa_webui_dom.mjs`（Node 沙箱真跑页面脚本：按钮绑定 + 按钮状态同步 + WS 实时刷新 + CSS 覆盖检查）
-- 真机联调：`python qa_verify/qa_joint_debug.py`（对运行中的主/子站逐项下发并逐帧核对）
+- 单元 + 集成：`pytest tests/`（**489**，含 Web API、协议符合性、类型覆盖、日志模块与报告生成器用例）
+- 全流程验收：`python tests/e2e/qa_full_flow.py [--shots]`（从零复位→启动→系统/控制命令→参数文件→模拟→注入→点表→多客户端→前端→关停重连，可选截图）
+- 浏览器/WS 端到端：`python tests/e2e/qa_webui_e2e.py --spawn`（真实 HTTP/WS 双端联调：SBO 两段式/直发、设点、错误 COT 注入）
+- 真机功能矩阵：`python tests/e2e/qa_real_device.py`（对运行中的主站跑只读类功能并核对应答）
 - 一致性：`tests/conformance/test_conformance.py`（42 用例）
 - 脚本：`run_tests.py tests/scripts/`（YAML 动作 + 断言）
 
@@ -132,14 +132,19 @@ python sim_tool.py --preset poor_wifi --mode master --host 127.0.0.1
 
 | 参数 | 说明 | 默认 |
 |------|------|------|
-| `--mode` | master / slave | master |
-| `--host` / `--port` | TCP | 127.0.0.1:2404 |
-| `--point-table` | 点表 YAML | — |
-| `--no-gui` | 仅 CLI | false |
-| `--test` | 测试脚本文件/目录 | — |
-| `--log-level` | DEBUG…ERROR | INFO |
+| `--mode` | 运行模式 master / slave | master |
+| `--config` | 配置文件路径 (YAML) | — |
+| `--host` / `--port` | 目标 TCP 地址 / 端口 | 127.0.0.1 / 2404 |
+| `--point-table` | 点表文件路径 (YAML) | — |
+| `--log-level` | 日志级别 DEBUG…ERROR | INFO |
+| `--log-file` | 日志文件路径 | — |
+| `--history-db` | 历史数据库路径 (SQLite) | — |
+| `--no-gui` | headless CLI 模式（仅日志输出） | false |
+| `--test` | 运行自动化测试脚本 (YAML 文件或目录) | — |
+| `--http-port` | Web UI HTTP 端口 | 主站 8765 / 子站 8766 |
+| `--no-browser` | 启动 Web 服务时不自动打开浏览器 | false |
 
-Web UI 入口另支持 `--http-port`（默认主站 8765、子站 8766）与 `--no-browser`（不自动打开浏览器）。
+> 共 12 个参数，与 `python app.py --help` 一致。`--http-port` / `--no-browser` 仅 Web UI 入口生效。
 
 ## ⚙️ 配置
 
@@ -196,6 +201,8 @@ iec104-tester/
 ├── configs/ resources/ tests/ build/
 └── requirements.txt
 ```
+
+> 详细架构、依赖规则与任务分解见 [`docs/architecture_plan.md`](docs/architecture_plan.md)。
 
 ## 🤝 贡献 / 许可
 

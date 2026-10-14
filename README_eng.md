@@ -9,11 +9,11 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/WebUI-aiohttp-41CD52" alt="Web UI">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/IEC--104-Complete-brightgreen.svg" alt="IEC 104">
-  <img src="https://img.shields.io/badge/Tests-482-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-489-brightgreen.svg" alt="Tests">
 </p>
 
 ---
@@ -49,10 +49,10 @@ Industrial IEC 60870-5-104 testing tool: browser-based **Web UI** (master + slav
 
 ### Tests
 
-- `pytest tests/` (**482** including Web API, protocol conformance, type-coverage, mechanism and logging tests), conformance suite (42), YAML scripts
-- Full-flow acceptance: `python qa_verify/qa_full_flow.py [--shots]` (reset → start → system/control commands → params & files → simulation → injection → point table → multi-client → frontend → shutdown/reconnect)
-- Frontend: `node qa_verify/qa_webui_dom.mjs` (runs page scripts in a Node DOM sandbox: button wiring, button-state sync, WS live refresh, CSS coverage)
-- Live interop: `python qa_verify/qa_joint_debug.py` (drives a running master/slave pair and checks every frame)
+- `pytest tests/` (**489** including Web API, protocol conformance, type-coverage, mechanism, logging and report-generator tests), conformance suite (42), YAML scripts
+- Full-flow acceptance: `python tests/e2e/qa_full_flow.py [--shots]` (reset → start → system/control commands → params & files → simulation → injection → point table → multi-client → frontend → shutdown/reconnect)
+- Browser/WS end-to-end: `python tests/e2e/qa_webui_e2e.py --spawn` (real HTTP/WS dual-end interop: SBO two-stage/direct, setpoint, wrong-COT injection)
+- Real-device matrix: `python tests/e2e/qa_real_device.py` (runs read-only functions against a running master and checks responses)
 
 ## Quick start
 

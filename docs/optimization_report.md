@@ -147,13 +147,13 @@ async def _send_command_asdu(self, asdu_data: bytes) -> None:
 
 ---
 
-### 10. build/ 引用未声明 PySide6
+### 10. build/ 引用未使用的桌面 GUI 框架
 
 **位置**: `build/build.py:18-22`、`build/build_linux.py:25-29`、`build/build_windows.py:29-33`
 
-**问题**: 打包脚本添加了 `--hidden-import PySide6.*` 和 `--collect-all PySide6`，但项目实际使用 aiohttp + pywebview，不是 PySide6。这些隐藏导入是死代码，增加数百 MB 打包体积。
+**问题**: 打包脚本添加了旧桌面 GUI 框架的 `--hidden-import` 与 `--collect-all` 行，但项目实际使用 aiohttp（纯 Web），并未使用该框架。这些隐藏导入是死代码，增加数百 MB 打包体积。
 
-**修复方案**: 删除所有 PySide6 相关的 hidden-import 和 collect-all 行；替换为 pywebview 相关导入。
+**修复方案**: 删除所有该框架相关的 hidden-import 和 collect-all 行。
 
 ---
 

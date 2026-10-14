@@ -3,7 +3,7 @@ name = "iec104-tester"
 version = "1.0.0"
 description = "IEC 60870-5-104 协议测试工具 — 主站/子站模拟器"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
     {name = "IEC104 Tester"}
@@ -21,6 +21,7 @@ build = [
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
+    "pytest-cov>=5.0",
     "ruff>=0.6",
 ]
 
@@ -36,7 +37,7 @@ include = ["core*", "webui*"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 extend-exclude = ["venv", "build/dist", "test_reports"]
 
 [tool.ruff.lint]
@@ -54,6 +55,7 @@ ignore = [
     "SIM105", # try/except/pass 有时是有意为之的降级
     "SIM102", # 嵌套 if 合并 — 协议分支代码拆开更可读
     "SIM108", # 三元表达式强制 — if/else 块在协议代码中更清晰
+    "UP041",  # asyncio.TimeoutError 在 3.11+ 即内置 TimeoutError；Phase 0 不改业务源码，保留原写法
 ]
 
 [tool.ruff.lint.per-file-ignores]

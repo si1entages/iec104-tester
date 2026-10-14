@@ -1,0 +1,59 @@
+station_name: QA Joint Debug
+common_addr: 1
+yx:
+- ioa: 1
+  name: YX_0001
+  group: 1
+  enabled: true
+  type: single
+  initial_value: false
+  inverted: false
+- ioa: 2001
+  name: YX_2001_PAIRED_WITH_YK_SBO
+  group: 1
+  enabled: true
+  type: single
+  initial_value: false
+  inverted: false
+- ioa: 2002
+  name: YX_2002_PAIRED_WITH_YK_DIRECT
+  group: 1
+  enabled: true
+  type: single
+  initial_value: false
+  inverted: false
+yc:
+- ioa: 4001
+  name: YC_4001
+  group: 1
+  enabled: true
+  type: short_float
+  initial_value: 0.0
+  min_value: -99999.0
+  max_value: 99999.0
+  dead_band: 0.0
+  unit: ''
+  scale: 1.0
+  offset: 0.0
+  decimal_places: 2
+yk:
+- ioa: 2001
+  name: YK_SBO_TRUE
+  group: 1
+  enabled: true
+  type: single
+  sbo: true
+  timeout_ms: 10000
+- ioa: 2002
+  name: YK_DIRECT
+  group: 1
+  enabled: true
+  type: single
+  sbo: false
+  timeout_ms: 10000
+ym:
+- ioa: 3001
+  name: YM_3001
+  group: 1
+  enabled: true
+  initial_value: 0

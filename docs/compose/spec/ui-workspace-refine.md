@@ -23,7 +23,7 @@ commits: 912c97c..912c97c
 ## [S2] Design
 
 ### S2.1 深色 Only
-- `gui/common/theme.py`：`get_theme()` 固定返回深色
+- 桌面公共模块 `theme.py`：`get_theme()` 固定返回深色
 - 主站/子站菜单去掉「浅色主题」；保留深色或直接去掉主题菜单
 - `apps/*_main.py` 的 `--theme` 仅接受 `dark`（或忽略 light）
 

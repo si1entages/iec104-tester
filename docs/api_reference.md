@@ -6,7 +6,7 @@
 2. [引擎层 API](#2-引擎层-api)
 3. [传输层 API](#3-传输层-api)
 4. [数据层 API](#4-数据层-api)
-5. [GUI 组件 API](#5-gui-组件-api)
+5. [Web UI API](#5-web-ui-api)
 
 ---
 
@@ -420,9 +420,18 @@ print(f"遥测数: {stats['yc_count']}")
 
 ---
 
-## 5. Web UI / 引擎桥 API
+## 5. Web UI API
 
-> 旧 PySide6 `gui/` 已移除，界面为 `webui/`（aiohttp REST + WebSocket + 静态页）。
+Web 界面为**纯浏览器形态**（aiohttp REST + WebSocket + 前端静态页），后端由以下模块组成：
+
+| 模块 | 职责 |
+|------|------|
+| [`webui/api_contract.md`](../webui/api_contract.md) | **REST/WS 契约表**（约 35 个端点，含请求/响应与 WS 消息形状） |
+| [`webui/server.py`](../webui/server.py) | aiohttp 路由装配：`create_app()` / `run_server()` |
+| [`webui/bridge.py`](../webui/bridge.py) | `EngineBridge` 门面（组合 session/points/events，保持对外 API 形状） |
+| [`webui/session.py`](../webui/session.py) | `EngineSession`：主站/子站启停与协议命令门面 |
+| [`webui/points.py`](../webui/points.py) | `PointService`：点表快照/批量/导入导出，同步引擎 |
+| [`core/logging_manager.py`](../core/logging_manager.py) | 结构化日志（内存环形缓冲 + JSONL 轮转 + 订阅推送），供「日志」面板使用 |
 
 ```python
 from webui.bridge import EngineBridge
@@ -430,10 +439,11 @@ from webui.server import create_app, run_server
 
 bridge = EngineBridge(role="master")  # 或 "slave"
 app = create_app(bridge)
-# 桌面壳: apps/web_master.py / apps/web_slave.py
+run_server(role="master", host="127.0.0.1", port=8765)
+# 瘦入口: apps/web_master.py / apps/web_slave.py
 ```
 
-### HTTP 摘要
+### REST 摘要
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -441,7 +451,15 @@ app = create_app(bridge)
 | POST | `/api/slave/start\|stop\|yx\|yc\|response\|sim` | 子站操作 |
 | GET/POST | `/api/points`、`/api/points/yaml`、`/api/points/batch` | 点表 |
 | GET | `/api/export/points.csv`、`/api/export/session.json` | 导出 |
-| GET | `/ws` | 实时帧/事件推送 |
+| GET | `/api/logs`、`/api/logs/export` | 日志查询 / JSONL 导出 |
+
+### WebSocket
+
+| 路径 | 说明 |
+|------|------|
+| `/ws` | 先推 `snapshot` 快照，再增量推送 `frame` / `event` / `log` 消息 |
+
+> 完整契约见 [`webui/api_contract.md`](../webui/api_contract.md)。本工具整体架构与任务分解见 [`architecture_plan.md`](architecture_plan.md)。
 
 ---
 

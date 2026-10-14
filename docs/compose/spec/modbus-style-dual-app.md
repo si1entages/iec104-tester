@@ -13,7 +13,7 @@ commits: 5f2f559..5f2f559
 
 ## Report
 
-**What was built** — 将单一 `app.py --mode` 工具拆成可并开的双窗口应用：`gui/master_app`（主站客户端）与 `gui/slave_app`（子站服务端），共享 `core/` 引擎与 `gui/common/`（主题、连接/监听栏、状态条）。入口为 `apps/master_main.py`、`apps/slave_main.py`；`app.py` 默认打开新界面，`--legacy-ui` 保留旧一体化 GUI。主站支持定义表、遥控/设点、周期 GI、报文/趋势/录制；子站支持可编辑点表（双击改值并自发上送）、客户端列表、ResponseBehavior、模拟。PyInstaller 脚本产出 `iec104-master` / `iec104-slave`。
+**What was built** — 将单一 `app.py --mode` 工具拆成可并开的双窗口应用：旧的桌面主站应用（主站客户端）与旧的桌面子站应用（子站服务端），共享 `core/` 引擎与桌面公共模块（主题、连接/监听栏、状态条）。入口为 `apps/master_main.py`、`apps/slave_main.py`；`app.py` 默认打开新界面，`--legacy-ui` 保留旧一体化界面。主站支持定义表、遥控/设点、周期 GI、报文/趋势/录制；子站支持可编辑点表（双击改值并自发上送）、客户端列表、ResponseBehavior、模拟。PyInstaller 脚本产出 `iec104-master` / `iec104-slave`。
 
 **Verification** — `pytest tests/ -q` → **224 passed**；offscreen 冒烟 Master/Slave 窗口标题与 Signal 挂接 OK。Review 后已修复：跨线程 UI 回调改为 Signal 编组；GUI 线程改值经 `run_coroutine` 发自发上送；启动前 ResponseBehavior 落盘并应用；去除 Poll 残留命名。
 
@@ -35,7 +35,7 @@ commits: 5f2f559..5f2f559
 | IEC104 主站 | 主站客户端 | `apps/master_main.py` → iec104-master |
 | IEC104 子站 | 子站服务端 | `apps/slave_main.py` → iec104-slave |
 
-布局：`gui/common` + `gui/master_app` + `gui/slave_app` + `build/build_all.py`。
+布局：桌面公共模块 + 桌面主站应用 + 桌面子站应用 + `build/build_all.py`。
 
 主站：连接栏/定义表/命令面板/报文|日志|趋势|录制；「连本地」填 127.0.0.1。
 子站：监听栏/可编辑点表/客户端列表/ResponseBehavior/模拟。
@@ -48,7 +48,7 @@ UI：Catppuccin 主题、布局 QSettings、Toast；引擎回调经 Qt Signal �
 
 ## Tasks
 
-- [x] T1: apps + gui/common 骨架与主题 — acceptance: 双入口可启动窗口 (covers: S2, S2.5)
+- [x] T1: apps + 桌面公共模块 骨架与主题 — acceptance: 双入口可启动窗口 (covers: S2, S2.5)
 - [x] T2: 主站连接栏 + 引擎 + 状态栏 — acceptance: 可连接，状态灯/k-w 正确 (covers: S2.1; depends: T1)
 - [x] T3: 主站定义表 + 命令面板 + 周期 GI — acceptance: 可编辑、可发令、总召进数 (covers: S2.1; depends: T2)
 - [x] T4: 主站报文/日志/趋势/录制页签 — acceptance: 帧可见可过滤 (covers: S2.1, S2.4; depends: T2)

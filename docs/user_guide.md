@@ -45,7 +45,7 @@ IEC 60870-5-104 测试工具是一款面向电力系统 SCADA 调试和测试的
 
 ### 环境要求
 
-- Python 3.10 或更高版本
+- Python 3.11 或更高版本
 - 操作系统：Windows / Linux / macOS
 
 ### 安装步骤
@@ -265,7 +265,7 @@ python app.py --mode slave --no-gui --log-level DEBUG --log-file slave.log
 ### 录制报文
 
 ```bash
-# GUI 中点击工具栏 "录制" 按钮
+# Web UI 中点击工具栏 "录制" 按钮
 # 或使用命令行：
 python capture_tool.py record --mode master --host 127.0.0.1 -o session.i104
 ```
@@ -525,7 +525,7 @@ A: 可能原因：
 ### Q: 如何录制报文？
 
 A: 两种方式：
-1. GUI 中点击工具栏 "录制" 按钮
+1. Web UI 中点击工具栏 "录制" 按钮
 2. 命令行使用 `capture_tool.py record`
 
 ### Q: 如何模拟网络异常？
