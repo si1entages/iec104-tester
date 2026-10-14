@@ -277,7 +277,33 @@ class EngineBridge:
         return self.bus.export_session(self.role, self.status())
 
     async def shutdown(self) -> None:
-        await self.session.shutdown()
+        """关停桥接：停引擎、回收后台任务、清空订阅队列与日志桥接（幂等）.
+
+        必须在事件循环关闭前调用。顺序：
+
+        1. ``session.shutdown()`` —— 停引擎（含 socket ``wait_closed`` 有界等待）
+           并回收引擎残留后台任务 / 调度器 / 已登记的多站管理器；
+        2. 断开日志桥接订阅，避免关停后仍有回调向已废弃的总线投递；
+        3. 清空 WebSocket/订阅队列集合，释放订阅者及其内部缓冲。
+        """
+        # 1) 引擎与会话资源
+        try:
+            await self.session.shutdown()
+        except Exception as e:
+            logger.warning("session shutdown: %s", e)
+
+        # 2) 断开日志 → 总线桥接
+        try:
+            self.logs.unsubscribe(self._on_log_entry)
+        except Exception as e:
+            logger.warning("log bridge detach: %s", e)
+
+        # 3) 清空订阅者队列集合（EventBus 无 clear()，经 unsubscribe 逐个移除）
+        for q in list(getattr(self.bus, "_subscribers", ())):
+            try:
+                self.bus.unsubscribe(q)
+            except Exception:
+                pass
 
     async def _cmd(self, coro) -> dict:
         try:

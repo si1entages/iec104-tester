@@ -45,6 +45,16 @@ class EngineSession:
         self.simulation = False
         self._on_event = on_event
         self._on_frame = on_frame
+        # 可选：随 Web 会话关停一并回收的多站管理器（T07 显式回收路径）
+        self._multi_station: Any | None = None
+
+    def attach_multi_station(self, manager: Any) -> None:
+        """登记多站管理器，使其随 Web 会话关停被彻底回收.
+
+        由 Web 侧在启用多站并发模拟时调用；``shutdown()`` 会 await 其
+        ``stop_all()``，释放各子站引擎、监听端口与后台任务。
+        """
+        self._multi_station = manager
 
     def _hook_master(self, event: MasterEvent, data: dict) -> None:
         self._on_event(event.value, jsonable(data))
@@ -98,6 +108,7 @@ class EngineSession:
             await asyncio.wait_for(eng.stop(), timeout=6)
         except Exception as e:
             logger.warning("master stop: %s", e)
+        await self._reap_engine(eng)
         return {"ok": True}
 
     async def start_slave(self, host: str, port: int, addr: int,
@@ -127,13 +138,41 @@ class EngineSession:
             await asyncio.wait_for(eng.stop(), timeout=8)
         except Exception as e:
             logger.warning("slave stop: %s", e)
+        await self._reap_engine(eng)
         return {"ok": True}
+
+    async def _reap_engine(self, eng: Any) -> None:
+        """引擎关停后的彻底回收：停调度器 + 取消并等待残留后台任务.
+
+        ``eng.stop()`` 只取消其已知长驻任务；本方法补齐对调度器与
+        ``_background_tasks`` 中短驻任务的回收，避免事件循环关闭时出现
+        "Task was destroyed but it is pending!" 与资源泄漏。幂等。
+        """
+        scheduler = getattr(eng, "_scheduler", None)
+        if scheduler is not None and getattr(scheduler, "is_running", False):
+            try:
+                await scheduler.stop()
+            except Exception as e:
+                logger.warning("scheduler stop: %s", e)
+        aclose = getattr(eng, "aclose_background_tasks", None)
+        if aclose is not None:
+            try:
+                await aclose()
+            except Exception as e:
+                logger.warning("background task reap: %s", e)
 
     async def shutdown(self) -> None:
         if self.role == "master":
             await self.stop_master()
         else:
             await self.stop_slave()
+        # 多站管理器（若已登记）：释放各子站引擎、监听端口与后台任务
+        if self._multi_station is not None:
+            try:
+                await self._multi_station.stop_all()
+            except Exception as e:
+                logger.warning("multi-station shutdown: %s", e)
+            self._multi_station = None
 
     def status_fields(self) -> dict:
         """状态字段.
