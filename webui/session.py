@@ -69,7 +69,8 @@ class EngineSession:
         return self.engine  # type: ignore[return-value]
 
     async def start_master(self, host: str, port: int, addr: int,
-                           reconnect: bool, points: Any) -> dict:
+                           reconnect: bool, points: Any,
+                           gi_interval: float = 0.0) -> dict:
         if self.engine:
             return {"ok": False, "error": "already running"}
         eng = MasterEngine(
@@ -77,6 +78,7 @@ class EngineSession:
             auto_start=True, auto_gi=False, reconnect=reconnect,
             reconnect_interval=5.0,
             point_table=getattr(points, "table", None),
+            gi_interval=float(gi_interval or 0.0),
         )
         eng.set_event_callback(self._hook_master)
         eng.set_raw_frame_callback(self._hook_frame_master)

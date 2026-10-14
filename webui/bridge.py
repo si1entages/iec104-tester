@@ -147,9 +147,11 @@ class EngineBridge:
         """
         self.bus.publish("event", {"type": "ui", "data": {"msg": msg}})
 
-    async def start_master(self, host: str, port: int, addr: int, reconnect: bool = True) -> dict:
+    async def start_master(self, host: str, port: int, addr: int, reconnect: bool = True,
+                           gi_interval: float = 0.0) -> dict:
         self.ensure_demo_points()
-        r = await self.session.start_master(host, port, addr, reconnect, self.points)
+        r = await self.session.start_master(host, port, addr, reconnect, self.points,
+                                            gi_interval=gi_interval)
         if r.get("ok"):
             self._status.update({"running": True, "host": host, "port": port})
             self._notify_ui(f"连接中 {host}:{port}")

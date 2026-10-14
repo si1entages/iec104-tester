@@ -23,6 +23,8 @@
     <button class="btn" id="btn-clock" disabled>时钟同步</button>
     <button class="btn" id="btn-reset" disabled>复位</button>
     <button class="btn" id="btn-test" disabled>测试</button>
+    <span class="muted" title="对只在总召时才回遥测的装置，可设周期自动召唤（秒，0=关闭）">周期总召(秒)</span>
+    <input id="gi-interval" type="number" min="0" step="1" value="0" style="width:64px" />
   </header>
 
   <main class="main">
@@ -198,6 +200,7 @@ function isValidQoi(v) {
 $("#btn-conn").onclick = async () => {
   const r = await api("/api/master/start", {
     host: $("#host").value, port: +$("#port").value, addr: +$("#addr").value,
+    gi_interval: +$("#gi-interval").value || 0,
   });
   toast(r.ok ? "正在连接…" : r.error || "失败");
   if (r.ok) {

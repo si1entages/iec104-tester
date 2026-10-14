@@ -94,11 +94,16 @@ def create_app(bridge: EngineBridge) -> web.Application:
         addr = body.get("addr", 1)
         if not isinstance(addr, int) or addr < 0:
             return web.json_response({"ok": False, "error": "invalid addr"}, status=400)
+        gi_interval = body.get("gi_interval", 0)
+        if not isinstance(gi_interval, (int, float)) or gi_interval < 0:
+            return web.json_response({"ok": False, "error": "invalid gi_interval"},
+                                     status=400)
         r = await bridge.start_master(
             host,
             port,
             addr,
             bool(body.get("reconnect", True)),
+            float(gi_interval),
         )
         return web.json_response(r)
 

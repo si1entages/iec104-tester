@@ -22,7 +22,14 @@ from typing import Any
 
 from ..data.data_store import RealtimeDB
 from ..data.history import HistoryDB
-from ..data.point_table import PointTable
+from ..data.point_table import (
+    PointTable,
+    YcPointDef,
+    YcType,
+    YmPointDef,
+    YxPointDef,
+    YxType,
+)
 from ..protocol.apci import APCI, APCICodec
 from ..protocol.asdu import ASDU, ASDUBuilder
 from ..protocol.file_transfer import FileTransferMaster, FileTransferState
@@ -97,6 +104,8 @@ class MasterEngine(EngineBase):
         # 默认关闭：实测部分真机在收到主站 I 帧后会断开或停摆数据流，
         # 自动重 GI 会造成「重连→EI→GI→被断开」的无限循环。对这类装置请保持
         # 关闭，改为手动总召唤；对支持该语义的装置可开启。
+        auto_add_points: bool = True,   # 按报文解析结果自动补充定义表点位（点位自学习）
+        gi_interval: float = 0.0,       # 周期总召唤间隔（秒），0=不周期召唤
         reconnect: bool = True,
         reconnect_interval: float = 5.0,
         history_db: HistoryDB | None = None,
@@ -109,6 +118,9 @@ class MasterEngine(EngineBase):
         self._auto_start = auto_start
         self._auto_gi = auto_gi
         self._auto_gi_on_init_end = auto_gi_on_init_end
+        self._auto_add_points = auto_add_points
+        self._gi_interval = float(gi_interval or 0.0)
+        self._periodic_gi_task: asyncio.Task | None = None
 
         # 协议组件
         self._seq = SequenceManager(k=k, w=w)
@@ -268,6 +280,15 @@ class MasterEngine(EngineBase):
 
         # 停止调度器
         await self._scheduler.stop()
+
+        # 停止周期总召唤
+        if self._periodic_gi_task:
+            self._periodic_gi_task.cancel()
+            try:
+                await asyncio.wait_for(self._periodic_gi_task, timeout=2.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+                pass
+            self._periodic_gi_task = None
 
         if self._timer_task:
             self._timer_task.cancel()
@@ -1090,6 +1111,10 @@ class MasterEngine(EngineBase):
             if self._auto_gi:
                 self._spawn(self._auto_general_interrogation())
 
+            # 周期总召唤（对"只在总召时才回遥测"的装置是必要手段）
+            if self._gi_interval > 0 and not self._periodic_gi_task:
+                self._periodic_gi_task = self._spawn(self._periodic_gi_loop())
+
         elif apci.is_stopdt_con:
             self._state_machine.on_stopdt_con()
             logger.info("STOPDT CON received")
@@ -1283,8 +1308,64 @@ class MasterEngine(EngineBase):
             "objects": asdu.objects,
         })
 
+    # ── 点位自学习 ────────────────────────────────────────────────
+
+    # 数据类型 → 遥信/遥测/遥脉的映射（用于自动补充定义表）
+    _YX_SINGLE_TYPES = {TypeID.M_SP_NA_1, TypeID.M_SP_TA_1, TypeID.M_SP_TB_1}
+    _YX_DOUBLE_TYPES = {TypeID.M_DP_NA_1, TypeID.M_DP_TA_1, TypeID.M_DP_TB_1}
+    _YC_NORMALIZED_TYPES = {TypeID.M_ME_NA_1, TypeID.M_ME_TA_1,
+                            TypeID.M_ME_TD_1, TypeID.M_ME_ND_1}
+    _YC_SCALED_TYPES = {TypeID.M_ME_NB_1, TypeID.M_ME_TB_1, TypeID.M_ME_TE_1}
+    _YC_SHORT_TYPES = {TypeID.M_ME_NC_1, TypeID.M_ME_TC_1, TypeID.M_ME_TF_1}
+    _YM_TYPES = {TypeID.M_IT_NA_1, TypeID.M_IT_TA_1, TypeID.M_IT_TB_1}
+
+    def _ensure_points_defined(self, asdu: ASDU) -> None:
+        """按报文解析结果自动补充定义表（点位自学习，**默认开启**）.
+
+        真机点位规划与本地定义表往往不一致（实测：设备的遥测在 IOA 16385+，
+        本地表只有 4001 等）——值其实已进实时库，只是定义表没有该点位导致
+        界面不显示。这里把数据帧中出现、定义表缺失的 IOA 自动补齐：
+        单/双点遥信 → YX、归一化/标度化/短浮点 → YC、累计量 → YM，
+        命名 ``遥信<IOA>`` / ``遥测<IOA>`` / ``遥脉<IOA>``。
+        """
+        if not self._auto_add_points:
+            return
+        table = self._point_table
+        if table is None:
+            table = PointTable()
+            self._point_table = table
+
+        added: list[str] = []
+        tid = asdu.type_id
+        for obj in asdu.objects:
+            ioa = obj.ioa
+            if tid in self._YX_SINGLE_TYPES and table.get_yx(ioa) is None:
+                table.add_yx(YxPointDef(ioa=ioa, name=f"遥信{ioa}", group=1,
+                                        point_type=YxType.SINGLE))
+                added.append(f"YX:{ioa}")
+            elif tid in self._YX_DOUBLE_TYPES and table.get_yx(ioa) is None:
+                table.add_yx(YxPointDef(ioa=ioa, name=f"遥信{ioa}", group=1,
+                                        point_type=YxType.DOUBLE))
+                added.append(f"YX(双点):{ioa}")
+            elif (tid in (self._YC_NORMALIZED_TYPES | self._YC_SCALED_TYPES
+                          | self._YC_SHORT_TYPES) and table.get_yc(ioa) is None):
+                data_type = (YcType.NORMALIZED if tid in self._YC_NORMALIZED_TYPES
+                             else YcType.SCALED if tid in self._YC_SCALED_TYPES
+                             else YcType.SHORT_FLOAT)
+                table.add_yc(YcPointDef(ioa=ioa, name=f"遥测{ioa}", group=1,
+                                        data_type=data_type))
+                added.append(f"YC:{ioa}")
+            elif tid in self._YM_TYPES and table.get_ym(ioa) is None:
+                table.add_ym(YmPointDef(ioa=ioa, name=f"遥脉{ioa}", group=1))
+                added.append(f"YM:{ioa}")
+        if added:
+            logger.info(f"Auto-added points from type={tid}: {', '.join(added[:8])}"
+                        f"{' ...' if len(added) > 8 else ''}（定义表现有 "
+                        f"{len(table.get_all_yx()) + len(table.get_all_yc()) + len(table.get_all_ym())} 点）")
+
     def _process_single_point(self, asdu: ASDU) -> None:
         """处理单点遥信."""
+        self._ensure_points_defined(asdu)
         for obj in asdu.objects:
             sp: SinglePoint = obj.data
             self._data_store.update_yx(
@@ -1299,6 +1380,7 @@ class MasterEngine(EngineBase):
 
     def _process_double_point(self, asdu: ASDU) -> None:
         """处理双点遥信."""
+        self._ensure_points_defined(asdu)
         for obj in asdu.objects:
             dp: DoublePoint = obj.data
             self._data_store.update_yx(
@@ -1313,6 +1395,7 @@ class MasterEngine(EngineBase):
 
     def _process_short_float(self, asdu: ASDU) -> None:
         """处理短浮点遥测."""
+        self._ensure_points_defined(asdu)
         for obj in asdu.objects:
             sf: ShortFloat = obj.data
             self._data_store.update_yc(
@@ -1326,6 +1409,7 @@ class MasterEngine(EngineBase):
 
     def _process_normalized(self, asdu: ASDU) -> None:
         """处理归一化遥测."""
+        self._ensure_points_defined(asdu)
         for obj in asdu.objects:
             nv: NormalizedValue = obj.data
             self._data_store.update_yc(
@@ -1334,6 +1418,7 @@ class MasterEngine(EngineBase):
 
     def _process_scaled(self, asdu: ASDU) -> None:
         """处理标度化遥测."""
+        self._ensure_points_defined(asdu)
         for obj in asdu.objects:
             sv: ScaledValue = obj.data
             self._data_store.update_yc(
@@ -1342,6 +1427,7 @@ class MasterEngine(EngineBase):
 
     def _process_counter(self, asdu: ASDU) -> None:
         """处理累计量."""
+        self._ensure_points_defined(asdu)
         for obj in asdu.objects:
             cv: CounterValue = obj.data
             self._data_store.update_ym(
@@ -1559,6 +1645,28 @@ class MasterEngine(EngineBase):
             await self.send_startdt()
         except Exception as e:
             logger.error(f"Auto STARTDT failed: {e}")
+
+    async def _periodic_gi_loop(self) -> None:
+        """周期总召唤循环（``gi_interval > 0`` 时启用）.
+
+        部分真机**从不自发上送遥测**，只在收到总召唤时回数据（实测：静默
+        70s 内零遥测帧）。这类装置只能靠周期总召刷新遥测值。
+        仅在 Running 状态召唤；异常不影响连接。
+        """
+        try:
+            while self._gi_interval > 0:
+                await asyncio.sleep(self._gi_interval)
+                if not self._state_machine.is_running:
+                    continue
+                try:
+                    logger.info(f"Periodic GI (interval={self._gi_interval}s)")
+                    await self.general_interrogation()
+                except Exception as e:
+                    logger.warning(f"Periodic GI failed: {e}")
+        except asyncio.CancelledError:
+            raise
+        finally:
+            self._periodic_gi_task = None
 
     async def _regi_after_init(self) -> None:
         """收到初始化结束(M_EI_NA_1, COT=4)后的自动重总召唤.
