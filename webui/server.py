@@ -282,6 +282,21 @@ def create_app(bridge: EngineBridge) -> web.Application:
             value, int(body.get("qualifier", 1)),
         ))
 
+    async def api_param_state(request: web.Request) -> web.Response:
+        """单个参数 IOA 的装载/激活状态快照（T08）: ?ioa=<int>."""
+        raw = request.query.get("ioa")
+        try:
+            ioa = int(raw)
+        except (TypeError, ValueError):
+            return web.json_response({"ok": False, "error": "invalid ioa"}, status=400)
+        if ioa < 0:
+            return web.json_response({"ok": False, "error": "invalid ioa"}, status=400)
+        return web.json_response(bridge.param_state(ioa))
+
+    async def api_params(request: web.Request) -> web.Response:
+        """全部已跟踪参数的状态快照列表（T08）."""
+        return web.json_response(bridge.param_states())
+
     async def api_file(request: web.Request) -> web.Response:
         try:
             body = await request.json()
@@ -502,6 +517,55 @@ def create_app(bridge: EngineBridge) -> web.Application:
             return web.json_response({"ok": False, "error": "invalid value"}, status=400)
         return web.json_response(await bridge.slave_set_yc(ioa, value))
 
+    async def api_slave_step(request: web.Request) -> web.Response:
+        """步位置置数并自发上送 (M_ST_TB_1, COT=3)（T09）."""
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        ioa = body.get("ioa")
+        if not isinstance(ioa, int) or ioa < 0:
+            return web.json_response({"ok": False, "error": "invalid ioa"}, status=400)
+        value = body.get("value")
+        if not isinstance(value, int) or not (-64 <= value <= 63):
+            return web.json_response(
+                {"ok": False, "error": "invalid value (须为 -64..63 的整数)"}, status=400)
+        return web.json_response(await bridge.slave_set_step(ioa, value))
+
+    # ── 多站（T16）────────────────────────────────────────────────
+
+    async def api_multi_start(request: web.Request) -> web.Response:
+        """创建并启动多站管理器: body {stations: [StationConfig, ...]}."""
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        stations = body.get("stations")
+        if not isinstance(stations, list) or not stations:
+            return web.json_response(
+                {"ok": False, "error": "invalid stations (须为非空数组)"}, status=400)
+        for s in stations:
+            if not isinstance(s, dict):
+                return web.json_response(
+                    {"ok": False, "error": "invalid station entry"}, status=400)
+            if not isinstance(s.get("station_id"), str) or not s.get("station_id"):
+                return web.json_response(
+                    {"ok": False, "error": "station_id required"}, status=400)
+            port = s.get("port", 2404)
+            if not isinstance(port, int) or port < 0 or port > 65535:
+                return web.json_response(
+                    {"ok": False, "error": "invalid port"}, status=400)
+        return web.json_response(await bridge.multi_start(stations))
+
+    async def api_multi_stop(request: web.Request) -> web.Response:
+        return web.json_response(await bridge.multi_stop())
+
+    async def api_multi_status(request: web.Request) -> web.Response:
+        return web.json_response(bridge.multi_status())
+
+    async def api_multi_summary(request: web.Request) -> web.Response:
+        return web.json_response(bridge.multi_summary())
+
     async def ws_feed(request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse(heartbeat=20)
         await ws.prepare(request)
@@ -574,6 +638,8 @@ def create_app(bridge: EngineBridge) -> web.Application:
     app.router.add_post("/api/master/test", api_test)
     app.router.add_post("/api/master/read", api_read)
     app.router.add_post("/api/master/param", api_param)
+    app.router.add_get("/api/master/param_state", api_param_state)
+    app.router.add_get("/api/master/params", api_params)
     app.router.add_post("/api/master/file", api_file)
     app.router.add_get("/api/points/yaml", api_points_yaml_get)
     app.router.add_post("/api/points/yaml", api_points_yaml_put)
@@ -588,10 +654,15 @@ def create_app(bridge: EngineBridge) -> web.Application:
     app.router.add_post("/api/slave/yx", api_slave_yx)
     app.router.add_post("/api/slave/yc", api_slave_yc)
     app.router.add_post("/api/slave/ym", api_slave_ym)
+    app.router.add_post("/api/slave/step", api_slave_step)
     app.router.add_post("/api/slave/ep", api_slave_ep)
     app.router.add_post("/api/slave/ps", api_slave_ps)
     app.router.add_post("/api/slave/response", api_slave_response)
     app.router.add_post("/api/slave/sim", api_slave_sim)
+    app.router.add_post("/api/multi/start", api_multi_start)
+    app.router.add_post("/api/multi/stop", api_multi_stop)
+    app.router.add_get("/api/multi/status", api_multi_status)
+    app.router.add_get("/api/multi/summary", api_multi_summary)
     app.router.add_get("/ws", ws_feed)
     app.router.add_get("/app", app_redirect)
     app.router.add_get("/app/", app_index)

@@ -254,6 +254,31 @@ class EngineBridge:
     async def slave_set_ym(self, ioa: int, value: int) -> dict:
         return await self._cmd(self.session.slave_set_ym(ioa, value))
 
+    async def slave_set_step(self, ioa: int, value: int) -> dict:
+        return await self._cmd(self.session.slave_set_step(ioa, value))
+
+    # ── 参数状态查询（T08）────────────────────────────────────────
+
+    def param_state(self, ioa: int) -> dict:
+        return self.session.param_state(ioa)
+
+    def param_states(self) -> dict:
+        return self.session.param_states()
+
+    # ── 多站（T16）───────────────────────────────────────────────
+
+    async def multi_start(self, stations: list[dict]) -> dict:
+        return await self._cmd(self.session.multi_start(stations))
+
+    async def multi_stop(self) -> dict:
+        return await self._cmd(self.session.multi_stop())
+
+    def multi_status(self) -> dict:
+        return self.session.multi_status()
+
+    def multi_summary(self) -> dict:
+        return self.session.multi_summary()
+
     async def slave_protection_event(self, ioa: int, event_value: int = 1,
                                       with_time: bool = True) -> dict:
         return await self._cmd(self.session.slave_protection_event(ioa, event_value, with_time))

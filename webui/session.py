@@ -5,10 +5,16 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
+from dataclasses import asdict
 from typing import Any
 
 from core.config import AppConfig
 from core.engine.master import MasterEngine, MasterEvent
+from core.engine.multi_station import (
+    MultiStationConfig,
+    MultiStationManager,
+    StationConfig,
+)
 from core.engine.slave import SlaveEngine, SlaveEvent
 
 logger = logging.getLogger("iec104.webui")
@@ -25,6 +31,30 @@ def jsonable(obj: Any) -> Any:
     if isinstance(obj, (str, int, float, bool)) or obj is None:
         return obj
     return str(obj)
+
+
+def param_state_to_dict(state: Any) -> dict | None:
+    """把主站 ``ParameterState`` 快照序列化为 JSON 友好 dict（``None`` 透传）.
+
+    ``ParameterResult`` 为字符串枚举，取 ``.value``（如 ``"ok"`` / ``"timeout"``）；
+    ``*_updated_at`` 为 ``time.monotonic()`` 秒值，供前端算时长而非展示绝对时间。
+    ``ioa`` 从未下发过参数命令时返回 ``None``。
+    """
+    if state is None:
+        return None
+
+    def _result(v: Any) -> Any:
+        return v.value if hasattr(v, "value") else v
+
+    return {
+        "ioa": int(state.ioa),
+        "loadResult": _result(state.load_result),
+        "loadCot": state.load_cot,
+        "loadUpdatedAt": state.load_updated_at,
+        "activationResult": _result(state.activation_result),
+        "activationCot": state.activation_cot,
+        "activationUpdatedAt": state.activation_updated_at,
+    }
 
 
 class EngineSession:
@@ -55,6 +85,85 @@ class EngineSession:
         ``stop_all()``，释放各子站引擎、监听端口与后台任务。
         """
         self._multi_station = manager
+
+    # ── 多站（T16）───────────────────────────────────────────────
+
+    @property
+    def multi_station(self) -> MultiStationManager | None:
+        return self._multi_station
+
+    async def multi_start(self, stations: list[dict]) -> dict:
+        """创建并启动多站管理器（子站侧压力测试）.
+
+        每个元素为 ``StationConfig`` 的字段字典（``station_id`` / ``port`` 等）。
+        已存在运行中的管理器时返回业务失败（``ok=False``）。
+        """
+        if self._multi_station is not None:
+            return {"ok": False, "error": "multi already running"}
+        try:
+            cfgs = [StationConfig(**s) for s in stations]
+        except TypeError as e:
+            return {"ok": False, "error": f"invalid station config: {e}"}
+        if not cfgs:
+            return {"ok": False, "error": "no stations"}
+        ids = [c.station_id for c in cfgs]
+        if len(set(ids)) != len(ids):
+            return {"ok": False, "error": "duplicate station_id"}
+        mgr = MultiStationManager(MultiStationConfig(stations=cfgs))
+        try:
+            await mgr.start_all()
+        except Exception as e:
+            await mgr.stop_all()
+            logger.warning("multi start failed: %s", e)
+            return {"ok": False, "error": str(e)}
+        self._multi_station = mgr
+        return {"ok": True, "stations": mgr.station_count}
+
+    async def multi_stop(self) -> dict:
+        mgr = self._multi_station
+        if mgr is None:
+            return {"ok": True}
+        await mgr.stop_all()
+        self._multi_station = None
+        return {"ok": True}
+
+    def multi_status(self) -> dict:
+        mgr = self._multi_station
+        if mgr is None:
+            return {"ok": True, "running": False, "stations": []}
+        return {
+            "ok": True,
+            "running": mgr.is_running,
+            "stations": [asdict(s) for s in mgr.get_all_station_status()],
+        }
+
+    def multi_summary(self) -> dict:
+        mgr = self._multi_station
+        if mgr is None:
+            return {"ok": True, "running": False, "station_count": 0,
+                    "total_clients": 0, "uptime": 0.0, "stations": []}
+        return {"ok": True, **mgr.get_summary()}
+
+    # ── 主站参数状态查询（T08）───────────────────────────────────
+
+    def param_state(self, ioa: int) -> dict:
+        eng = self.engine
+        if self.role != "master" or eng is None or not hasattr(eng, "get_parameter_state"):
+            return {"ok": False, "error": "not connected"}
+        return {
+            "ok": True,
+            "ioa": int(ioa),
+            "state": param_state_to_dict(eng.get_parameter_state(int(ioa))),
+        }
+
+    def param_states(self) -> dict:
+        eng = self.engine
+        if self.role != "master" or eng is None or not hasattr(eng, "parameter_states"):
+            return {"ok": False, "error": "not connected"}
+        rows = [param_state_to_dict(s) for s in eng.parameter_states().values()]
+        rows = [r for r in rows if r is not None]
+        rows.sort(key=lambda r: r["ioa"])
+        return {"ok": True, "params": rows}
 
     def _hook_master(self, event: MasterEvent, data: dict) -> None:
         self._on_event(event.value, jsonable(data))
@@ -359,6 +468,12 @@ class EngineSession:
         """累计量置数并自发上送 (M_IT_TB_1, COT=3)."""
         eng = self.require_slave()
         await eng.send_spontaneous_ym(int(ioa), int(value))
+        return {"ok": True}
+
+    async def slave_set_step(self, ioa: int, value: int) -> dict:
+        """步位置置数并自发上送 (M_ST_TB_1, COT=3)."""
+        eng = self.require_slave()
+        await eng.send_spontaneous_step(int(ioa), int(value))
         return {"ok": True}
 
     async def slave_protection_event(self, ioa: int, event_value: int = 1,

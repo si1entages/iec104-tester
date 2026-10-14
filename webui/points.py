@@ -8,6 +8,7 @@ from typing import Any
 
 from core.data.point_table import (
     PointTable,
+    StepPointDef,
     YcPointDef,
     YkPointDef,
     YmPointDef,
@@ -41,6 +42,7 @@ class PointService:
             + len(self.table.get_all_yc())
             + len(self.table.get_all_yk())
             + len(self.table.get_all_ym())
+            + len(self.table.get_all_step())
         )
         return self._count
 
@@ -77,6 +79,9 @@ class PointService:
         for p in self.table.get_all_ym():
             out.append({"ioa": p.ioa, "type": "YM", "name": p.name, "group": p.group,
                         "enabled": p.enabled, "value": 0})
+        for p in self.table.get_all_step():
+            out.append({"ioa": p.ioa, "type": "STEP", "name": p.name, "group": p.group,
+                        "enabled": p.enabled, "value": 0})
         if engine is not None:
             store = getattr(engine, "data_store", None)
             if store is not None:
@@ -96,12 +101,17 @@ class PointService:
                         if d:
                             row["value"] = int(d.value)
                             row["quality"] = str(d.quality)
+                    elif row["type"] == "STEP":
+                        d = store.get_step(row["ioa"])
+                        if d:
+                            row["value"] = int(d.value)
+                            row["quality"] = str(d.quality)
         return out
 
     def batch(self, ptype: str, ioas: list[int], action: str,
               group: int | None = None, engine: Any = None) -> dict:
         ptype = (ptype or "").upper()
-        if ptype not in ("YX", "YC", "YK", "YM"):
+        if ptype not in ("YX", "YC", "YK", "YM", "STEP"):
             return {"ok": False, "error": "bad type"}
         action = (action or "").lower()
         if action not in ("enable", "disable", "group"):
@@ -116,6 +126,7 @@ class PointService:
             "YC": self.table.get_all_yc,
             "YK": self.table.get_all_yk,
             "YM": self.table.get_all_ym,
+            "STEP": self.table.get_all_step,
         }
         changed = 0
         for p in getters[ptype]():
@@ -244,6 +255,11 @@ class PointService:
                     new_table.add_ym(YmPointDef(ioa=ioa, name=name, group=group,
                                                 enabled=enabled,
                                                 initial_value=int(row.get("value") or 0)))
+                elif ptype == "STEP":
+                    new_table.add_step(StepPointDef(
+                        ioa=ioa, name=name, group=group, enabled=enabled,
+                        initial_value=int(row.get("value") or 0),
+                    ))
                 else:
                     continue
                 count += 1
@@ -252,7 +268,7 @@ class PointService:
                         "error": f"第 {count + 2} 行解析失败（ioa={row.get('ioa')}）: {e}"}
 
         if count == 0:
-            return {"ok": False, "error": "CSV 未解析出有效点（type 须为 YX/YC/YK/YM）"}
+            return {"ok": False, "error": "CSV 未解析出有效点（type 须为 YX/YC/YK/YM/STEP）"}
         self.table = new_table
         self.refresh_count()
         if engine is not None:

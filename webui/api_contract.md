@@ -123,6 +123,38 @@
 | GET | `/api/logs` | query：`level_min: str="DEBUG"`, `category?: str`, `source?: str`, `q?: str`, `limit: int=200 (≤2000)` | `{ok: true, logs: LogRow[], stats: LogStats}`（见 §4.5） |
 | GET | `/api/logs/export` | — | JSONL 文本（`Content-Disposition: attachment`） |
 
+### 2.6 主站参数状态查询（T08）
+
+| 方法 | 路径 | 请求 | 响应 |
+|------|------|------|------|
+| GET | `/api/master/param_state` | query：`ioa: int (≥0)` | `{ok, ioa, state: ParameterStateEntry \| null}` |
+| GET | `/api/master/params` | — | `{ok, params: ParameterStateEntry[]}` |
+
+> `state` 为该 IOA 的装载/激活状态**快照**；从未下发过参数命令时为 `null`。
+> 结构见 §4.6。参数命令（`POST /api/master/param`）下发后即可查询其
+> `PENDING → OK/REJECTED → TERMINATED`（或 `TIMEOUT`）推进过程。
+
+### 2.7 子站步位置（T09）
+
+| 方法 | 路径 | 请求 | 响应 |
+|------|------|------|------|
+| POST | `/api/slave/step` | `ioa: int (≥0)`, `value: int (-64..63)` | `{ok, error?}` |
+
+> 置数并自发上送步位置信息（`M_ST_TB_1`, COT=3）。点表快照（§4.2）与 CSV/YAML
+> 导出会带出 `STEP` 类型点。
+
+### 2.8 多站（T16）
+
+| 方法 | 路径 | 请求 | 响应 |
+|------|------|------|------|
+| POST | `/api/multi/start` | `stations: StationConfig[]`（非空；`station_id` 必填且唯一，`port` 0–65535） | `{ok, stations?, error?}` |
+| POST | `/api/multi/stop` | — | `{ok, error?}` |
+| GET | `/api/multi/status` | — | `{ok, running, stations: StationStatus[]}` |
+| GET | `/api/multi/summary` | — | `{ok, running, station_count, total_clients, uptime, stations: StationSummary[]}` |
+
+> 多站管理器与主/子站会话独立；Web 会话关停时会随 `shutdown()` 一并回收
+> （见 `webui/session.py::attach_multi_station`）。结构见 §4.7。
+
 ---
 
 ## 3. WebSocket `/ws`
@@ -185,6 +217,8 @@
 }
 ```
 
+> `type ∈ {"YX","YC","YK","YM","STEP"}`；`STEP` 为步位置点（`value` 为档位整数）。
+
 ### 4.3 `Frame`
 
 ```ts
@@ -206,6 +240,36 @@
 LogRow  = { ts: number, level: "DEBUG"|"INFO"|"WARNING"|"ERROR"|"CRITICAL"|string,
             source: string, category: string, message: string, data?: object }
 LogStats = { total?: number, by_level?: Record<string, number>, source?: string, [k: string]: unknown }
+```
+
+### 4.6 `ParameterStateEntry`
+
+```ts
+{
+  ioa: number
+  loadResult: "unknown" | "pending" | "ok" | "terminated" | "rejected" | "timeout"
+  loadCot: number | null            // 装载应答的传送原因
+  loadUpdatedAt: number | null      // monotonic 秒值（用于算时长，非绝对时间）
+  activationResult: "unknown" | "pending" | "ok" | "terminated" | "rejected" | "timeout"
+  activationCot: number | null
+  activationUpdatedAt: number | null
+}
+```
+
+### 4.7 `StationConfig` / `StationStatus` / `StationSummary`
+
+```ts
+StationConfig = {               // 字段均有默认值，仅 station_id 必填
+  station_id: string
+  station_name?: string, host?: string, port?: number, common_addr?: number
+  max_connections?: number, point_table_file?: string, auto_generate?: boolean
+  yx_count?: number, yc_count?: number, yk_count?: number, ym_count?: number
+  spontaneous_enabled?: boolean, simulation_enabled?: boolean
+  yx_interval?: number, yc_interval?: number, yx_change_rate?: number, yc_change_range?: number
+}
+StationStatus  = { station_id, station_name, port, common_addr, running, client_count,
+                   yx_count, yc_count, yk_count, ym_count, simulation_active }
+StationSummary = { id, name, port, clients }
 ```
 
 ---
