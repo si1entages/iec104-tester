@@ -217,6 +217,7 @@ class PacketRecorder:
             direction=DIRECTION_RX if direction == "rx" else DIRECTION_TX,
             frame_data=data,
             metadata=metadata or {},
+            absolute_time=now,   # 绝对（Unix）时间，供 pcap/pcapng 导出用真实时间戳
         )
 
         with self._lock:

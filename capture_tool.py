@@ -19,6 +19,13 @@
     python capture_tool.py convert session.i104 -o session.json
     python capture_tool.py convert session.json -o session.i104
 
+    # 导出为 Wireshark 可打开的 pcap/pcapng
+    # ⚠️ 会**合成**以太网/IP/TCP 头（目的端口 2404）以便 Wireshark 原生解析；
+    #    合成头非真实网络层信息（IP 恒为 TEST-NET-1 192.0.2.0/24）。
+    python capture_tool.py convert session.i104 -o session.pcap
+    python capture_tool.py convert session.i104 -o session.pcapng
+    python capture_tool.py convert session.i104 -o raw.pcap --raw   # 裸 APDU(LINKTYPE_USER0)
+
     # 查看
     python capture_tool.py show session.i104
     python capture_tool.py show session.i104 --filter "frame_type=I direction=RX"
@@ -278,7 +285,7 @@ def cmd_show(args):
 # ═══════════════════════════════════════════════════════════════════
 
 def cmd_convert(args):
-    """格式转换."""
+    """格式转换（含 pcap/pcapng 导出）."""
     from core.capture import CaptureFile
 
     header, frames = CaptureFile.load(args.file)
@@ -291,7 +298,11 @@ def cmd_convert(args):
         else:
             output = args.file.replace(".i104", ".json")
 
-    CaptureFile.save(output, frames, description=header.description, created=header.created)
+    CaptureFile.save(output, frames, description=header.description,
+                     created=header.created, raw=bool(getattr(args, "raw", False)))
+    if str(output).lower().endswith((".pcap", ".pcapng", ".ntar")):
+        print("⚠️  已合成以太网/IP/TCP 头（目的端口 2404）以便 Wireshark 原生解析；"
+              "该头部为**合成信息，非真实网络层数据**（IP 恒为 TEST-NET-1 192.0.2.0/24）。")
     print(f"✅ Converted {len(frames)} frames: {args.file} → {output}")
 
 
@@ -393,9 +404,13 @@ def main():
     p_show.add_argument("--log-level", default="INFO")
 
     # convert
-    p_convert = subparsers.add_parser("convert", help="格式转换")
+    p_convert = subparsers.add_parser("convert", help="格式转换（.i104/.json/.pcap/.pcapng）")
     p_convert.add_argument("file", help="输入文件")
     p_convert.add_argument("-o", "--output", help="输出文件")
+    p_convert.add_argument(
+        "--raw", action="store_true",
+        help="pcap/pcapng：导出裸 APDU(LINKTYPE_USER0) 而非合成以太网/IP/TCP 头",
+    )
     p_convert.add_argument("--log-level", default="INFO")
 
     args = parser.parse_args()

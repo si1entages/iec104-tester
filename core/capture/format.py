@@ -169,6 +169,161 @@ class FrameEntry:
         return entry, offset
 
 
+# ═══════════════════════════════════════════════════════════════════
+#  pcap / pcapng 导出（供 Wireshark 打开）
+# ═══════════════════════════════════════════════════════════════════
+#
+# ⚠️ 诚实性声明（必读）：.i104 / .json 录制保存的是**裸 APDU 字节流**，不含真实的
+# 链路层 / IP / TCP 头。而 Wireshark 的 IEC 60870-5-104 解析器**依赖 TCP 上下文**
+# （端口 2404 或 IP/TCP 头）才能识别。为使导出文件能被 Wireshark **原生识别**，
+# 本模块默认在每条报文前**合成**一个以太网 + IPv4 + TCP 头（目的端口固定 2404）。
+#
+# 这些头是**伪造的、非真实网络层信息**：
+#   * 源/目的 IP 恒为 TEST-NET-1 文档用地址段 192.0.2.0/24；
+#   * 端口、序号、MAC 均为合成值，**与真实抓包的拓扑/时序无关**；
+#   * 仅 APDU 载荷（TCP payload）是真实录制内容。
+# 因此**不得**据此推断真实网络行为。若需保留原始 APDU（不做任何合成），
+# 使用 ``raw=True`` → LINKTYPE_USER0，Wireshark 需手工 "Decode As" 或用外部工具解析。
+#
+# 方向约定（使 Wireshark 把两侧归入同一条 TCP 会话）：
+#   TX（主站→子站）：src=192.0.2.1:40000 → dst=192.0.2.2:2404
+#   RX（主站←子站）：src=192.0.2.2:2404  → dst=192.0.2.1:40000
+
+LINKTYPE_ETHERNET = 1
+LINKTYPE_USER0 = 147          # 裸载荷（无链路层/IP/TCP 头）
+
+SYNTH_MASTER_IP = "192.0.2.1"  # TEST-NET-1，文档用地址（合成，非真实）
+SYNTH_SLAVE_IP = "192.0.2.2"
+SYNTH_MASTER_PORT = 40000
+SYNTH_SLAVE_PORT = 2404        # IEC 104 标准端口（合成）
+
+_MAC_MASTER = bytes.fromhex("020000000001")
+_MAC_SLAVE = bytes.fromhex("020000000002")
+
+PCAP_MAGIC_US = 0xA1B2C3D4     # 经典 pcap 魔数（微秒时间戳）
+PCAP_SNAPLEN = 65535
+
+
+def _ip_bytes(dotted: str) -> bytes:
+    return bytes(int(x) for x in dotted.split("."))
+
+
+def _checksum(data: bytes) -> int:
+    """16 位反码校验和（RFC 1071）."""
+    if len(data) % 2:
+        data += b"\x00"
+    total = 0
+    for i in range(0, len(data), 2):
+        total += (data[i] << 8) | data[i + 1]
+    while total >> 16:
+        total = (total & 0xFFFF) + (total >> 16)
+    return (~total) & 0xFFFF
+
+
+def _synth_packet(payload: bytes, is_tx: bool, ident: int = 0) -> bytes:
+    """合成以太网 + IPv4 + TCP 头并拼上 APDU 载荷.
+
+    ``is_tx=True`` 表示主站→子站方向，否则为子站→主站。
+    详见模块内「诚实性声明」——合成头非真实网络信息。
+    """
+    src_ip_s, dst_ip_s = (SYNTH_MASTER_IP, SYNTH_SLAVE_IP) if is_tx \
+        else (SYNTH_SLAVE_IP, SYNTH_MASTER_IP)
+    src_port, dst_port = (SYNTH_MASTER_PORT, SYNTH_SLAVE_PORT) if is_tx \
+        else (SYNTH_SLAVE_PORT, SYNTH_MASTER_PORT)
+    src_mac, dst_mac = (_MAC_MASTER, _MAC_SLAVE) if is_tx else (_MAC_SLAVE, _MAC_MASTER)
+    src_ip, dst_ip = _ip_bytes(src_ip_s), _ip_bytes(dst_ip_s)
+
+    eth = dst_mac + src_mac + b"\x08\x00"           # EtherType IPv4
+
+    tcp_len = 20 + len(payload)
+    ip_total = 20 + tcp_len
+    ip_hdr = struct.pack(
+        "!BBHHHBBH4s4s",
+        0x45, 0x00, ip_total,
+        ident & 0xFFFF, 0x4000,                      # flags=DF
+        64, 6, 0,                                    # ttl=64, proto=TCP, csum=0(占位)
+        src_ip, dst_ip,
+    )
+    ip_csum = _checksum(ip_hdr)
+    ip_hdr = ip_hdr[:10] + struct.pack("!H", ip_csum) + ip_hdr[12:]
+
+    tcp_hdr = struct.pack(
+        "!HHIIBBHHH",
+        src_port, dst_port,
+        ident & 0xFFFFFFFF, 0,                       # seq / ack（合成值）
+        0x50, 0x18, 65535, 0, 0,                     # data offset=5, PSH|ACK, window, csum, urg
+    )
+    pseudo = src_ip + dst_ip + struct.pack("!BBH", 0, 6, tcp_len)
+    tcp_csum = _checksum(pseudo + tcp_hdr + payload)
+    tcp_hdr = tcp_hdr[:16] + struct.pack("!H", tcp_csum) + tcp_hdr[18:]
+
+    return eth + ip_hdr + tcp_hdr + payload
+
+
+def _extract_synth_packet(pkt: bytes) -> tuple[bytes, int]:
+    """从合成的以太网帧中取出 (APDU 载荷, TCP 源端口).
+
+    仅用于回读自身导出的文件；对真实抓包不做保证。
+    """
+    if len(pkt) < 14:
+        return pkt, 0
+    ihl = (pkt[14] & 0x0F) * 4 if len(pkt) > 14 else 20
+    ip_off = 14
+    tcp_off = ip_off + ihl
+    if len(pkt) < tcp_off + 20:
+        return pkt, 0
+    src_port = struct.unpack_from("!H", pkt, tcp_off)[0]
+    doff = ((pkt[tcp_off + 12] >> 4) & 0x0F) * 4
+    payload = pkt[tcp_off + doff:]
+    return payload, src_port
+
+
+def _decode_packet(pkt: bytes, linktype: int) -> tuple[bytes, int]:
+    """按 linktype 解出 (APDU 载荷, 方向常量)."""
+    if linktype == LINKTYPE_USER0:
+        return pkt, DIRECTION_RX
+    payload, src_port = _extract_synth_packet(pkt)
+    # 合成约定：src=slave:2404 为 RX（主站收到），否则为 TX（主站发出）
+    direction = DIRECTION_RX if src_port == SYNTH_SLAVE_PORT else DIRECTION_TX
+    return payload, direction
+
+
+def _frame_abs_time(frame: FrameEntry, created: float) -> float:
+    """取帧的绝对（Unix）时间：优先 absolute_time，否则 created + 相对时间."""
+    if frame.absolute_time:
+        return frame.absolute_time
+    return (created or 0.0) + frame.timestamp
+
+
+def _pcapng_block(btype: int, body: bytes) -> bytes:
+    total = 8 + len(body) + 4
+    pad = (4 - len(body) % 4) % 4
+    return struct.pack("<II", btype, total) + body + b"\x00" * pad + \
+        struct.pack("<I", total)
+
+
+def _pcapng_shb() -> bytes:
+    body = struct.pack("<IHHq", 0x1A2B3C4D, 1, 0, -1)
+    return _pcapng_block(0x0A0D0D0A, body)
+
+
+def _pcapng_idb(linktype: int) -> bytes:
+    body = struct.pack("<HHI", linktype, 0, PCAP_SNAPLEN)
+    body += struct.pack("<HH", 0, 0)                 # opt_endofopt
+    return _pcapng_block(1, body)
+
+
+def _pcapng_epb(iface_id: int, ts_us: int, data: bytes) -> bytes:
+    pad = (4 - len(data) % 4) % 4
+    body = struct.pack(
+        "<IIIII", iface_id,
+        (ts_us >> 32) & 0xFFFFFFFF, ts_us & 0xFFFFFFFF,
+        len(data), len(data),
+    ) + data + b"\x00" * pad
+    body += struct.pack("<HH", 0, 0)                 # opt_endofopt
+    return _pcapng_block(6, body)
+
+
 class CaptureFile:
     """录制文件读写器.
 
@@ -288,6 +443,154 @@ class CaptureFile:
 
         return header, frames
 
+    # ── pcap / pcapng（Wireshark 可打开）───────────────────────────
+
+    @staticmethod
+    def save_pcap(
+        path: str | Path,
+        frames: list[FrameEntry],
+        description: str = "",
+        created: float = 0.0,
+        *,
+        raw: bool = False,
+    ) -> int:
+        """导出为经典 pcap（.pcap）.
+
+        ``raw=False``（默认）**合成**以太网/IP/TCP 头（目的端口 2404），使 Wireshark
+        能原生识别为 IEC 60870-5-104；``raw=True`` 使用 LINKTYPE_USER0 直接放裸
+        APDU（Wireshark 需手工 Decode As）。**合成头非真实网络信息**，详见模块内
+        「诚实性声明」。
+
+        Returns:
+            导出的帧数。
+        """
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if created == 0.0 and frames:
+            created = _frame_abs_time(frames[0], 0.0)
+        linktype = LINKTYPE_USER0 if raw else LINKTYPE_ETHERNET
+
+        with open(path, "wb") as f:
+            f.write(struct.pack("<IHHiIII", PCAP_MAGIC_US, 2, 4, 0, 0,
+                                PCAP_SNAPLEN, linktype))
+            for i, frame in enumerate(frames):
+                data = frame.frame_data if raw else \
+                    _synth_packet(frame.frame_data, frame.direction == DIRECTION_TX, i)
+                abs_t = _frame_abs_time(frame, created)
+                sec = int(abs_t)
+                usec = int(round((abs_t - sec) * 1_000_000))
+                if usec >= 1_000_000:
+                    sec += 1
+                    usec -= 1_000_000
+                f.write(struct.pack("<IIII", sec, usec, len(data), len(data)))
+                f.write(data)
+        return len(frames)
+
+    @staticmethod
+    def load_pcap(path: str | Path) -> tuple[FileHeader, list[FrameEntry]]:
+        """回读 pcap（支持 LE/BE、µs/ns 时间戳；载荷按 linktype 还原）."""
+        data = Path(path).read_bytes()
+        if len(data) < 24:
+            raise ValueError("pcap too small")
+        magic = data[0:4]
+        if magic == b"\xd4\xc3\xb2\xa1":
+            endian, scale = "<", 1_000_000
+        elif magic == b"\xa1\xb2\xc3\xd4":
+            endian, scale = ">", 1_000_000
+        elif magic == b"\x4d\x3c\xb2\xa1":
+            endian, scale = "<", 1_000_000_000
+        elif magic == b"\xa1\xb2\x3c\x4d":
+            endian, scale = ">", 1_000_000_000
+        else:
+            raise ValueError(f"Invalid pcap magic: {magic!r}")
+
+        linktype = struct.unpack_from(endian + "I", data, 20)[0]
+        offset = 24
+        frames: list[FrameEntry] = []
+        abs_times: list[float] = []
+        while offset + 16 <= len(data):
+            sec, frac, incl, _orig = struct.unpack_from(endian + "IIII", data, offset)
+            offset += 16
+            if incl > len(data) - offset:
+                break
+            pkt = data[offset:offset + incl]
+            offset += incl
+            payload, direction = _decode_packet(pkt, linktype)
+            abs_t = sec + frac / scale
+            frames.append(FrameEntry(timestamp=0.0, direction=direction,
+                                     frame_data=payload, absolute_time=abs_t))
+            abs_times.append(abs_t)
+
+        created = min(abs_times) if abs_times else time.time()
+        for fr in frames:
+            fr.timestamp = fr.absolute_time - created
+        return FileHeader(created=created, description=""), frames
+
+    @staticmethod
+    def save_pcapng(
+        path: str | Path,
+        frames: list[FrameEntry],
+        description: str = "",
+        created: float = 0.0,
+        *,
+        raw: bool = False,
+    ) -> int:
+        """导出为 pcapng（.pcapng，EPB 结构，µs 时间戳，4 字节对齐）.
+
+        与 :meth:`save_pcap` 相同的合成头约定与 ``raw`` 语义。
+        """
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if created == 0.0 and frames:
+            created = _frame_abs_time(frames[0], 0.0)
+        linktype = LINKTYPE_USER0 if raw else LINKTYPE_ETHERNET
+
+        out = bytearray()
+        out += _pcapng_shb()
+        out += _pcapng_idb(linktype)
+        for i, frame in enumerate(frames):
+            data = frame.frame_data if raw else \
+                _synth_packet(frame.frame_data, frame.direction == DIRECTION_TX, i)
+            abs_t = _frame_abs_time(frame, created)
+            out += _pcapng_epb(0, int(round(abs_t * 1_000_000)), data)
+        path.write_bytes(bytes(out))
+        return len(frames)
+
+    @staticmethod
+    def load_pcapng(path: str | Path) -> tuple[FileHeader, list[FrameEntry]]:
+        """回读 pcapng（解析 SHB/IDB/EPB，载荷按 linktype 还原）."""
+        data = Path(path).read_bytes()
+        offset = 0
+        endian = "<"
+        linktype = LINKTYPE_ETHERNET
+        frames: list[FrameEntry] = []
+        abs_times: list[float] = []
+        while offset + 12 <= len(data):
+            btype, blen = struct.unpack_from(endian + "II", data, offset)
+            if btype == 0x0A0D0D0A:
+                bom = struct.unpack_from("<I", data, offset + 8)[0]
+                endian = "<" if bom == 0x1A2B3C4D else ">"
+                btype, blen = struct.unpack_from(endian + "II", data, offset)
+            if blen < 12 or offset + blen > len(data):
+                break
+            if btype == 1:                       # IDB
+                linktype = struct.unpack_from(endian + "H", data, offset + 8)[0]
+            elif btype == 6:                     # EPB
+                (_iface, ts_high, ts_low, caplen, _origlen) = struct.unpack_from(
+                    endian + "IIIII", data, offset + 8)
+                pkt = data[offset + 28:offset + 28 + caplen]
+                abs_t = ((ts_high << 32) | ts_low) / 1_000_000
+                payload, direction = _decode_packet(pkt, linktype)
+                frames.append(FrameEntry(timestamp=0.0, direction=direction,
+                                         frame_data=payload, absolute_time=abs_t))
+                abs_times.append(abs_t)
+            offset += blen
+
+        created = min(abs_times) if abs_times else time.time()
+        for fr in frames:
+            fr.timestamp = fr.absolute_time - created
+        return FileHeader(created=created, description=""), frames
+
     @staticmethod
     def load(path: str | Path) -> tuple[FileHeader, list[FrameEntry]]:
         """自动识别格式并加载."""
@@ -295,8 +598,11 @@ class CaptureFile:
         suffix = path.suffix.lower()
         if suffix == ".json":
             return CaptureFile.load_json(path)
-        else:
-            return CaptureFile.load_binary(path)
+        if suffix == ".pcap":
+            return CaptureFile.load_pcap(path)
+        if suffix in (".pcapng", ".ntar"):
+            return CaptureFile.load_pcapng(path)
+        return CaptureFile.load_binary(path)
 
     @staticmethod
     def save(
@@ -304,11 +610,21 @@ class CaptureFile:
         frames: list[FrameEntry],
         description: str = "",
         created: float = 0.0,
+        *,
+        raw: bool = False,
     ) -> None:
-        """根据扩展名自动选择格式保存."""
+        """根据扩展名自动选择格式保存（.i104/.json/.pcap/.pcapng）.
+
+        ``raw`` 仅对 pcap/pcapng 生效：True 时导出裸 APDU（LINKTYPE_USER0），
+        否则**合成**以太网/IP/TCP 头以便 Wireshark 原生识别（见模块诚实性声明）。
+        """
         path = Path(path)
         suffix = path.suffix.lower()
         if suffix == ".json":
             CaptureFile.save_json(path, frames, description, created)
+        elif suffix == ".pcap":
+            CaptureFile.save_pcap(path, frames, description, created, raw=raw)
+        elif suffix in (".pcapng", ".ntar"):
+            CaptureFile.save_pcapng(path, frames, description, created, raw=raw)
         else:
             CaptureFile.save_binary(path, frames, description, created)
