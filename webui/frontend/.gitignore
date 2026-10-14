@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.vite/
+*.local
+*.log
+
+# 不忽略构建产物 webui/static/app/ —— 它随仓库分发并被 PyInstaller 打包
