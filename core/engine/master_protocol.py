@@ -15,6 +15,10 @@
 
 注意：命令单帧下发统一经 ``engine._send_command_asdu`` 这一「引擎属性」转发，
 以保证测试/外部对 ``engine._send_command_asdu`` 的替换（帧捕获）依然生效。
+
+``MasterEvent`` 事件枚举定义在本模块：会话层与协议层都需要它，而本模块不
+反向依赖 ``master_session``/``master.py``，故由本模块承载并由 ``master.py``
+再导出（``from core.engine.master import MasterEvent`` 保持兼容）。
 """
 
 from __future__ import annotations
@@ -979,7 +983,7 @@ class MasterProtocolHandler:
             # 主站应**重新总召唤**刷新全数据。但部分真机收到主站 I 帧后会直接
             # 断开/停摆（实测），故默认关闭、可经 auto_gi_on_init_end=True 开启。
             if cot == COT.INIT and e._auto_gi_on_init_end:
-                e._spawn(e._regi_after_init())
+                e._spawn(e._session.regi_after_init())
 
         # 参数命令确认
         elif type_id in (TypeID.P_ME_NA_1, TypeID.P_ME_NB_1, TypeID.P_ME_NC_1,

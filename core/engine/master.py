@@ -9,17 +9,16 @@
 - 周期轮询
 - 报文解析与分发
 
-本模块保留 ``MasterEngine`` 的编排与**公开 API**（薄门面）；命令构建与 ASDU
-解码分发见 ``master_protocol.MasterProtocolHandler``（组合持有）。连接/状态/
-帧接收/定时器逻辑暂仍由本类承载。全部共享状态由本类持有，公开方法签名与行为
-保持不变。
+本模块保留 ``MasterEngine`` 的编排与**公开 API**（薄门面）；连接/状态/重连/
+帧接收/定时器逻辑见 ``master_session.MasterSession``，命令构建与 ASDU 解码
+分发见 ``master_protocol.MasterProtocolHandler``。二者以组合方式持有，全部
+共享状态仍由本类持有，公开方法签名与行为保持不变。
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from collections import deque
 from collections.abc import Callable
 from typing import Any
@@ -36,6 +35,7 @@ from ..protocol.types import COT, CP56Time2a
 from ..transport.connection import ConnectionStats, TCPClient
 from .base import EngineBase
 from .master_protocol import MasterEvent, MasterProtocolHandler
+from .master_session import MasterSession
 from .scheduler import TaskScheduler
 
 logger = logging.getLogger("iec104.master")
@@ -85,6 +85,7 @@ class MasterEngine(EngineBase):
         super().__init__()
 
         # 组合组件（构造期注入引擎引用；仅保存引用，不读取尚未初始化的状态）
+        self._session = MasterSession(self)
         self._protocol = MasterProtocolHandler(self)
 
         self._host = host
@@ -243,7 +244,7 @@ class MasterEngine(EngineBase):
         self._seq.set_s_frame_callback(self._send_s_frame)
 
         # 启动定时器检查
-        self._timer_task = self._spawn(self._timer_loop())
+        self._timer_task = self._spawn(self._session.timer_loop())
 
         # 启动定时任务调度器
         await self._scheduler.start()
@@ -286,18 +287,11 @@ class MasterEngine(EngineBase):
 
     async def send_startdt(self) -> None:
         """发送 STARTDT ACT."""
-        frame = APCICodec.startdt_act()
-        await self._send_frame(frame)
-        self._state_machine.on_startdt_act_sent()
-        logger.info("STARTDT ACT sent")
+        await self._session.send_startdt()
 
     async def send_stopdt(self) -> None:
         """发送 STOPDT ACT."""
-        frame = APCICodec.stopdt_act()
-        await self._send_frame(frame)
-        # STOPDT ACT 属 U 格式报文，发送后须在 t1 内收到 STOPDT CON
-        self._state_machine.on_u_frame_act_sent()
-        logger.info("STOPDT ACT sent")
+        await self._session.send_stopdt()
 
     async def _await_send_window(self) -> None:
         """等待发送窗口可用（最多 t1）— 与子站行为对称."""
@@ -537,137 +531,19 @@ class MasterEngine(EngineBase):
         if fut is not None and not fut.done():
             fut.set_result((pn, cot))
 
-    # ── 帧接收处理 ────────────────────────────────────────────────
+    # ── 帧接收处理（门面 → MasterSession）─────────────────────────
 
     def _on_frame_received(self, frame: bytes) -> None:
         """收到原始帧回调（从TCP层）."""
-        if self._raw_frame_callback:
-            try:
-                self._raw_frame_callback(frame, "rx")
-            except Exception:
-                pass
-
-        # 报文录制
-        if self._recorder:
-            self._recorder.record_frame(frame, direction="rx")
-
-        self._rx_buffer.append((time.monotonic(), frame))
-
-        # 记录到历史数据库
-        if self._history_db:
-            frame_type = APCICodec.frame_type_of(frame)
-            self._history_db.record_frame("rx", frame, frame_type=frame_type)
-
-        try:
-            apci, _ = APCICodec.decode(frame)
-
-            if apci.is_i_frame:
-                self._handle_i_frame(apci, frame)
-            elif apci.is_s_frame:
-                self._handle_s_frame(apci)
-            elif apci.is_u_frame:
-                self._handle_u_frame(apci)
-
-            self._state_machine.on_any_frame_received()
-
-        except Exception as exc:
-            logger.error(f"Frame decode error: {exc}")
-
-    def _handle_i_frame(self, apci: APCI, frame: bytes) -> None:
-        """处理 I 帧."""
-        seq_ok = self._seq.process_rx_i_frame(apci.tx_seq)
-        if not seq_ok:
-            # 标准: 报文丢失/错序意味着 TCP 连接异常，应关闭连接并重建。
-            # 主站与子站策略统一：均断开连接。使用 disconnect() 仅重建当前
-            # 连接 —— 关闭底层连接后 _connect_loop 会触发 _on_tcp_disconnected
-            # (状态机离开 Running + 触发 DISCONNECTED) 并按配置重连；
-            # 若用 stop() 会取消重连循环并跳过 on_disconnected 回调。
-            logger.error(
-                f"Sequence mismatch: expected={self._seq.recv_seq}, "
-                f"received={apci.tx_seq}, disconnecting"
-            )
-            self._spawn(self._client.disconnect())
-            return
-        # I帧的rx_seq是隐式确认，等效于S帧
-        self._seq.process_rx_i_frame_ack(apci.rx_seq)
-        # 隐式确认可能释放了发送窗口
-        if self._seq.send_window_available:
-            self._window_available.set()
-
-        # 解析 ASDU
-        asdu_data = frame[6:6 + apci.asdu_length]
-        self._protocol.decode_and_dispatch(asdu_data)
-
-        self._state_machine.on_i_frame_received()
+        self._session.on_frame_received(frame)
 
     def _handle_s_frame(self, apci: APCI) -> None:
         """处理 S 帧."""
-        self._seq.process_rx_s_frame(apci.rx_seq)
-        # S帧确认释放了发送窗口
-        if self._seq.send_window_available:
-            self._window_available.set()
-        self._state_machine.on_ack_received()
-        logger.debug(f"S-Frame: rx_seq={apci.rx_seq}")
-
-    def _handle_u_frame(self, apci: APCI) -> None:
-        """处理 U 帧."""
-        if apci.is_startdt_con:
-            self._state_machine.on_startdt_con()
-            self._seq.process_rx_u_frame_startdt_con()
-            logger.info("STARTDT CON received")
-            self._fire_event(MasterEvent.STARTED)
-
-            # 自动总召唤
-            if self._auto_gi:
-                self._spawn(self._auto_general_interrogation())
-
-            # 周期总召唤（对"只在总召时才回遥测"的装置是必要手段）
-            if self._gi_interval > 0 and not self._periodic_gi_task:
-                self._periodic_gi_task = self._spawn(self._periodic_gi_loop())
-
-        elif apci.is_stopdt_con:
-            self._state_machine.on_stopdt_con()
-            logger.info("STOPDT CON received")
-
-        elif apci.is_testfr_act:
-            # 回复 TESTFR CON
-            self._spawn(self._send_frame(APCICodec.testfr_con()))
-            self._state_machine.on_testfr_act_received()
-            logger.debug("TESTFR ACT received, CON sent")
-
-        elif apci.is_testfr_con:
-            self._state_machine.on_ack_received()
-            logger.debug("TESTFR CON received")
-
-    async def _auto_general_interrogation(self) -> None:
-        """自动总召唤（连接建立后）."""
-        await asyncio.sleep(0.5)  # 短暂延迟
-        try:
-            await self.general_interrogation()
-        except Exception as exc:
-            logger.error(f"Auto GI failed: {exc}")
+        self._session.handle_s_frame(apci)
 
     async def _send_frame(self, frame: bytes) -> None:
         """发送帧并记录."""
-        await self._client.send(frame)
-
-        if self._raw_frame_callback:
-            try:
-                self._raw_frame_callback(frame, "tx")
-            except Exception:
-                pass
-
-        # 报文录制
-        if self._recorder:
-            self._recorder.record_frame(frame, direction="tx")
-
-        self._tx_buffer.append((time.monotonic(), frame))
-        self._state_machine.on_any_frame_sent()
-
-        # 记录到历史数据库
-        if self._history_db:
-            frame_type = APCICodec.frame_type_of(frame)
-            self._history_db.record_frame("tx", frame, frame_type=frame_type)
+        await self._session.send_frame(frame)
 
     def _send_s_frame(self, rx_seq: int) -> None:
         """S帧回调（从序列号管理器触发）."""
@@ -676,110 +552,21 @@ class MasterEngine(EngineBase):
         self._state_machine.on_s_frame_sent()
         logger.debug(f"S-Frame sent: rx_seq={rx_seq}")
 
-    # ── TCP 事件 ──────────────────────────────────────────────────
+    # ── TCP 事件（门面 → MasterSession）───────────────────────────
 
     def _on_tcp_connected(self) -> None:
         """TCP 连接建立."""
-        self._state_machine.on_connected()
-        self._fire_event(MasterEvent.CONNECTED)
-
-        # 自动发送 STARTDT
-        if self._auto_start:
-            self._spawn(self._auto_startdt())
+        self._session.on_tcp_connected()
 
     def _on_tcp_disconnected(self) -> None:
         """TCP 连接断开."""
-        self._state_machine.on_disconnected()
-        self._fire_event(MasterEvent.DISCONNECTED)
-
-    async def _auto_startdt(self) -> None:
-        """自动发送 STARTDT."""
-        await asyncio.sleep(0.2)
-        try:
-            await self.send_startdt()
-        except Exception as exc:
-            logger.error(f"Auto STARTDT failed: {exc}")
-
-    async def _periodic_gi_loop(self) -> None:
-        """周期总召唤循环（``gi_interval > 0`` 时启用）.
-
-        部分真机**从不自发上送遥测**，只在收到总召唤时回数据（实测：静默
-        70s 内零遥测帧）。这类装置只能靠周期总召刷新遥测值。
-        仅在 Running 状态召唤；异常不影响连接。
-        """
-        try:
-            while self._gi_interval > 0:
-                await asyncio.sleep(self._gi_interval)
-                if not self._state_machine.is_running:
-                    continue
-                try:
-                    logger.info(f"Periodic GI (interval={self._gi_interval}s)")
-                    await self.general_interrogation()
-                except Exception as exc:
-                    logger.warning(f"Periodic GI failed: {exc}")
-        except asyncio.CancelledError:
-            raise
-        finally:
-            self._periodic_gi_task = None
-
-    async def _regi_after_init(self) -> None:
-        """收到初始化结束(M_EI_NA_1, COT=4)后的自动重总召唤.
-
-        装置重启后原实时数据可能已失效，标准要求主站重新召唤；
-        延迟 2s 等待装置完成初始化收尾（部分真机对连接初期的 I 帧敏感），
-        失败不影响连接（t1 超时会按标准断开并自动重连）。
-        """
-        await asyncio.sleep(2.0)
-        try:
-            if self._state_machine.is_running:
-                logger.info("Auto re-GI after End of Initialization")
-                await self.general_interrogation()
-        except Exception as exc:
-            logger.warning(f"Auto re-GI after init failed: {exc}")
+        self._session.on_tcp_disconnected()
 
     def _on_state_change(self, old_state: str, new_state: str) -> None:
-        logger.info(f"State: {old_state} → {new_state}")
+        self._session.on_state_change(old_state, new_state)
 
     def _on_timer_expired(self, timer_type: TimerType) -> None:
-        logger.warning(f"Timer expired: {timer_type}")
-        self._fire_event(MasterEvent.TIMER_EXPIRED, {"timer": timer_type})
-
-        if timer_type == TimerType.T0:
-            # 连接超时：仅重建当前连接，保留重连循环（stop() 会取消重连）
-            self._spawn(self._client.disconnect())
-        elif timer_type == TimerType.T1:
-            # 发送超时 - 根据规范应断开连接。
-            # 必须用 disconnect() 而非 stop()：stop() 会取消重连循环且跳过
-            # on_disconnected 回调，导致 t1 超时后永久停在 Stopped（真机实测：
-            # 对未知 IOA 的读命令，设备不回 ACK → t1 超时 → 再也不重连）。
-            logger.error("T1 timeout: no confirmation received, disconnecting")
-            self._spawn(self._client.disconnect())
-        elif timer_type == TimerType.T2:
-            # 无数据确认超时 — 发送S帧确认已收到的I帧
-            rx_seq = self._seq.get_recv_seq()
-            frame = APCICodec.encode_s(rx_seq)
-            self._spawn(self._send_frame(frame))
-            self._state_machine.on_s_frame_sent()
-            logger.info(f"T2 expired: S-Frame sent (rx_seq={rx_seq})")
-        elif timer_type == TimerType.T3:
-            # 空闲超时，发送测试帧 — U 帧 ACT，发送后须在 t1 内收到 TESTFR CON
-            self._spawn(self._send_frame(APCICodec.testfr_act()))
-            self._state_machine.on_u_frame_act_sent()
-
-    # ── 定时器循环 ─────────────────────────────────────────────────
-
-    async def _timer_loop(self) -> None:
-        """定时器检查循环."""
-        while True:
-            try:
-                expired = self._state_machine.check_timers()
-                if expired:
-                    self._on_timer_expired(expired)
-                await asyncio.sleep(0.5)
-            except asyncio.CancelledError:
-                break
-            except Exception as exc:
-                logger.error(f"Timer loop error: {exc}")
+        self._session.on_timer_expired(timer_type)
 
     # ── 事件分发 ──────────────────────────────────────────────────
 
