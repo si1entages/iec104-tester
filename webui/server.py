@@ -14,6 +14,9 @@ from .bridge import EngineBridge
 
 logger = logging.getLogger("iec104.webui")
 STATIC = Path(__file__).parent / "static"
+# 新前端（Vite/React）构建产物目录：webui/static/app/（T10）。
+# 与旧原生页（master.html/slave.html/js/css）同级共存，互不干扰。
+APP_STATIC = STATIC / "app"
 # 项目资源目录（图标等）：webui/ 的上一级 resources/
 RESOURCES = Path(__file__).parent.parent / "resources"
 
@@ -27,7 +30,11 @@ async def no_cache_pages(request: web.Request, handler) -> web.Response:
     本工具只在局域网调试使用，全部走协商缓存（no-cache 表示必须回源校验）。
     """
     resp = await handler(request)
-    if request.path == "/" or request.path.startswith("/static/"):
+    if (
+        request.path == "/"
+        or request.path.startswith("/static/")
+        or request.path.startswith("/app")
+    ):
         resp.headers["Cache-Control"] = "no-cache, must-revalidate"
     return resp
 
@@ -67,6 +74,39 @@ def create_app(bridge: EngineBridge) -> web.Application:
         if not icon.exists():
             return web.Response(status=404)
         return web.FileResponse(icon, headers={"Content-Type": "image/svg+xml"})
+
+    # ── 新前端（Vite 产物）托管：/app/ ────────────────────────────────
+    # 独立路径，与旧原生页完全并存；产物缺失时优雅 404，不影响旧 UI。
+
+    async def app_redirect(request: web.Request) -> web.Response:
+        """`/app` → `/app/`：保证 Vite base 下的相对资源正确解析."""
+        return web.HTTPFound("/app/")
+
+    async def app_index(request: web.Request) -> web.Response:
+        index_file = APP_STATIC / "index.html"
+        if not index_file.is_file():
+            return web.Response(
+                status=404,
+                text=(
+                    "前端产物缺失：请先执行 "
+                    "`cd webui/frontend && npm ci && npm run build`"
+                ),
+                content_type="text/plain",
+                charset="utf-8",
+            )
+        return web.FileResponse(index_file)
+
+    async def app_asset(request: web.Request) -> web.Response:
+        """托管 /app/ 下产物；未命中真实文件时回落 index.html（支持 SPA 前端路由）."""
+        tail = request.match_info.get("tail", "")
+        root = APP_STATIC.resolve()
+        target = (root / tail).resolve()
+        # 路径穿越防护：解析后必须仍在 root 之内
+        if target != root and root not in target.parents:
+            return web.Response(status=404, text="not found")
+        if target.is_file():
+            return web.FileResponse(target)
+        return await app_index(request)
 
     async def api_status(request: web.Request) -> web.Response:
         return web.json_response(bridge.status())
@@ -532,6 +572,9 @@ def create_app(bridge: EngineBridge) -> web.Application:
     app.router.add_post("/api/slave/response", api_slave_response)
     app.router.add_post("/api/slave/sim", api_slave_sim)
     app.router.add_get("/ws", ws_feed)
+    app.router.add_get("/app", app_redirect)
+    app.router.add_get("/app/", app_index)
+    app.router.add_get("/app/{tail:.*}", app_asset)
     app.router.add_static("/static/", STATIC, show_index=False)
     app.router.add_get("/favicon.ico", favicon)
     app.router.add_get("/favicon.svg", favicon)
