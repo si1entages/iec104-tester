@@ -110,7 +110,8 @@ round-trip 实测：C_SC/DC/RC_TA_1=**17B**，C_SE_TA/TB_1=**19B**，C_SE_TC_1=*
 ## 六点五、联合调试（2026-09-26）新发现并修复的问题
 
 真机联调方式：`app.py --mode slave --no-browser --port 24040` + `app.py --mode master …`
-两端各自打开 Web UI，用 `qa_verify/qa_joint_debug.py` 逐项下发召唤/遥控/时钟同步/累计量召唤，
+两端各自打开 Web UI，用 `qa_verify/qa_joint_debug.py`（**仅本地开发使用的临时调试脚本，
+未纳入版本控制——干净克隆中不存在该文件**）逐项下发召唤/遥控/时钟同步/累计量召唤，
 并**逐帧解码**核对 IOA、COT、S/E、类型标识。
 
 ### A. 召唤应答把非连续 IOA 打包进一帧 SQ=1 → 主站静默错址（P0）

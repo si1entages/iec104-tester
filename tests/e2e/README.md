@@ -38,3 +38,8 @@ python tests/e2e/qa_shutdown.py
 
 > 端口占用提示：`qa_full_flow.py` / `qa_webui_e2e.py` / `qa_joint_debug.py` 会占用 2404/24040/8765/8766，
 > **勿与 pytest 并行运行**（`tests/test_multi_station.py` 等也会绑定端口）。
+>
+> 注：`qa_joint_debug.py` 是**仅本地开发使用的临时调试脚本，未纳入版本控制**
+> （位于被 `.gitignore` 忽略的 `qa_verify/`，干净克隆中不存在）。本目录下
+> `qa_full_flow.py` / `qa_webui_e2e.py` / `qa_shutdown.py` 才是已入库、可在干净克隆中
+> 独立运行的验收脚本（其可复用部分见 `qa_common.py`）。
