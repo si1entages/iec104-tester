@@ -1,6 +1,9 @@
-"""TCP Server — re-export from connection module.
+"""TCP Server — 兼容性 re-export shim.
 
-IEC 60870-5-104 TCP 服务端实现，用于子站监听连接。
+DEPRECATED: 仅为向后兼容保留，新代码请从 :mod:`core.transport.connection`
+导入。兼容期至 2026-12-31；届时（下一个主版本）本模块将被删除。
+
+权威实现见 ``core.transport.connection.TCPServer``。
 """
 
 from .connection import ConnectionStats, TCPConnection, TCPServer

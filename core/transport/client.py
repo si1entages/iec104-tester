@@ -1,6 +1,9 @@
-"""TCP Client — re-export from connection module.
+"""TCP Client — 兼容性 re-export shim.
 
-IEC 60870-5-104 TCP 客户端实现，用于主站连接子站。
+DEPRECATED: 仅为向后兼容保留，新代码请从 :mod:`core.transport.connection`
+导入。兼容期至 2026-12-31；届时（下一个主版本）本模块将被删除。
+
+权威实现见 ``core.transport.connection.TCPClient``。
 """
 
 from .connection import ConnectionStats, TCPClient, TCPConnection
