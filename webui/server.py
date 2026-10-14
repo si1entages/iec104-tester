@@ -11,6 +11,7 @@ from pathlib import Path
 from aiohttp import WSMsgType, web
 
 from .bridge import EngineBridge
+from .events import SCHEMA_VERSION
 
 logger = logging.getLogger("iec104.webui")
 STATIC = Path(__file__).parent / "static"
@@ -109,7 +110,19 @@ def create_app(bridge: EngineBridge) -> web.Application:
         return await app_index(request)
 
     async def api_status(request: web.Request) -> web.Response:
-        return web.json_response(bridge.status())
+        # schemaVersion 供前端做契约版本协商（T18）；对旧消费者是新增键，向后兼容
+        st = bridge.status()
+        st["schemaVersion"] = SCHEMA_VERSION
+        return web.json_response(st)
+
+    async def api_schema(request: web.Request) -> web.Response:
+        """契约版本探测入口（T18）：前端可先探测再决定是否降级渲染."""
+        return web.json_response({
+            "ok": True,
+            "schemaVersion": SCHEMA_VERSION,
+            "wsKinds": ["snapshot", "frame", "event", "log"],
+            "wsSchemaKey": "schemaVersion",
+        })
 
     async def api_points(request: web.Request) -> web.Response:
         return web.json_response({"points": bridge.snapshot_points()})
@@ -493,10 +506,11 @@ def create_app(bridge: EngineBridge) -> web.Application:
         ws = web.WebSocketResponse(heartbeat=20)
         await ws.prepare(request)
         q = bridge.subscribe()
-        # 先推快照
-        await ws.send_json({"kind": "snapshot", "data": {
+        # 先推快照（snapshot 必须先行：前端据此对齐后再生效增量）
+        await ws.send_json({"kind": "snapshot", "schemaVersion": SCHEMA_VERSION, "data": {
+            "schemaVersion": SCHEMA_VERSION,
             "points": bridge.snapshot_points(),
-            "status": bridge.status(),
+            "status": {**bridge.status(), "schemaVersion": SCHEMA_VERSION},
             "frames": bridge.recent("frame", 50),
             "events": bridge.recent("event", 50),
             "logs": bridge.recent_logs(80),
@@ -527,15 +541,22 @@ def create_app(bridge: EngineBridge) -> web.Application:
                     if msg.type == WSMsgType.TEXT:
                         # 前端可请求刷新
                         if msg.data == "refresh":
-                            await ws.send_json({"kind": "snapshot", "data": {
-                                "points": bridge.snapshot_points(),
-                                "status": bridge.status(),
-                            }})
+                            await ws.send_json({
+                                "kind": "snapshot",
+                                "schemaVersion": SCHEMA_VERSION,
+                                "data": {
+                                    "schemaVersion": SCHEMA_VERSION,
+                                    "points": bridge.snapshot_points(),
+                                    "status": {**bridge.status(),
+                                               "schemaVersion": SCHEMA_VERSION},
+                                },
+                            })
         finally:
             bridge.unsubscribe(q)
         return ws
 
     app.router.add_get("/", index)
+    app.router.add_get("/api/schema", api_schema)
     app.router.add_get("/api/status", api_status)
     app.router.add_get("/api/points", api_points)
     app.router.add_get("/api/recent", api_recent)

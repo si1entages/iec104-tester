@@ -6,6 +6,14 @@ import asyncio
 import time
 from typing import Any
 
+# ── WS/REST 契约版本（T18）────────────────────────────────────────────
+# 递增规则（详见 webui/api_contract.md §版本策略）：
+#   * 破坏性变更（删字段 / 改类型 / 改语义）→ +1，消费方必须适配
+#   * 纯新增字段（向后兼容）→ 不递增，消费方应忽略未知字段
+# 该字段始终出现在 WS 消息信封顶层（snapshot / frame / event / log），
+# 旧消费者（static/js/app.js 等）只读 kind/data，新增键向后兼容。
+SCHEMA_VERSION = 1
+
 
 class EventBus:
     def __init__(self, buffer_size: int = 500, queue_size: int = 256):
@@ -29,7 +37,12 @@ class EventBus:
         self._subscribers.discard(q)
 
     def publish(self, kind: str, data: dict) -> dict:
-        msg = {"kind": kind, "ts": time.time(), "data": data}
+        msg = {
+            "kind": kind,
+            "schemaVersion": SCHEMA_VERSION,
+            "ts": time.time(),
+            "data": data,
+        }
         if kind == "frame":
             self._frames.append(msg)
             if len(self._frames) > self._buffer_size:
