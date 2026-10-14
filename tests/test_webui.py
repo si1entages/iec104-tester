@@ -424,10 +424,16 @@ for (const [v, exp] of truth) {
 
 
 def test_master_html_qoi_behavioural():
-    """Nit D 行为级验证 (需 node): 输入 17 不发请求且出提示；1/16/20 正常发."""
+    """Nit D 行为级验证 (需 node): 输入 17 不发请求且出提示；1/16/20 正常发.
+
+    前置条件用**硬断言**而非 pytest.skip：node 缺失属 CI 配置缺陷，静默跳过会
+    让「前端行为无人验证」长期潜伏（同 test_frontend_inline_scripts_*）。
+    """
     node = shutil.which("node")
-    if not node:
-        pytest.skip("node 不可用，跳过 JS 行为级验证")
+    assert node is not None, (
+        "未找到 node（Node.js）。本用例需 PATH 中可用 node；"
+        "CI 的 test job 必须提供 Node.js（参见 .github/workflows/ci.yml）。"
+    )
     env = {**os.environ, "MASTER_HTML": str(_MASTER_HTML)}
     proc = subprocess.run(
         [node, "-e", _QOI_BEHAVIOUR_JS],
@@ -563,16 +569,28 @@ async def test_pages_and_static_disable_heuristic_cache(slave_client):
         assert "no-cache" in cc, f"{path} Cache-Control={cc!r}"
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="需要 node 执行前端沙箱脚本")
 def test_frontend_inline_scripts_wire_buttons_and_live_refresh():
     """真跑前端脚本（Node 沙箱）：按钮必须绑上 onclick，WS 报文必须触发刷新.
 
     背景：`app.js` 曾未把 `$` 暴露到 window，两页内联脚本首句即 ReferenceError，
     所有按钮静默失效、点值只能靠刷新页面更新——Python 端 HTML 字符串断言看不到这类问题。
+
+    前置条件是**硬断言而非 skip**：脚本必须随仓库受版本控制（`tests/frontend/`，
+    此前放在被 .gitignore 的 `qa_verify/`，导致干净克隆 / CI 中本用例必红），
+    node 必须可用。二者缺失均属 CI 配置缺陷，静默跳过只会让缺陷长期潜伏。
     """
-    script = Path(__file__).parent.parent / "qa_verify" / "qa_webui_dom.mjs"
+    script = Path(__file__).parent / "frontend" / "qa_webui_dom.mjs"
+    assert script.is_file(), (
+        f"前端沙箱脚本缺失: {script}\n"
+        "该脚本须纳入版本控制（tests/frontend/），否则干净克隆 / CI 中本用例必然失败。"
+    )
+    node = shutil.which("node")
+    assert node is not None, (
+        "未找到 node（Node.js）。本用例需 PATH 中可用 node；"
+        "CI 的 test job 必须提供 Node.js（参见 .github/workflows/ci.yml）。"
+    )
     proc = subprocess.run(
-        [shutil.which("node"), str(script)],
+        [node, str(script)],
         capture_output=True, text=True, encoding="utf-8", timeout=60,
     )
     assert proc.returncode == 0, f"前端沙箱验证失败:\n{proc.stdout}\n{proc.stderr}"
