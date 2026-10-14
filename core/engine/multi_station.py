@@ -133,8 +133,19 @@ class MultiStationManager:
         logger.info(f"All {len(self._engines)} stations started successfully")
 
     async def stop_all(self) -> None:
-        """停止所有子站引擎."""
-        if not self._running:
+        """停止并**彻底回收**所有子站引擎（幂等）.
+
+        关停加固（T07）：
+
+        - **不再以 ``_running`` 作为提前返回条件**：``start_all()`` 中途失败
+          会回滚调用 ``stop_all()``，此时 ``_running`` 仍为 False 但 ``_engines``
+          里已有已启动的引擎——旧的提前返回会让这些引擎与其监听端口泄漏。
+          现在只要「有引擎实例」或「标记为运行中」就执行回收。
+        - 逐站 ``stop()`` 后再回收其**残留后台任务**（``aclose_background_tasks``），
+          避免事件循环关闭时出现 "Task was destroyed but it is pending!"。
+        - 清空引擎/配置字典与全局事件回调，复位运行标记与计时。
+        """
+        if not self._engines and not self._running:
             return
 
         logger.info("Stopping all stations...")
@@ -142,13 +153,22 @@ class MultiStationManager:
         for station_id, engine in list(self._engines.items()):
             try:
                 await engine.stop()
-                logger.info(f"Station {station_id} stopped")
             except Exception as e:
                 logger.error(f"Error stopping station {station_id}: {e}")
+            # 关停后回收残留后台任务，防 pending 告警与资源泄漏
+            aclose = getattr(engine, "aclose_background_tasks", None)
+            if aclose is not None:
+                try:
+                    await aclose()
+                except Exception as e:
+                    logger.warning(f"Error reaping station {station_id} tasks: {e}")
+            logger.info(f"Station {station_id} stopped")
 
         self._engines.clear()
         self._station_configs.clear()
+        self._global_event_callback = None
         self._running = False
+        self._start_time = 0.0
         logger.info("All stations stopped")
 
     async def _start_station(self, config: StationConfig) -> None:

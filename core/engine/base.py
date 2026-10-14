@@ -39,3 +39,30 @@ class EngineBase:
 
         task.add_done_callback(_log_exc)
         return task
+
+    async def aclose_background_tasks(self, timeout: float = 2.0) -> int:
+        """取消并回收全部后台任务（关停加固）.
+
+        引擎 ``stop()`` 只取消其**已知的长驻任务**（定时器 / 模拟 / 轮询 /
+        周期总召等）；其余经 ``_spawn()`` 派发的**短驻任务**（如逐帧发送、
+        一次性应答）在关停瞬间可能仍处于 pending。若随后事件循环关闭，
+        这些任务会触发 "Task was destroyed but it is pending!"，并可能
+        泄漏引用/句柄。
+
+        本方法取消 ``_background_tasks`` 中所有未完成任务，并以 ``timeout``
+        **有界**等待其结束，最后清空集合。幂等，可重复调用。
+
+        Returns:
+            本次被取消的任务数量。
+        """
+        pending = [t for t in list(self._background_tasks) if not t.done()]
+        for task in pending:
+            task.cancel()
+        if pending:
+            try:
+                await asyncio.wait(pending, timeout=timeout)
+            except Exception:  # noqa: BLE001 — 关停阶段不允许抛出
+                pass
+        # 无论是否等待完成，都清空引用；未完成者已被取消，循环关闭时不会告警
+        self._background_tasks.clear()
+        return len(pending)
