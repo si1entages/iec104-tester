@@ -94,3 +94,8 @@ config.local.yaml
 
 # QA verification scratch scripts (process artifacts, not deliverables)
 qa_verify/
+
+# Node / 前端工程（源码与锁文件入库，依赖与缓存不入库）
+node_modules/
+webui/frontend/dist/
+webui/frontend/.vite/
