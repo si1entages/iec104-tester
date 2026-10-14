@@ -16,10 +16,11 @@ import yaml
 
 class PointType(enum.Enum):
     """信息类型."""
-    YX = "yx"   # 遥信 (单点/双点)
-    YC = "yc"   # 遥测 (模拟量)
-    YK = "yk"   # 遥控 (控制命令)
-    YM = "ym"   # 遥脉 (电度/累计量)
+    YX = "yx"       # 遥信 (单点/双点)
+    YC = "yc"       # 遥测 (模拟量)
+    YK = "yk"       # 遥控 (控制命令)
+    YM = "ym"       # 遥脉 (电度/累计量)
+    STEP = "step"   # 步位置 (调节档位, M_ST_NA_1)
 
 
 class YxType(enum.Enum):
@@ -88,6 +89,21 @@ class YmPointDef(PointDef):
     frozen: bool = False
 
 
+@dataclass
+class StepPointDef(PointDef):
+    """步位置点定义 (M_ST_NA_1).
+
+    用于建模调节步/档位（真机为 M_ST_NA_1 步位置信息）：档位用带符号整数表示
+    （标准取值范围 -64..+63）。升降命令 (C_RC_NA_1) 执行后按 ``step_size``
+    加减档位并限幅到 ``[min_value, max_value]``。
+    """
+    initial_value: int = 0          # 初始档位
+    min_value: int = -64            # 档位下限
+    max_value: int = 63             # 档位上限
+    step_size: int = 1              # 单次升降步长
+    transient: bool = False         # M_ST 暂态标志 (T 位)
+
+
 class PointTable:
     """点表管理器.
 
@@ -103,6 +119,7 @@ class PointTable:
         self._yc: dict[int, YcPointDef] = {}
         self._yk: dict[int, YkPointDef] = {}
         self._ym: dict[int, YmPointDef] = {}
+        self._step: dict[int, StepPointDef] = {}
         self._lock = threading.RLock()
         self._station_name: str = ""
         self._common_addr: int = 1
@@ -141,6 +158,10 @@ class PointTable:
         with self._lock:
             self._ym[point.ioa] = point
 
+    def add_step(self, point: StepPointDef) -> None:
+        with self._lock:
+            self._step[point.ioa] = point
+
     def get_yx(self, ioa: int) -> YxPointDef | None:
         with self._lock:
             return self._yx.get(ioa)
@@ -156,6 +177,10 @@ class PointTable:
     def get_ym(self, ioa: int) -> YmPointDef | None:
         with self._lock:
             return self._ym.get(ioa)
+
+    def get_step(self, ioa: int) -> StepPointDef | None:
+        with self._lock:
+            return self._step.get(ioa)
 
     def remove_point(self, point_type: PointType, ioa: int) -> bool:
         with self._lock:
@@ -181,6 +206,10 @@ class PointTable:
         with self._lock:
             return sorted(self._ym.values(), key=lambda p: p.ioa)
 
+    def get_all_step(self) -> list[StepPointDef]:
+        with self._lock:
+            return sorted(self._step.values(), key=lambda p: p.ioa)
+
     def get_yx_by_group(self, group: int) -> list[YxPointDef]:
         with self._lock:
             return sorted(
@@ -192,6 +221,13 @@ class PointTable:
         with self._lock:
             return sorted(
                 [p for p in self._yc.values() if p.group == group],
+                key=lambda p: p.ioa
+            )
+
+    def get_step_by_group(self, group: int) -> list[StepPointDef]:
+        with self._lock:
+            return sorted(
+                [p for p in self._step.values() if p.group == group],
                 key=lambda p: p.ioa
             )
 
@@ -215,12 +251,18 @@ class PointTable:
         with self._lock:
             return len(self._ym)
 
+    @property
+    def step_count(self) -> int:
+        with self._lock:
+            return len(self._step)
+
     def _get_store(self, point_type: PointType) -> dict:
         return {
             PointType.YX: self._yx,
             PointType.YC: self._yc,
             PointType.YK: self._yk,
             PointType.YM: self._ym,
+            PointType.STEP: self._step,
         }[point_type]
 
     # ── YAML 导入导出 ────────────────────────────────────────────
@@ -241,6 +283,7 @@ class PointTable:
             self._yc.clear()
             self._yk.clear()
             self._ym.clear()
+            self._step.clear()
 
             for p in data.get('yx', []):
                 point = YxPointDef(
@@ -293,6 +336,20 @@ class PointTable:
                     initial_value=p.get('initial_value', 0),
                 )
                 self._ym[point.ioa] = point
+
+            for p in data.get('step', []):
+                point = StepPointDef(
+                    ioa=p['ioa'],
+                    name=p.get('name', ''),
+                    group=p.get('group', 1),
+                    enabled=p.get('enabled', True),
+                    initial_value=p.get('initial_value', 0),
+                    min_value=p.get('min_value', -64),
+                    max_value=p.get('max_value', 63),
+                    step_size=p.get('step_size', 1),
+                    transient=p.get('transient', False),
+                )
+                self._step[point.ioa] = point
 
     def save_yaml(self, path: str | Path) -> None:
         """导出点表到 YAML 文件."""
@@ -352,6 +409,20 @@ class PointTable:
                     }
                     for p in sorted(self._ym.values(), key=lambda x: x.ioa)
                 ],
+                'step': [
+                    {
+                        'ioa': p.ioa,
+                        'name': p.name,
+                        'group': p.group,
+                        'enabled': p.enabled,
+                        'initial_value': p.initial_value,
+                        'min_value': p.min_value,
+                        'max_value': p.max_value,
+                        'step_size': p.step_size,
+                        'transient': p.transient,
+                    }
+                    for p in sorted(self._step.values(), key=lambda x: x.ioa)
+                ],
             }
 
         with open(path, 'w', encoding='utf-8') as f:
@@ -394,6 +465,7 @@ class PointTable:
         yc_count: int = 50,
         yk_count: int = 20,
         ym_count: int = 10,
+        step_count: int = 10,
     ) -> None:
         """生成演示用点表."""
         with self._lock:
@@ -401,6 +473,7 @@ class PointTable:
             self._yc.clear()
             self._yk.clear()
             self._ym.clear()
+            self._step.clear()
 
             for i in range(yx_count):
                 group = (i // 16) + 1  # 每16个一组
@@ -435,4 +508,14 @@ class PointTable:
                     ioa=i + 3001,
                     name=f"YM_{i + 1:04d}",
                     initial_value=0,
+                )
+
+            for i in range(step_count):
+                self._step[i + 4001] = StepPointDef(
+                    ioa=i + 4001,
+                    name=f"STEP_{i + 1:04d}",
+                    initial_value=0,
+                    min_value=-64,
+                    max_value=63,
+                    step_size=1,
                 )

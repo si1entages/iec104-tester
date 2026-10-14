@@ -327,6 +327,8 @@ class SlaveEngine(EngineBase):
                 point.change_count = 0
             for point in self._data_store._ym.values():
                 point.change_count = 0
+            for point in self._data_store._step.values():
+                point.change_count = 0
         logger.info("Change counts reset")
 
     # ── ASDU 处理（分发）─────────────────────────────────────────
@@ -651,10 +653,12 @@ class SlaveEngine(EngineBase):
     async def _reflect_command_result(self, ioa: int, *,
                                       single: bool | None = None,
                                       double_state: int | None = None,
-                                      yc_value: float | None = None) -> bool:
+                                      yc_value: float | None = None,
+                                      step_delta: int | None = None) -> bool:
         """命令结果联动并自发上送（门面 → SlaveSimulator）."""
         return await self._sim.reflect_command_result(
-            ioa, single=single, double_state=double_state, yc_value=yc_value
+            ioa, single=single, double_state=double_state, yc_value=yc_value,
+            step_delta=step_delta,
         )
 
     async def send_spontaneous_yx(self, ioa: int, value: bool,
@@ -678,9 +682,10 @@ class SlaveEngine(EngineBase):
         await self._sim.send_spontaneous_ym(ioa, value, quality)
 
     async def send_spontaneous_step(self, ioa: int, value: int,
-                                    quality: int = 0) -> None:
+                                    quality: int = 0,
+                                    transient: bool = False) -> None:
         """自发上送步位置变化（门面 → SlaveSimulator）."""
-        await self._sim.send_spontaneous_step(ioa, value, quality)
+        await self._sim.send_spontaneous_step(ioa, value, quality, transient)
 
     async def send_protection_event(self, ioa: int, event_value: int = 1,
                                     with_time: bool = True, quality: int = 0) -> None:

@@ -98,9 +98,25 @@ class YmData:
 
 
 @dataclass
+class StepData:
+    """步位置实时数据 (M_ST_NA_1)."""
+    ioa: int = 0
+    value: int = 0              # 档位 -64..+63 (7bit 有符号)
+    transient: bool = False     # M_ST 暂态标志 (T 位)
+    quality: QualityDescriptor = field(default_factory=QualityDescriptor)
+    timestamp: float = 0.0
+    change_count: int = 0
+    name: str = ""
+    group: int = 1
+    min_val: int = -64
+    max_val: int = 63
+    step_size: int = 1
+
+
+@dataclass
 class DataChangeEvent:
     """数据变化事件."""
-    point_type: str     # "yx"/"yc"/"ym"
+    point_type: str     # "yx"/"yc"/"ym"/"step"
     ioa: int
     old_value: Any
     new_value: Any
@@ -127,6 +143,7 @@ class RealtimeDB:
         self._yc: dict[int, YcData] = {}
         self._yk: dict[int, YkData] = {}
         self._ym: dict[int, YmData] = {}
+        self._step: dict[int, StepData] = {}
         self._lock = threading.RLock()
 
         # 变化事件
@@ -193,6 +210,20 @@ class RealtimeDB:
                     quality=QualityDescriptor(p.initial_quality),
                     timestamp=time.monotonic(),
                     name=p.name,
+                )
+
+            for p in point_table.get_all_step():
+                self._step[p.ioa] = StepData(
+                    ioa=p.ioa,
+                    value=p.initial_value,
+                    transient=p.transient,
+                    quality=QualityDescriptor(p.initial_quality),
+                    timestamp=time.monotonic(),
+                    name=p.name,
+                    group=p.group,
+                    min_val=p.min_value,
+                    max_val=p.max_value,
+                    step_size=p.step_size,
                 )
 
     # ── 遥信操作 ────────────────────────────────────────────────
@@ -380,6 +411,58 @@ class RealtimeDB:
         """获取遥脉数据引用（无拷贝，高性能）。"""
         return self._ym
 
+    # ── 步位置操作 ──────────────────────────────────────────────
+
+    def update_step(self, ioa: int, value: int,
+                    quality: QualityDescriptor = None,
+                    transient: bool = False) -> bool:
+        """更新步位置档位 (M_ST_NA_1).
+
+        Returns:
+            True 如果值发生了变化
+        """
+        with self._lock:
+            point = self._step.get(ioa)
+            if point is None:
+                point = StepData(ioa=ioa)
+                self._step[ioa] = point
+
+            old_value = point.value
+            changed = value != old_value or (
+                quality is not None and quality != point.quality
+            )
+
+            point.value = value
+            point.transient = transient
+            if quality is not None:
+                point.quality = quality
+            point.timestamp = time.monotonic()
+
+            if changed:
+                point.change_count += 1
+                self._total_changes += 1
+                self._fire_event(DataChangeEvent(
+                    point_type="step", ioa=ioa,
+                    old_value=old_value, new_value=value,
+                    timestamp=point.timestamp,
+                    quality=quality or point.quality,
+                ))
+
+            self._total_updates += 1
+            return changed
+
+    def get_step(self, ioa: int) -> StepData | None:
+        with self._lock:
+            return self._step.get(ioa)
+
+    def get_all_step(self) -> dict[int, StepData]:
+        with self._lock:
+            return self._step
+
+    def get_step_ref(self) -> dict[int, StepData]:
+        """获取步位置数据引用（无拷贝，高性能）。"""
+        return self._step
+
     def get_changed_ioas(self) -> tuple[set[int], set[int], set[int]]:
         """获取自上次调用以来变化的IOA集合，并清空。"""
         with self._lock:
@@ -401,6 +484,7 @@ class RealtimeDB:
                 'yc': dict(self._yc),
                 'yk': dict(self._yk),
                 'ym': dict(self._ym),
+                'step': dict(self._step),
                 'stats': {
                     'total_updates': self._total_updates,
                     'total_changes': self._total_changes,
@@ -408,6 +492,7 @@ class RealtimeDB:
                     'yc_count': len(self._yc),
                     'yk_count': len(self._yk),
                     'ym_count': len(self._ym),
+                    'step_count': len(self._step),
                 },
             }
 
@@ -452,6 +537,7 @@ class RealtimeDB:
                 'yc_count': len(self._yc),
                 'yk_count': len(self._yk),
                 'ym_count': len(self._ym),
+                'step_count': len(self._step),
                 'event_buffer_size': len(self._event_buffer),
             }
 
@@ -462,6 +548,7 @@ class RealtimeDB:
             self._yc.clear()
             self._yk.clear()
             self._ym.clear()
+            self._step.clear()
             self._event_buffer.clear()
             self._total_updates = 0
             self._total_changes = 0

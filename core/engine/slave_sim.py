@@ -163,14 +163,17 @@ class SlaveSimulator:
     async def reflect_command_result(self, ioa: int, *,
                                      single: bool | None = None,
                                      double_state: int | None = None,
-                                     yc_value: float | None = None) -> bool:
+                                     yc_value: float | None = None,
+                                     step_delta: int | None = None) -> bool:
         """把命令执行结果联动到被控点并自发上送（**以真机为准**）.
 
         真机语义：
         - 遥控执行成功后，同 IOA 的遥信立即变位并带时标上送（COT=3, SOE）；
         - 遥调/设点执行成功后，同 IOA 的遥测更新并上报（COT=3）；
-        - 上送类型由**点表声明**决定：单点遥信 → M_SP_TB_1，双点遥信 → M_DP_TB_1；
-        - 点表没有该点、或值未发生变化时不上送（真机不做无变化的冗余上送）。
+        - 升降命令执行成功后，同 IOA 的**步位置**按步长加减并限幅后上送；
+        - 上送类型由**点表声明**决定：单点遥信 → M_SP_TB_1，双点遥信 → M_DP_TB_1，
+          步位置 → M_ST_TB_1；
+        - 点表没有该点、或值未发生变化（含已到限幅边界）时不上送。
 
         上送受 ``spontaneous_enabled`` 约束（关闭时仍更新实时库，供召唤使用）。
 
@@ -179,11 +182,27 @@ class SlaveSimulator:
             single: 单命令目标状态（True=合）。
             double_state: 双命令目标状态（1=分, 2=合）。
             yc_value: 设点目标值（工程值）。
+            step_delta: 升降步数增量（+1=升一步 / -1=降一步）。
 
         Returns:
             True 表示已完成联动（值有变化或被更新）。
         """
         e = self._engine
+        if step_delta is not None:
+            point = e._point_table.get_step(ioa)
+            if point is None:
+                logger.debug(f"Command feedback: STEP IOA={ioa} 不在点表，跳过联动")
+                return False
+            current = e._data_store.get_step(ioa)
+            cur = int(current.value) if current is not None else int(point.initial_value)
+            new_value = cur + int(point.step_size) * int(step_delta)
+            # 限幅到点表定义的上下限（升到上限不再增、降到下限不再减）
+            new_value = max(int(point.min_value), min(int(point.max_value), new_value))
+            if new_value == cur:
+                return False
+            await self.send_spontaneous_step(ioa, new_value, transient=point.transient)
+            return True
+
         if yc_value is not None:
             if e._point_table.get_yc(ioa) is None:
                 logger.debug(f"Command feedback: YC IOA={ioa} 不在点表，跳过联动")
@@ -282,17 +301,19 @@ class SlaveSimulator:
         await e._session.broadcast_i_frame(asdu_data)
 
     async def send_spontaneous_step(self, ioa: int, value: int,
-                                    quality: int = 0) -> None:
-        """自发上送步位置变化."""
+                                    quality: int = 0,
+                                    transient: bool = False) -> None:
+        """自发上送步位置变化 (M_ST_TB_1, COT=3)."""
         e = self._engine
-        e._data_store.update_yc(ioa, float(value), QualityDescriptor(quality))
+        e._data_store.update_step(ioa, int(value), QualityDescriptor(quality),
+                                  transient=transient)
 
         if not e._spontaneous_enabled:
             return
 
         asdu_data = ASDUBuilder.build_step_position(
-            e._common_addr, ioa, value, quality,
-            cot=COT.SPONT, with_time=True
+            e._common_addr, ioa, int(value), quality,
+            transient=transient, cot=COT.SPONT, with_time=True
         )
         await e._session.broadcast_i_frame(asdu_data)
 

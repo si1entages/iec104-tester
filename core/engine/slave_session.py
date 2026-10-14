@@ -536,6 +536,10 @@ class SlaveSession:
 
                     # 发送激活终止
                     await self.send_i_frame(state, e._build_command_ack(asdu.type_id, COT.ACTTERM, obj))
+                    # 真机语义：升降成功后同 IOA 步位置按步长加减并主动上送
+                    step_delta = 1 if int(cmd.state) == 2 else (-1 if int(cmd.state) == 1 else 0)
+                    if step_delta:
+                        await e._reflect_command_result(obj.ioa, step_delta=step_delta)
                 else:
                     # 未选择，回复否定确认 (COT bit6 P/N=1)
                     await self.send_i_frame(state, e._build_command_ack(asdu.type_id, COT.ACTCON, obj, pn=True))
