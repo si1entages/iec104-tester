@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react'
 
 import { ClearOutlined, DownloadOutlined, ReloadOutlined } from '@ant-design/icons'
+import { useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, Select, Space, Table, Tag } from 'antd'
 import type { TableColumnsType } from 'antd'
 
-import { useLogsQuery } from '../api/queries'
+import { LOGS_EXPORT_URL } from '../api/endpoints'
+import { clearLiveLogs, useLiveLogs, useLogsQuery } from '../api/queries'
 import type { LogLevel, LogQueryParams, LogRow } from '../api/types'
 import { useUiStore } from '../store/uiStore'
 
@@ -34,8 +36,7 @@ const CATEGORY_OPTIONS = ['connection', 'protocol', 'command', 'data', 'ui', 'sy
 
 function formatTime(ts: number): string {
   if (!ts) return '-'
-  const d = new Date(ts * 1000)
-  return d.toLocaleString('zh-CN', { hour12: false })
+  return new Date(ts * 1000).toLocaleString('zh-CN', { hour12: false })
 }
 
 function rowKey(row: LogRow): string {
@@ -52,7 +53,12 @@ function matches(row: LogRow, params: LogQueryParams): boolean {
 }
 
 const columns: TableColumnsType<LogRow> = [
-  { title: '时间', dataIndex: 'ts', width: 190, render: (ts: number) => <span className="mono">{formatTime(ts)}</span> },
+  {
+    title: '时间',
+    dataIndex: 'ts',
+    width: 190,
+    render: (ts: number) => <span className="mono">{formatTime(ts)}</span>,
+  },
   {
     title: '级别',
     dataIndex: 'level',
@@ -69,14 +75,16 @@ export function LogsPage() {
   const [category, setCategory] = useState<string | undefined>(undefined)
   const [keyword, setKeyword] = useState<string>('')
 
+  const queryClient = useQueryClient()
   const params = useMemo<LogQueryParams>(
     () => ({ level_min: levelMin, category, q: keyword || undefined, limit: 200 }),
     [levelMin, category, keyword],
   )
 
-  const liveLogs = useUiStore((s) => s.liveLogs)
-  const clearLogs = useUiStore((s) => s.clearLogs)
+  const liveLogs = useLiveLogs()
   const logsQuery = useLogsQuery(params)
+  const wsStatus = useUiStore((s) => s.wsStatus)
+  const droppedFrames = useUiStore((s) => s.droppedFrames)
 
   const rows = useMemo(() => {
     const seen = new Set<string>()
@@ -90,7 +98,7 @@ export function LogsPage() {
       seen.add(key)
       out.push(row)
     }
-    // 再补历史（后端返回默认 newest_first）
+    // 再补历史（后端默认 newest_first）
     for (const row of logsQuery.data?.logs ?? []) {
       const key = rowKey(row)
       if (seen.has(key)) continue
@@ -103,19 +111,27 @@ export function LogsPage() {
   return (
     <Card
       size="small"
-      title={`日志（实时 ${liveLogs.length} / 历史 ${logsQuery.data?.logs.length ?? 0}）`}
+      title={
+        <Space>
+          <span>日志</span>
+          <Tag color="blue">实时 {liveLogs.length}</Tag>
+          <Tag>历史 {logsQuery.data?.logs.length ?? 0}</Tag>
+          {wsStatus !== 'open' ? <Tag color="orange">实时流已断开</Tag> : null}
+          {droppedFrames > 0 ? <Tag color="warning">已丢帧 {droppedFrames}</Tag> : null}
+        </Space>
+      }
       extra={
         <Space>
           <Button icon={<ReloadOutlined />} onClick={() => void logsQuery.refetch()}>
             刷新
           </Button>
-          <Button icon={<ClearOutlined />} onClick={clearLogs}>
+          <Button icon={<ClearOutlined />} onClick={() => clearLiveLogs(queryClient)}>
             清空实时
           </Button>
           <Button
             type="primary"
             icon={<DownloadOutlined />}
-            onClick={() => window.open('/api/logs/export', '_blank')}
+            onClick={() => window.open(LOGS_EXPORT_URL, '_blank')}
           >
             导出 JSONL
           </Button>

@@ -2,10 +2,12 @@ import { AppLayout } from './layout/AppLayout'
 import { LogsPage } from './pages/LogsPage'
 import { StatusPage } from './pages/StatusPage'
 import { useUiStore } from './store/uiStore'
+import { useSchemaHandshake } from './hooks/useSchemaHandshake'
 import { useWsBridge } from './ws/useWsBridge'
 
 export default function App() {
-  // 全局 WS：把 snapshot/log 灌进 React Query 缓存与 Zustand
+  // 契约版本协商（GET /api/schema）+ 全局 WS（snapshot 先行 / 背压感知）
+  useSchemaHandshake()
   useWsBridge()
   const page = useUiStore((s) => s.page)
 

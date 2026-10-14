@@ -38,31 +38,54 @@ IEC104_BACKEND=http://127.0.0.1:8766 npm run dev
 ```
 webui/frontend/
 ├── index.html            # Vite 入口
-├── vite.config.ts        # base=/app/、outDir=../static/app、dev 代理
+├── vite.config.ts        # base=/app/、outDir=../static/app、dev 代理、app/ 精确清理
 ├── vitest.config.ts      # 单测配置（jsdom）
 ├── tsconfig.json
 ├── package.json / package-lock.json
 └── src/
-    ├── main.tsx          # 入口：ConfigProvider(dark) + React Query + ErrorBoundary
-    ├── App.tsx           # 页面切换 + 全局 WS 桥
+    ├── main.tsx          # 入口：ConfigProvider(dark) + React Query + antd App + ErrorBoundary
+    ├── App.tsx           # 页面切换 + 契约协商 + 全局 WS 桥
     ├── theme.ts          # antd darkAlgorithm 主题
-    ├── api/              # REST 客户端 / 类型 / React Query hooks
-    ├── ws/               # WS 客户端（断线重连）+ 桥接 hook
-    ├── store/            # Zustand（UI 状态 + live 日志缓冲）
+    ├── api/
+    │   ├── schema.ts     # SCHEMA_VERSION + 版本不匹配判定（与 events.py 对齐）
+    │   ├── types.ts      # 契约类型（api_contract.md 的 TS 投影）
+    │   ├── validate.ts   # 零依赖运行时校验（宽进严出、绝不抛异常）
+    │   ├── client.ts     # fetch 封装 / buildUrl / ApiError
+    │   ├── endpoints.ts  # 全部 REST 端点（36 个）
+    │   └── queries.ts    # React Query：queries + 命令 mutations + 失效策略
+    ├── ws/
+    │   ├── client.ts     # WS 客户端：指数退避重连 + 背压感知
+    │   └── useWsBridge.ts# snapshot 先行 + 写入 React Query 缓存
+    ├── hooks/useSchemaHandshake.ts
+    ├── store/uiStore.ts  # Zustand：**仅** UI 状态（页面 / 连接指示 / 告警）
     ├── layout/           # AppLayout / ErrorBoundary
     ├── pages/            # StatusPage / LogsPage
     ├── styles/
     └── test/
 ```
 
+## 数据层与状态分层（T11）
+
+- **REST**：`api/endpoints.ts` 覆盖 `api_contract.md` 全部 36 个端点；
+  `api/queries.ts` 提供 `useStatusQuery` / `usePointsQuery` / `useLogsQuery` /
+  `useLiveLogs` 与命令 `useCommand` / `useCommandNoArgs`（命令返回后自动失效
+  `status` / `points`，断线时也能对齐）。
+- **WS**：`ws/client.ts` 指数退避重连（1s→30s）+ 发送侧背压检测；
+  `ws/useWsBridge.ts` 保证 **snapshot 先行**（重连后先对齐快照，期间增量入缓冲区，
+  快照落地后按序回放），并把结果写入 React Query 缓存。
+- **状态分层**：服务端数据（状态 / 点表 / 日志）**只存在于 React Query 缓存**；
+  Zustand 仅保存 UI 状态（当前页、连接指示、契约/背压告警）。
+- **契约版本**：`api/schema.ts::SCHEMA_VERSION` 必须与后端
+  `webui/events.py::SCHEMA_VERSION` 一致（由 `webui/contract_check.py` 强制）；
+  不一致时界面**告警 + 降级渲染，不崩溃**。
+- **运行时校验**：`api/validate.ts` 以零依赖守卫函数过滤脏数据，
+  不匹配的载荷直接忽略而非抛出异常。
+
 ## 与后端的契约
 
 所有数据只经 REST/WS 契约访问后端（方案 R7：前端零 Python 依赖），契约见
-[`../api_contract.md`](../api_contract.md)。首版消费：
-
-- `GET /api/status`、`GET /api/points`（状态总览）
-- `GET /api/logs`、`GET /api/logs/export`（日志面板）
-- `WS /ws`：`snapshot` / `log` 消息
+[`../api_contract.md`](../api_contract.md)。信封形如
+`{kind, schemaVersion, ts, data}`（`snapshot` / `frame` / `event` / `log`）。
 
 ## 构建产物与打包
 

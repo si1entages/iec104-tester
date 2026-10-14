@@ -1,10 +1,30 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
-import { Alert, Card, Col, Descriptions, Row, Statistic, Table, Tag } from 'antd'
+import {
+  Alert,
+  Button,
+  Card,
+  Col,
+  Descriptions,
+  Input,
+  InputNumber,
+  Row,
+  Space,
+  Statistic,
+  Table,
+  Tag,
+  App as AntdApp,
+} from 'antd'
 import type { TableColumnsType } from 'antd'
 
-import { usePointsQuery, useStatusQuery } from '../api/queries'
-import type { Point } from '../api/types'
+import { api } from '../api/endpoints'
+import {
+  useCommand,
+  useCommandNoArgs,
+  usePointsQuery,
+  useStatusQuery,
+} from '../api/queries'
+import type { OkResponse, Point } from '../api/types'
 
 const pointColumns: TableColumnsType<Point> = [
   { title: 'IOA', dataIndex: 'ioa', width: 90, sorter: (a, b) => a.ioa - b.ioa },
@@ -29,9 +49,57 @@ const pointColumns: TableColumnsType<Point> = [
 ]
 
 export function StatusPage() {
+  const { message } = AntdApp.useApp()
   const statusQuery = useStatusQuery()
   const pointsQuery = usePointsQuery()
   const status = statusQuery.data
+  const role = status?.role
+  const running = Boolean(status?.running)
+
+  const [host, setHost] = useState('127.0.0.1')
+  const [port, setPort] = useState(2404)
+  const [addr, setAddr] = useState(1)
+
+  // 状态里的连接参数一旦变化（启动/断开）就回填表单，避免输入框与实际脱节
+  useEffect(() => {
+    if (!status) return
+    if (typeof status.host === 'string') setHost(status.host)
+    if (typeof status.port === 'number') setPort(status.port)
+    if (typeof status.addr === 'number') setAddr(status.addr)
+  }, [status?.host, status?.port, status?.addr])
+
+  const masterStart = useCommand(api.master.start)
+  const masterStop = useCommandNoArgs(api.master.stop)
+  const slaveStart = useCommand(api.slave.start)
+  const slaveStop = useCommandNoArgs(api.slave.stop)
+  const gi = useCommand(api.master.gi)
+  const clock = useCommandNoArgs(api.master.clock)
+  const testCommand = useCommandNoArgs(api.master.test)
+  const reset = useCommandNoArgs(api.master.reset)
+
+  const report = (result: OkResponse): void => {
+    if (result.ok) message.success('命令已下发')
+    else message.error(result.error ?? '命令失败')
+  }
+
+  const handleStart = async (): Promise<void> => {
+    const body = { host, port, addr }
+    report(role === 'slave' ? await slaveStart.mutateAsync(body) : await masterStart.mutateAsync(body))
+  }
+
+  const handleStop = async (): Promise<void> => {
+    report(role === 'slave' ? await slaveStop.mutateAsync() : await masterStop.mutateAsync())
+  }
+
+  const busy =
+    masterStart.isPending ||
+    masterStop.isPending ||
+    slaveStart.isPending ||
+    slaveStop.isPending ||
+    gi.isPending ||
+    clock.isPending ||
+    testCommand.isPending ||
+    reset.isPending
 
   const items = useMemo(() => {
     if (!status) return []
@@ -57,6 +125,52 @@ export function StatusPage() {
           description={String((statusQuery.error as Error)?.message ?? statusQuery.error)}
         />
       ) : null}
+
+      <Card title="连接与命令" size="small">
+        <Space wrap>
+          <Input
+            prefix="主机"
+            style={{ width: 220 }}
+            value={host}
+            onChange={(e) => setHost(e.target.value)}
+          />
+          <InputNumber
+            prefix="端口"
+            min={0}
+            max={65535}
+            value={port}
+            onChange={(v) => setPort(Number(v ?? 2404))}
+          />
+          <InputNumber
+            prefix="地址"
+            min={0}
+            value={addr}
+            onChange={(v) => setAddr(Number(v ?? 1))}
+          />
+          <Button type="primary" loading={busy} disabled={running} onClick={() => void handleStart()}>
+            {role === 'slave' ? '启动监听' : '连接'}
+          </Button>
+          <Button danger loading={busy} disabled={!running} onClick={() => void handleStop()}>
+            {role === 'slave' ? '停止监听' : '断开'}
+          </Button>
+        </Space>
+        {role === 'master' ? (
+          <Space wrap style={{ marginTop: 12 }}>
+            <Button size="small" disabled={!running} onClick={() => void gi.mutateAsync({}).then(report)}>
+              总召唤
+            </Button>
+            <Button size="small" disabled={!running} onClick={() => void clock.mutateAsync().then(report)}>
+              时钟同步
+            </Button>
+            <Button size="small" disabled={!running} onClick={() => void testCommand.mutateAsync().then(report)}>
+              测试命令
+            </Button>
+            <Button size="small" disabled={!running} onClick={() => void reset.mutateAsync().then(report)}>
+              复位进程
+            </Button>
+          </Space>
+        ) : null}
+      </Card>
 
       <Row gutter={16}>
         <Col span={6}>

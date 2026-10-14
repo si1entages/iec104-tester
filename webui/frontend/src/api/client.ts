@@ -1,6 +1,7 @@
 /**
- * REST 客户端：与 aiohttp 后端同源，无需拼 BASE（dev 期由 vite 代理 /api）。
- * 契约：HTTP 200 + JSON `{ok, ...}`；失败含 `error` 字符串（见 api_contract.md）。
+ * REST 客户端底层（T11）：与 aiohttp 后端同源，无需拼 BASE（dev 期由 vite 代理 /api）。
+ * 契约：HTTP 200 + JSON `{ok, ...}`；失败含 `error` 字符串；参数非法为 400。
+ * 权威契约见 `webui/api_contract.md`。
  */
 
 export class ApiError extends Error {
@@ -47,37 +48,60 @@ function errorMessage(body: unknown, status: number): string {
     const err = (body as { error?: unknown }).error
     if (typeof err === 'string' && err) return err
   }
+  if (typeof body === 'string' && body.trim()) return body.trim().slice(0, 300)
   return `HTTP ${status}`
 }
 
-async function request<T>(method: string, path: string, init?: {
+interface RequestOptions {
   params?: Record<string, QueryValue>
-  body?: unknown
-}): Promise<T> {
-  const url = buildUrl(path, init?.params)
+  /** JSON 请求体 */
+  json?: unknown
+  /** 原始文本请求体（用于 /api/points/yaml、/api/points/import） */
+  text?: string
+  contentType?: string
+}
+
+async function send(method: string, path: string, options: RequestOptions = {}): Promise<Response> {
   const headers: Record<string, string> = {}
-  const options: RequestInit = { method, headers }
-  if (init?.body !== undefined) {
+  const init: RequestInit = { method, headers }
+  if (options.text !== undefined) {
+    headers['Content-Type'] = options.contentType ?? 'text/plain;charset=utf-8'
+    init.body = options.text
+  } else if (options.json !== undefined || method === 'POST') {
     headers['Content-Type'] = 'application/json'
-    options.body = JSON.stringify(init.body)
+    init.body = JSON.stringify(options.json ?? {})
   }
-  const res = await fetch(url, options)
+  return fetch(buildUrl(path, options.params), init)
+}
+
+async function asJson<T>(res: Response): Promise<T> {
   const body = await readBody(res)
   if (!res.ok) throw new ApiError(res.status, errorMessage(body, res.status))
   return body as T
 }
 
-export function apiGet<T>(path: string, params?: Record<string, QueryValue>): Promise<T> {
-  return request<T>('GET', path, { params })
+export async function apiGet<T>(
+  path: string,
+  params?: Record<string, QueryValue>,
+): Promise<T> {
+  return asJson<T>(await send('GET', path, { params }))
 }
 
-export function apiPost<T>(path: string, body?: unknown): Promise<T> {
-  return request<T>('POST', path, { body: body ?? {} })
+export async function apiPost<T>(path: string, json?: unknown): Promise<T> {
+  return asJson<T>(await send('POST', path, { json }))
 }
 
-/** 文本类响应（YAML / CSV）。 */
-export async function apiGetText(path: string, params?: Record<string, QueryValue>): Promise<string> {
-  const res = await fetch(buildUrl(path, params))
+/** POST 原始文本（YAML / 点表导入），响应仍是 JSON。 */
+export async function apiPostText<T>(path: string, text: string): Promise<T> {
+  return asJson<T>(await send('POST', path, { text }))
+}
+
+/** 取文本响应（YAML / CSV）。 */
+export async function apiGetText(
+  path: string,
+  params?: Record<string, QueryValue>,
+): Promise<string> {
+  const res = await send('GET', path, { params })
   const text = await res.text()
   if (!res.ok) throw new ApiError(res.status, errorMessage(text, res.status))
   return text

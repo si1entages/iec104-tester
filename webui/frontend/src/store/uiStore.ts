@@ -1,32 +1,55 @@
 import { create } from 'zustand'
 
-import type { LogRow } from '../api/types'
+import type { WsStatus } from '../ws/client'
 
 export type PageKey = 'status' | 'logs'
 
-const MAX_LIVE_LOGS = 500
-
+/**
+ * 纯 UI 状态（T11）。
+ * 约束：**不在 Zustand 里缓存服务端数据**——状态 / 点表 / 日志全部由 React Query 持有，
+ * 本 store 只保存「界面上打开哪个页、连接指示、告警文案」这类本地状态。
+ */
 interface UiState {
   page: PageKey
   setPage: (page: PageKey) => void
-  /** WS 连接状态（头部指示） */
-  wsConnected: boolean
-  setWsConnected: (connected: boolean) => void
-  /** WS 实时日志环形缓冲 */
-  liveLogs: LogRow[]
-  seedLogs: (rows: LogRow[]) => void
-  pushLog: (row: LogRow) => void
-  clearLogs: () => void
+
+  /** WS 连接状态（头部指示 + 日志页提示） */
+  wsStatus: WsStatus
+  setWsStatus: (status: WsStatus) => void
+
+  /** 契约版本不匹配时的降级告警（null = 正常） */
+  schemaWarning: string | null
+  setSchemaWarning: (warning: string | null) => void
+
+  /** 后端背压丢弃累计（来自 Status.dropped） */
+  droppedFrames: number
+  setDroppedFrames: (dropped: number) => void
+
+  /** 发送侧积压提示（WS bufferedAmount 超阈值） */
+  sendBackpressure: string | null
+  setSendBackpressure: (notice: string | null) => void
+
+  /** 等待重连后的首个快照（此期间应用不接收增量） */
+  resyncing: boolean
+  setResyncing: (resyncing: boolean) => void
 }
 
 export const useUiStore = create<UiState>((set) => ({
   page: 'status',
   setPage: (page) => set({ page }),
-  wsConnected: false,
-  setWsConnected: (wsConnected) => set({ wsConnected }),
-  liveLogs: [],
-  seedLogs: (rows) => set({ liveLogs: rows.slice(-MAX_LIVE_LOGS) }),
-  pushLog: (row) =>
-    set((state) => ({ liveLogs: [...state.liveLogs, row].slice(-MAX_LIVE_LOGS) })),
-  clearLogs: () => set({ liveLogs: [] }),
+
+  wsStatus: 'idle',
+  setWsStatus: (wsStatus) => set({ wsStatus }),
+
+  schemaWarning: null,
+  setSchemaWarning: (schemaWarning) => set({ schemaWarning }),
+
+  droppedFrames: 0,
+  setDroppedFrames: (droppedFrames) => set({ droppedFrames }),
+
+  sendBackpressure: null,
+  setSendBackpressure: (sendBackpressure) => set({ sendBackpressure }),
+
+  resyncing: false,
+  setResyncing: (resyncing) => set({ resyncing }),
 }))
