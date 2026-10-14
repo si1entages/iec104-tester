@@ -1,0 +1,236 @@
+classDiagram
+    %% ===== 协议层（纯同步，无 async / 无 GUI） =====
+    class APCICodec {
+        +encode_i(send_seq, recv_seq, asdu) bytes
+        +encode_s(recv_seq) bytes
+        +encode_u(utype) bytes
+        +decode(data) APCI
+    }
+    class ASDU {
+        +type_id: TypeID
+        +sq: int
+        +cot: COT
+        +common_addr: int
+        +objects: list~InformationObject~
+        +encode() bytes
+        +decode(data) ASDU
+    }
+    class ASDUBuilder {
+        +build(...) ASDU
+        +general_interrogation(addr) ASDU
+        +single_command(ioa, value, select) ASDU
+        +setpoint_shortfloat(ioa, value) ASDU
+    }
+    class SequenceManager {
+        +k: int
+        +w: int
+        +send_seq: int
+        +recv_seq: int
+        +unconfirmed_count: int
+        +next_send() int
+        +on_recv_i(frame) void
+        +need_ack() bool
+    }
+    class ConnectionStateMachine {
+        +state: str
+        +is_running: bool
+        +t0: float
+        +t1: float
+        +t2: float
+        +t3: float
+        +on_state_change: Callable
+        +on_timer_expired: Callable
+        +start() void
+        +stop() void
+    }
+    class FileTransferMaster
+    class FileTransferSlave
+
+    %% ===== 传输层 =====
+    class TCPClient {
+        +connect() void
+        +send(data) void
+        +close() void
+        +stats: ConnectionStats
+    }
+    class TCPServer {
+        +start() void
+        +broadcast(data) void
+        +stop() void
+    }
+    class TCPConnection {
+        +send(data) void
+        +close() void
+        +is_closed: bool
+    }
+    class ConnectionStats {
+        +frames_sent: int
+        +frames_received: int
+    }
+
+    %% ===== 数据层 =====
+    class RealtimeDB {
+        +update_yx(ioa, value) void
+        +update_yc(ioa, value) void
+        +get_yx(ioa) YXData
+        +get_yc(ioa) YCData
+        +init_from_point_table(pt) void
+        +stats: dict
+    }
+    class PointTable {
+        +yx_count: int
+        +yc_count: int
+        +common_addr: int
+        +load_yaml(path) void
+        +save_yaml(path) void
+        +generate_demo_points(...) void
+    }
+    class HistoryDB {
+        +open() void
+        +record_frame(dir, data) void
+        +flush() void
+        +close() void
+    }
+
+    %% ===== 支撑：结构化日志（v1.2 新增）=====
+    class LogManager {
+        +source: str
+        +log(level, message, category, data) LogEntry
+        +query(level_min, category, source, contains, limit) list
+        +subscribe(callback) void
+        +attach_python_logging(names, level) void
+        +stats() dict
+    }
+    class LogEntry {
+        +ts: float
+        +level: str
+        +source: str
+        +category: str
+        +message: str
+        +data: dict
+    }
+    LogManager --> LogEntry
+
+    %% ===== 引擎层（asyncio 编排） =====
+    class EngineBase {
+        +_background_tasks: set
+        +_spawn(coro) Task
+    }
+    class MasterEngine {
+        +state: str
+        +data_store: RealtimeDB
+        +sequence_manager: SequenceManager
+        +general_interrogation() void
+        +single_command(ioa, value, select) void
+        +double_command(ioa, value, select) void
+        +setpoint_shortfloat(ioa, value) void
+        +clock_sync() void
+    }
+    class SlaveEngine {
+        +data_store: RealtimeDB
+        +point_table: PointTable
+        +client_count: int
+        +set_response_behavior(rb) void
+        +send_spontaneous_yx(ioa, value) void
+        +send_spontaneous_yc(ioa, value) void
+        +start_simulation(...) void
+    }
+    class ResponseBehavior {
+        +gi_delay: float
+        +command_delay: float
+        +drop_frames: bool
+        +corrupt: bool
+        +no_response: bool
+        +wrong_cot: bool
+        +quality_mask() int
+        +from_dict(config) ResponseBehavior
+    }
+    class TaskScheduler {
+        +add_task(name, interval, cb) void
+        +start() void
+        +stop() void
+    }
+    class MultiStationManager {
+        +start_all() void
+        +stop_all() void
+        +get_station_status(id) StationStatus
+        +get_summary() dict
+    }
+
+    %% ===== Web UI 层（v1.2 拆分）=====
+    class EngineBridge {
+        +role: str
+        +session: EngineSession
+        +points: PointService
+        +events: EventBus
+        +logs: LogManager
+        +start_master(...) dict
+        +start_slave(...) dict
+        +send_yk(ioa, state, select) dict
+        +snapshot_points() list
+        +status() dict
+        +shutdown() void
+    }
+    class EngineSession {
+        +start_master(...) dict
+        +start_slave(...) dict
+        +send_yk(...) dict
+        +send_step(...) dict
+        +set_response_behavior(...) void
+    }
+    class PointService {
+        +snapshot() list
+        +batch(type, ioas, action, group) dict
+        +load_yaml(text) void
+        +export_csv() str
+    }
+    class EventBus {
+        +buffer_size: int
+        +queue_size: int
+        +subscribe() Queue
+        +publish(kind, data) void
+        +snapshot() dict
+    }
+    class AiohttpServer {
+        +create_app(bridge) Application
+        +run_server(role, host, port) void
+    }
+    class ReactFrontend {
+        <<webui/frontend Vite+React18+TS+AntD5>>
+        +api() RestClient
+        +wsClient: WsClient
+    }
+
+    %% ===== 关系 =====
+    EngineBase <|-- MasterEngine
+    EngineBase <|-- SlaveEngine
+    MasterEngine --> APCICodec
+    MasterEngine --> ASDUBuilder
+    MasterEngine --> SequenceManager
+    MasterEngine --> ConnectionStateMachine
+    MasterEngine --> TCPClient
+    MasterEngine --> RealtimeDB
+    MasterEngine --> TaskScheduler
+    MasterEngine --> FileTransferMaster
+    SlaveEngine --> APCICodec
+    SlaveEngine --> ASDUBuilder
+    SlaveEngine --> TCPServer
+    SlaveEngine --> TCPConnection
+    SlaveEngine --> RealtimeDB
+    SlaveEngine --> PointTable
+    SlaveEngine --> ResponseBehavior
+    SlaveEngine --> FileTransferSlave
+    MultiStationManager --> "0..*" SlaveEngine
+    EngineBridge --> EngineSession
+    EngineBridge --> PointService
+    EngineBridge --> EventBus
+    EngineBridge --> LogManager
+    EngineSession --> MasterEngine
+    EngineSession --> SlaveEngine
+    AiohttpServer --> EngineBridge
+    EventBus ..> LogManager : 订阅 log
+    RealtimeDB ..> PointTable : init_from
+    ASDU --> SequenceManager : 编号后编码
+    MasterEngine --> HistoryDB
+    SlaveEngine --> HistoryDB
+    ReactFrontend ..> AiohttpServer : REST / WS 契约（schemaVersion）

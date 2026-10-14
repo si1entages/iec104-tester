@@ -1,0 +1,158 @@
+%% ========== 场景 1：主站 Web UI 连接 → 总召 → 遥控（SBO） ==========
+%% v1.2：前端为 webui/frontend（Vite+React18+TS+AntD5），经 REST/WS 契约访问后端
+sequenceDiagram
+    autonumber
+    actor U as 用户(浏览器)
+    participant FE as webui/frontend (React/antd)
+    participant SRV as webui/server.py (aiohttp)
+    participant BR as EngineBridge
+    participant SES as EngineSession
+    participant ME as MasterEngine
+    participant PR as APCICodec/ASDUBuilder
+    participant TCP as TCPClient
+    participant SL as 子站(SlaveEngine)
+
+    U->>FE: 填写 host/port，点击「连接」
+    FE->>SRV: POST /api/master/start {host,port,addr}
+    SRV->>BR: start_master(...)
+    BR->>SES: start_master(...)
+    SES->>ME: MasterEngine(...).start()
+    ME->>TCP: connect()
+    TCP->>SL: TCP 三次握手
+    TCP-->>ME: on_connected
+    ME->>PR: 构建 U 帧 STARTDT_ACT
+    ME->>TCP: send(I/U 帧)
+    TCP->>SL: STARTDT_ACT
+    SL-->>TCP: STARTDT_CON (U 帧)
+    TCP-->>ME: on_frame -> decode
+    ME-->>BR: event_callback(STARTED)
+    BR->>BR: EventBus.publish("event")
+    BR-->>SRV: ws_feed 出队
+    SRV-->>FE: WS 推送 event/status
+    FE-->>U: 状态显示「已连接/运行中」
+
+    U->>FE: 点击「总召唤」
+    FE->>SRV: POST /api/master/gi
+    SRV->>BR: general_interrogation()
+    BR->>SES: general_interrogation()
+    SES->>ME: general_interrogation()
+    ME->>PR: ASDUBuilder.general_interrogation()
+    ME->>TCP: send(I 帧, COT=6)
+    TCP->>SL: 总召请求
+    SL-->>TCP: 多帧 I(遥信/遥测, COT=20)
+    TCP-->>ME: on_frame -> ASDU 解析
+    ME->>ME: RealtimeDB.update_yx/yc
+    ME-->>BR: raw_frame_callback + event_callback
+    BR-->>SRV: EventBus.publish("frame"/"event")
+    SRV-->>FE: WS 推送帧与数据
+    FE-->>U: 表格实时刷新
+
+    U->>FE: 选中行 → 命令面板「遥控合闸(选择)」
+    FE->>SRV: POST /api/master/yk {ioa,state,select:true}
+    SRV->>BR: send_yk(ioa,state,select=true)
+    BR->>SES: send_yk(...)
+    SES->>ME: single_command(ioa,value,select=True)
+    ME->>PR: ASDUBuilder.single_command(...)
+    ME->>TCP: send(I 帧, COT=1 选择)
+    SL-->>TCP: 激活确认(COT=7)
+    TCP-->>ME: on_frame
+    ME-->>BR: event_callback(COMMAND_SENT)
+    BR-->>FE: WS event
+    U->>FE: 「执行」
+    FE->>SRV: POST /api/master/yk {select:false}
+    SRV->>BR: send_yk(select=false)
+    BR->>SES: send_yk(select=false)
+    SES->>ME: single_command(select=False)
+    ME->>TCP: send(I 帧, COT=1 执行)
+    SL-->>TCP: 激活终止(COT=10)
+    TCP-->>ME: on_frame
+    ME-->>BR: event_callback
+    BR-->>FE: WS 更新
+
+%% ========== 场景 2：子站启动 → 自发上送 → 命令应答 ==========
+sequenceDiagram
+    autonumber
+    actor U as 用户
+    participant FE as React 前端
+    participant SRV as server.py
+    participant BR as EngineBridge
+    participant SE as SlaveEngine
+    participant PT as PointTable/RealtimeDB
+    participant TCP as TCPServer
+    participant MC as 主站客户端
+
+    U->>FE: 启动子站(监听 2404)
+    FE->>SRV: POST /api/slave/start {port,addr}
+    SRV->>BR: start_slave(...)
+    BR->>SE: SlaveEngine(point_table).start()
+    SE->>PT: data_store.init_from_point_table()
+    SE->>TCP: start() 监听
+    MC->>TCP: TCP 连接
+    TCP-->>SE: on_client_connected
+    MC->>TCP: STARTDT_ACT
+    TCP-->>SE: on_frame
+    SE-->>BR: event(STARTDT_RECEIVED)
+    BR-->>FE: WS event
+
+    U->>FE: 手动置位遥信
+    FE->>SRV: POST /api/slave/yx {ioa,value}
+    SRV->>BR: slave_set_yx(ioa,value)
+    BR->>SE: data_store.update_yx + send_spontaneous_yx
+    SE->>SE: EngineBase._spawn(broadcast I 帧 COT=3)
+    SE->>TCP: broadcast(I 帧)
+    TCP->>MC: 突发上送
+
+    MC->>TCP: 遥控命令(SBO 选择)
+    TCP-->>SE: on_frame -> decode
+    SE->>SE: 校验 SBO / ResponseBehavior
+    alt SBO 已选择
+        SE-->>MC: 激活确认(COT=7)
+    else 未选择或校验失败
+        SE-->>MC: 激活终止(否定, COT=10 + P/N)
+    end
+
+%% ========== 场景 3：Web 事件推送与背压 ==========
+sequenceDiagram
+    autonumber
+    participant SE as 引擎(Master/Slave)
+    participant BR as EngineBridge
+    participant EB as EventBus
+    participant Q as asyncio.Queue(256)
+    participant WS as server.py ws_feed
+    participant FE as React 前端
+
+    FE->>WS: GET /ws (WebSocket 升级)
+    WS->>EB: subscribe()
+    WS-->>FE: 先推 snapshot(points/status/frames/events/logs, schemaVersion)
+    loop 事件循环
+        SE-->>BR: event_callback / raw_frame_callback
+        BR->>EB: publish(kind,data) 缓存最近 500 条
+        EB->>Q: put_nowait(msg)
+        alt 队列已满
+            EB->>EB: 丢弃(背压保护)
+        end
+        Q-->>WS: get()
+        WS-->>FE: send_json(msg)
+        FE->>FE: React Query 缓存更新 + 局部重渲染
+    end
+    Note over FE,WS: 断线时前端自动重连并重新拉取 snapshot
+
+%% ========== 场景 4：结构化日志流（v1.2 新增） ==========
+sequenceDiagram
+    autonumber
+    participant ENG as 引擎/传输层 logger
+    participant BRIDGE as _PythonLogBridge
+    participant LM as LogManager
+    participant WS as server.py
+    participant FE as React 前端
+
+    ENG->>BRIDGE: logger.info(...)（iec104.* 自动转发）
+    BRIDGE->>LM: log(level, msg, category, data)
+    LM->>LM: 内存环形缓冲 append (deque, maxlen=5000)
+    LM->>LM: JSONL 会话文件 append（按大小轮转）
+    LM-->>WS: 订阅回调 → EventBus.publish("log")
+    WS-->>FE: WS 推 log 消息
+    FE->>WS: GET /api/logs?level_min=&category=&q=&limit=
+    WS-->>FE: 结构化日志查询结果
+    FE->>WS: GET /api/logs/export
+    WS-->>FE: JSONL 文件下载
