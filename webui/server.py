@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
 from pathlib import Path
 
 from aiohttp import WSMsgType, web
@@ -16,7 +15,7 @@ from .events import SCHEMA_VERSION
 logger = logging.getLogger("iec104.webui")
 STATIC = Path(__file__).parent / "static"
 # 新前端（Vite/React）构建产物目录：webui/static/app/（T10）。
-# 与旧原生页（master.html/slave.html/js/css）同级共存，互不干扰。
+# 旧原生页（master.html/slave.html/js/css）已于 T19 退役并删除。
 APP_STATIC = STATIC / "app"
 # 项目资源目录（图标等）：webui/ 的上一级 resources/
 RESOURCES = Path(__file__).parent.parent / "resources"
@@ -31,11 +30,7 @@ async def no_cache_pages(request: web.Request, handler) -> web.Response:
     本工具只在局域网调试使用，全部走协商缓存（no-cache 表示必须回源校验）。
     """
     resp = await handler(request)
-    if (
-        request.path == "/"
-        or request.path.startswith("/static/")
-        or request.path.startswith("/app")
-    ):
+    if request.path == "/" or request.path.startswith("/app"):
         resp.headers["Cache-Control"] = "no-cache, must-revalidate"
     return resp
 
@@ -43,31 +38,9 @@ async def no_cache_pages(request: web.Request, handler) -> web.Response:
 def create_app(bridge: EngineBridge) -> web.Application:
     app = web.Application(middlewares=[no_cache_pages])
 
-    def _asset_version() -> str:
-        """静态资源版本号 = 关键前端文件的最新 mtime（内容一变，URL 即变）."""
-        latest = 0
-        for rel in ("js/app.js", "css/app.css", "master.html", "slave.html"):
-            p = STATIC / rel
-            if p.exists():
-                latest = max(latest, int(p.stat().st_mtime))
-        return str(latest)
-
     async def index(request: web.Request) -> web.Response:
-        page = "master.html" if bridge.role == "master" else "slave.html"
-        html = (STATIC / page).read_text(encoding="utf-8")
-
-        # 缓存击穿：给静态资源引用追加版本号。浏览器即使缓存了旧 HTML，
-        # 也会因为 URL 变化而拉取新的 app.js / app.css（配合 no-cache 双保险）。
-        v = _asset_version()
-        html = html.replace("app.js", f"app.js?v={v}").replace("app.css", f"app.css?v={v}")
-
-        # 构建时间戳：让用户能直接确认跑的是不是新版本前端
-        stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(int(v)))
-        html = html.replace(
-            "</body>",
-            f'<script>window.IEC104_BUILD = "{stamp}";</script>\n</body>',
-        )
-        return web.Response(text=html, content_type="text/html", charset="utf-8")
+        """旧原生页（master.html/slave.html）已退役（T19）：一律进新前端 /app/."""
+        raise web.HTTPFound("/app/")
 
     async def favicon(request: web.Request) -> web.Response:
         """返回项目图标，避免浏览器请求 /favicon.ico 时 404."""
@@ -77,7 +50,7 @@ def create_app(bridge: EngineBridge) -> web.Application:
         return web.FileResponse(icon, headers={"Content-Type": "image/svg+xml"})
 
     # ── 新前端（Vite 产物）托管：/app/ ────────────────────────────────
-    # 独立路径，与旧原生页完全并存；产物缺失时优雅 404，不影响旧 UI。
+    # 新前端产物托管；产物缺失时优雅 404 并给出构建提示。
 
     async def app_redirect(request: web.Request) -> web.Response:
         """`/app` → `/app/`：保证 Vite base 下的相对资源正确解析."""
@@ -683,7 +656,6 @@ def create_app(bridge: EngineBridge) -> web.Application:
     app.router.add_get("/app", app_redirect)
     app.router.add_get("/app/", app_index)
     app.router.add_get("/app/{tail:.*}", app_asset)
-    app.router.add_static("/static/", STATIC, show_index=False)
     app.router.add_get("/favicon.ico", favicon)
     app.router.add_get("/favicon.svg", favicon)
     return app

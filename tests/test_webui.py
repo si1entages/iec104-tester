@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
-import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -16,7 +13,7 @@ from core.protocol.types import COT
 from webui.bridge import EngineBridge
 from webui.server import create_app
 
-_MASTER_HTML = Path(__file__).parent.parent / "webui" / "static" / "master.html"
+_APP_INDEX = Path(__file__).parent.parent / "webui" / "static" / "app" / "index.html"
 
 
 @pytest_asyncio.fixture
@@ -45,15 +42,15 @@ async def master_client():
 
 @pytest.mark.asyncio
 async def test_static_and_status(slave_client):
+    """T19 退役旧原生页：`/` 重定向到 /app/，新前端产物可达。"""
     client, bridge = slave_client
-    r = await client.get("/")
+    r = await client.get("/", allow_redirects=False)
+    assert r.status == 302
+    assert r.headers["Location"] == "/app/"
+    r = await client.get("/app/")
     assert r.status == 200
     html = await r.text()
     assert "IEC104" in html
-    r = await client.get("/static/css/app.css")
-    assert r.status == 200
-    r = await client.get("/static/js/app.js")
-    assert r.status == 200
     r = await client.get("/api/status")
     st = await r.json()
     assert st["role"] == "slave"
@@ -360,90 +357,6 @@ async def test_sim_toggle_requires_listen(master_client):
     assert body["ok"] is False
 
 
-# ── Nit D: 前端 QOI 非法值校验 ───────────────────────────────────
-
-def test_master_html_qoi_guard_present():
-    """master.html 应对 QOI 做 1-16/20 校验，且校验先于发请求（非法值不发）."""
-    html = _MASTER_HTML.read_text(encoding="utf-8")
-    assert "function isValidQoi(" in html, "缺少 isValidQoi 校验函数"
-
-    handler = html.split('$("#btn-gi-qoi").onclick', 1)[1].split("};", 1)[0]
-    assert "isValidQoi(" in handler, "处理器未调用 isValidQoi"
-    guard_pos = handler.index("isValidQoi(")
-    api_pos = handler.index('api("/api/master/gi"')
-    assert guard_pos < api_pos, "校验必须早于发请求"
-    assert "return" in handler[:api_pos], "非法值应提前 return，不发请求"
-
-
-_QOI_BEHAVIOUR_JS = r"""
-const fs = require('fs');
-const html = fs.readFileSync(process.env.MASTER_HTML, 'utf8');
-
-const fn = html.match(/function isValidQoi\(v\)\s*\{[\s\S]*?\n\}/);
-const handlerSrc = html.match(/\$\("#btn-gi-qoi"\)\.onclick\s*=\s*async\s*\(\)\s*=>\s*\{[\s\S]*?\n\};/);
-if (!fn || !handlerSrc) { console.log('FAIL:extract'); process.exit(2); }
-eval(fn[0]);
-
-const el = {};
-global.$ = (s) => (el[s] ??= {});
-let calls = [];
-let toasts = [];
-global.api = async (u, p) => { calls.push([u, p]); return { ok: true }; };
-global.toast = (m) => toasts.push(m);
-eval(handlerSrc[0]);
-
-const truth = [[1,true],[16,true],[20,true],[17,false],[18,false],[19,false],
-               [0,false],[21,false],[1.5,false],['',false]];
-let bad = '';
-for (const [v, exp] of truth) {
-  if (isValidQoi(v) !== exp) bad += `isValidQoi(${JSON.stringify(v)})!=${exp};`;
-}
-
-(async () => {
-  const run = async (v) => {
-    el['#qoi'] = { value: v };
-    calls = []; toasts = [];
-    await el['#btn-gi-qoi'].onclick();
-    return { calls, toasts };
-  };
-  let r = await run('17');
-  if (r.calls.length !== 0) bad += '17-sent;';
-  if (!(r.toasts.length === 1 && r.toasts[0].includes('1-16'))) bad += '17-no-toast;';
-  r = await run('19');
-  if (r.calls.length !== 0) bad += '19-sent;';
-  r = await run('');
-  if (r.calls.length !== 0) bad += 'empty-sent;';
-  r = await run('1');
-  if (!(r.calls.length === 1 && r.calls[0][0] === '/api/master/gi' && r.calls[0][1].qoi === 1)) bad += '1-wrong;';
-  r = await run('20');
-  if (!(r.calls.length === 1 && r.calls[0][1].qoi === 20)) bad += '20-wrong;';
-  console.log(bad ? 'FAIL:' + bad : 'OK');
-  process.exit(bad ? 1 : 0);
-})();
-"""
-
-
-def test_master_html_qoi_behavioural():
-    """Nit D 行为级验证 (需 node): 输入 17 不发请求且出提示；1/16/20 正常发.
-
-    前置条件用**硬断言**而非 pytest.skip：node 缺失属 CI 配置缺陷，静默跳过会
-    让「前端行为无人验证」长期潜伏（同 test_frontend_inline_scripts_*）。
-    """
-    node = shutil.which("node")
-    assert node is not None, (
-        "未找到 node（Node.js）。本用例需 PATH 中可用 node；"
-        "CI 的 test job 必须提供 Node.js（参见 .github/workflows/ci.yml）。"
-    )
-    env = {**os.environ, "MASTER_HTML": str(_MASTER_HTML)}
-    proc = subprocess.run(
-        [node, "-e", _QOI_BEHAVIOUR_JS],
-        capture_output=True, text=True, timeout=30, env=env,
-        cwd=str(_MASTER_HTML.parent.parent),
-    )
-    assert proc.returncode == 0, f"stdout={proc.stdout}\nstderr={proc.stderr}"
-    assert "OK" in proc.stdout
-
-
 # ── favicon 路由 ──────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -463,7 +376,7 @@ async def test_favicon_routes_served(master_client):
 async def test_html_declares_icon(master_client):
     """页面 <head> 需声明图标，否则浏览器仍走默认 404 探测."""
     client, _ = master_client
-    r = await client.get("/")
+    r = await client.get("/app/")
     html = await r.text()
     assert 'rel="icon"' in html
     assert "/favicon.svg" in html
@@ -560,50 +473,39 @@ async def test_status_started_flag_tracks_session(slave_client):
 
 @pytest.mark.asyncio
 async def test_pages_and_static_disable_heuristic_cache(slave_client):
-    """页面与 app.js 必须带 no-cache，否则前端修复会被浏览器启发式缓存挡住."""
-    client, _ = slave_client
-    for path in ("/", "/static/js/app.js"):
-        r = await client.get(path)
-        assert r.status == 200, f"{path} -> {r.status}"
-        cc = r.headers.get("Cache-Control", "")
-        assert "no-cache" in cc, f"{path} Cache-Control={cc!r}"
+    """页面必须带 no-cache，否则前端修复会被浏览器启发式缓存挡住.
 
-
-def test_frontend_inline_scripts_wire_buttons_and_live_refresh():
-    """真跑前端脚本（Node 沙箱）：按钮必须绑上 onclick，WS 报文必须触发刷新.
-
-    背景：`app.js` 曾未把 `$` 暴露到 window，两页内联脚本首句即 ReferenceError，
-    所有按钮静默失效、点值只能靠刷新页面更新——Python 端 HTML 字符串断言看不到这类问题。
-
-    前置条件是**硬断言而非 skip**：脚本必须随仓库受版本控制（`tests/frontend/`，
-    此前放在被 .gitignore 的 `qa_verify/`，导致干净克隆 / CI 中本用例必红），
-    node 必须可用。二者缺失均属 CI 配置缺陷，静默跳过只会让缺陷长期潜伏。
+    T19 退役旧原生页后：`/` 302 到 /app/（重定向本身无缓存语义），
+    no-cache 覆盖 `/app/` 及其产物路径。
     """
-    script = Path(__file__).parent / "frontend" / "qa_webui_dom.mjs"
-    assert script.is_file(), (
-        f"前端沙箱脚本缺失: {script}\n"
-        "该脚本须纳入版本控制（tests/frontend/），否则干净克隆 / CI 中本用例必然失败。"
-    )
-    node = shutil.which("node")
-    assert node is not None, (
-        "未找到 node（Node.js）。本用例需 PATH 中可用 node；"
-        "CI 的 test job 必须提供 Node.js（参见 .github/workflows/ci.yml）。"
-    )
-    proc = subprocess.run(
-        [node, str(script)],
-        capture_output=True, text=True, encoding="utf-8", timeout=60,
-    )
-    assert proc.returncode == 0, f"前端沙箱验证失败:\n{proc.stdout}\n{proc.stderr}"
+    client, _ = slave_client
+    for path in ("/app/", "/app/assets"):
+        r = await client.get(path, allow_redirects=False)
+        assert r.status in (200, 404), f"{path} -> {r.status}"
+        if r.status == 200:
+            cc = r.headers.get("Cache-Control", "")
+            assert "no-cache" in cc, f"{path} Cache-Control={cc!r}"
+    # 旧 /static/ 路径已随旧页退役，不再提供静态挂载
+    r = await client.get("/static/js/app.js", allow_redirects=False)
+    assert r.status == 404, f"/static/js/app.js 应已不可达（旧页退役），实际 {r.status}"
 
 
 @pytest.mark.asyncio
 async def test_slave_page_exposes_wrong_cot_control(slave_client):
-    """子站页需提供「返回错误COT」开关并与 API 字段名一致（防止 UI 与后端脱节）."""
+    """子站 UI 需提供「返回错误COT」开关并与 API 字段名一致（防止 UI 与后端脱节）.
+
+    T19 退役旧原生页后，该约束由前端单测（ResponsePanel.test.tsx，
+    断言 wrong_cot 字段名随 /api/slave/response 下发）承担；此处保留
+    API 层字段名回归（wrong_cot 进请求体且被后端接受）。
+    """
     client, _ = slave_client
-    html = await (await client.get("/")).text()
-    assert 'id="wrong-cot"' in html
-    assert '"#wrong-cot"' in html
-    assert "wrong_cot:" in html
+    r = await client.post("/api/slave/response", json={"errors": {"wrong_cot": True}})
+    body = await r.json()
+    assert body["ok"] is True
+    # 回读确认字段名与前端 ResponsePanel 使用的一致
+    r = await client.get("/api/slave/response")
+    resp = (await r.json())["response"]
+    assert resp["errors"]["wrong_cot"] is True
 
 
 # ── CLI 点表传递到 Web 会话 ────────────────────────────────────────
