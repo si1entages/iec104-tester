@@ -1,7 +1,7 @@
 import { useDeferredValue, useMemo, useState } from 'react'
 
 import { LineChartOutlined } from '@ant-design/icons'
-import { Alert, Button, Card, Input, Select, Space, Switch, Table, Tag, Typography, theme as antdTheme } from 'antd'
+import { Alert, Button, Card, Input, Segmented, Space, Switch, Table, Tag, Typography, theme as antdTheme } from 'antd'
 import type { TableColumnsType } from 'antd'
 
 import { usePointsQuery } from '../api/queries'
@@ -10,7 +10,8 @@ import { formatValue } from '../lib/format'
 import { pointKey } from '../lib/pointValue'
 import { PointsTools } from './PointsTools'
 
-const TYPE_OPTIONS = ['YX', 'YC', 'YK', 'YM', 'STEP'].map((v) => ({ value: v, label: v }))
+/** 类型页签（第二批体验改造 ②）：全部 + 五类点；默认「全部」 */
+const TYPE_TABS = ['全部', 'YX', 'YC', 'YK', 'YM', 'STEP'].map((v) => ({ value: v, label: v }))
 
 const COLUMNS: TableColumnsType<Point> = [
   { title: 'IOA', dataIndex: 'ioa', width: 100, className: 'mono' },
@@ -63,6 +64,8 @@ interface Props {
  * - **就地更新单元格**：值由 WS 增量补丁/合并快照写入 React Query，
  *   仅变化行换新对象（见 `lib/pointValue.ts`），正常行保持引用不重渲染
  * - **单击选中行**（主站据此下发命令、子站据此手动置数）——**刻意不提供双击路径**
+ * - **类型页签**（第二批改造②）：全部/YX/YC/YK/YM/STEP，只影响**表格显示过滤**；
+ *   PointsTools 批量操作保持原语义——按其弹窗内自选的类型与 IOA 列表对**全表**生效
  */
 export function PointsTable({
   selected,
@@ -74,10 +77,12 @@ export function PointsTable({
   const { data: points = [], isLoading, isError, error } = usePointsQuery()
   const { token } = antdTheme.useToken()
   const [keyword, setKeyword] = useState('')
-  const [type, setType] = useState<string | undefined>(undefined)
+  // 类型页签：'全部' = 不过滤；'YX'/'YC'/… = 只看该类型（取代原下拉选择器）
+  const [typeTab, setTypeTab] = useState<string>('全部')
   const [enabledOnly, setEnabledOnly] = useState(false)
   // 十万行过滤放到低优先级更新，保证输入框不掉帧
   const deferredKeyword = useDeferredValue(keyword)
+  const type = typeTab === '全部' ? undefined : typeTab
 
   const rows = useMemo(() => {
     const kw = deferredKeyword.trim().toLowerCase()
@@ -126,15 +131,6 @@ export function PointsTable({
           >
             加入趋势
           </Button>
-          <Select
-            size="small"
-            style={{ width: 96 }}
-            allowClear
-            placeholder="类型"
-            value={type}
-            options={TYPE_OPTIONS}
-            onChange={setType}
-          />
           <Input.Search
             size="small"
             style={{ width: 200 }}
@@ -156,6 +152,13 @@ export function PointsTable({
           description={String((error as Error)?.message ?? error)}
         />
       ) : null}
+      <Segmented
+        size="small"
+        style={{ marginBottom: 8 }}
+        options={TYPE_TABS}
+        value={typeTab}
+        onChange={(v) => setTypeTab(String(v))}
+      />
       <Table<Point>
         virtual
         rowKey={pointKey}
