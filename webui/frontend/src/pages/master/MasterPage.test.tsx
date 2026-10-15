@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { queryKeys } from '../../api/queries'
 import type { Point } from '../../api/types'
+import { trendBuffer } from '../../lib/trendBuffer'
 import MasterPage from './MasterPage'
 
 function jsonResponse(body: unknown): Response {
@@ -81,5 +82,18 @@ describe('MasterPage（主站工作台）命令面板当前值实时刷新', () 
 
     // 命令面板「当前值」必须跟随缓存变化（此前是选中瞬间的快照，永远不变）
     await waitFor(() => expect(screen.getByText(/当前值 66\.6/)).toBeInTheDocument())
+  })
+
+  it('点「加入趋势」即注册采样，无需先打开趋势图页签', async () => {
+    setup()
+    await screen.findByText('YC_0008')
+    const setWatchedSpy = vi.spyOn(trendBuffer, 'setWatched')
+
+    // 先选中行，「加入趋势」按钮才可用
+    fireEvent.click(screen.getByText('YC_0008'))
+    await waitFor(() => expect(screen.getAllByText(/已选 YC-1008/).length).toBeGreaterThan(0))
+    fireEvent.click(screen.getByRole('button', { name: /加入趋势/ }))
+
+    await waitFor(() => expect(setWatchedSpy).toHaveBeenCalledWith(['YC-1008']))
   })
 })

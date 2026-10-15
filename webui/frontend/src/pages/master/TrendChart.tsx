@@ -47,12 +47,8 @@ export function TrendChart({ watched, onRemove, onClear }: Props) {
   const chartRef = useRef<EChartsType | null>(null)
   const [version, setVersion] = useState(0)
 
-  // 订阅点集变化 → 只采样被选中的点位
-  useEffect(() => {
-    trendBuffer.setWatched(watched.map(pointKey))
-  }, [watched])
-
-  // 采样缓冲节流通知（最多 2Hz），避免高频重渲染
+  // 采样注册（setWatched）由 MasterPage 持有：工作台挂载即采样，与本组件是否
+  // 挂载无关；这里只负责订阅缓冲节流通知并重绘
   useEffect(() => trendBuffer.subscribe(() => setVersion((v) => v + 1)), [])
 
   useEffect(() => {
@@ -77,7 +73,9 @@ export function TrendChart({ watched, onRemove, onClear }: Props) {
       return {
         name: `${point.type}-${point.ioa} ${point.name}`,
         type: 'line' as const,
-        showSymbol: false,
+        // 稀疏数据（总召唤后往往只有 1~2 个采样点）开符号可见，否则单点画不出线
+        showSymbol: samples.length <= 2,
+        symbolSize: 6,
         smooth: true,
         sampling: 'lttb' as const,
         data: samples.map((s) => [formatClock(s.ts), s.value]),

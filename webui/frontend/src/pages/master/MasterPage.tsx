@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useMemo, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react'
 
 import { Alert, Col, Row, Spin, Tabs } from 'antd'
 
@@ -6,6 +6,7 @@ import { usePointsQuery, useStatusQuery } from '../../api/queries'
 import type { Point } from '../../api/types'
 import { PointsTable } from '../../components/PointsTable'
 import { pointKey } from '../../lib/pointValue'
+import { trendBuffer } from '../../lib/trendBuffer'
 import { CommandPanel } from './CommandPanel'
 import { ConnectionPanel } from './ConnectionPanel'
 
@@ -50,6 +51,12 @@ export default function MasterPage() {
   }, [])
 
   const watchedKeys = useMemo(() => watched.map(pointKey), [watched])
+
+  // 采样注册放在工作台层（而非趋势图组件挂载后）——否则只有打开趋势图页签才开始
+  // 采样，此前发生的值变化全部丢失，切过去只看到空图（bug 修复）
+  useEffect(() => {
+    trendBuffer.setWatched(watchedKeys)
+  }, [watchedKeys])
 
   const addTrend = useCallback((point: Point) => {
     setWatched((prev) => {

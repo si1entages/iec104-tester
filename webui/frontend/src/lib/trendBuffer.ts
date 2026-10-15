@@ -61,6 +61,11 @@ class TrendBuffer {
 
   clear(): void {
     this.series.clear()
+    // 挂起的节流通知已无意义（缓冲已清空），取消定时器避免陈旧 dirty 状态泄漏
+    if (this.timer) {
+      clearTimeout(this.timer)
+      this.timer = null
+    }
     this.notify()
   }
 
