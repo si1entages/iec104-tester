@@ -325,8 +325,13 @@ class EngineSession:
         return {"ok": True}
 
     async def start_slave(self, host: str, port: int, addr: int,
-                          points: Any, spontaneous: bool = True,
+                          points: Any, spontaneous: bool | None = None,
                           tls: Any = None) -> dict:
+        """启动子站监听.
+
+        ``spontaneous`` 为 ``None``（默认，Web 入口不传）时回落会话配置
+        ``config.slave.spontaneous_enabled``；显式传入时以调用方为准。
+        """
         if self.engine:
             return {"ok": False, "error": "already running"}
         # TLS 来源优先级（D3 修复）：HTTP body 显式传入 > 会话配置
@@ -342,7 +347,9 @@ class EngineSession:
                         "request body" if tls is not None else "CLI/config")
         eng = SlaveEngine(
             host=host, port=port, common_addr=addr,
-            point_table=points.table, spontaneous_enabled=spontaneous,
+            point_table=points.table,
+            spontaneous_enabled=(self.config.slave.spontaneous_enabled
+                                 if spontaneous is None else spontaneous),
             ssl_context=ssl_context,
         )
         eng.data_store.init_from_point_table(points.table)

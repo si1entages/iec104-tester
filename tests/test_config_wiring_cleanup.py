@@ -27,7 +27,10 @@ def _session(role: str, cfg: AppConfig) -> EngineSession:
 
 
 class _Points:
-    """最小 points 占位（start_master 用 ``getattr(points, "table", None)``）."""
+    """最小 points 占位（start_slave 读 ``points.table``）."""
+
+    def __init__(self):
+        self.table = None
 
 
 # ── Web start_master：timers / flow_control / reconnect_interval ────
@@ -95,3 +98,63 @@ def test_web_start_master_defaults_unchanged(monkeypatch):
     assert (kw["k"], kw["w"]) == (12, 8)
     assert (kw["t0"], kw["t1"], kw["t2"], kw["t3"]) == (30.0, 15.0, 10.0, 20.0)
     assert kw["reconnect_interval"] == 5.0
+
+
+# ── Web start_slave：spontaneous 回落 config.slave ────────────────
+
+
+def test_web_start_slave_spontaneous_falls_back_to_config(monkeypatch):
+    """入口不传 spontaneous → 回落 config.slave.spontaneous_enabled."""
+    capture: dict = {}
+
+    class _FakeSlaveEngine:
+        def __init__(self, **kwargs):
+            capture["kwargs"] = kwargs
+            self.data_store = type("_DS", (), {"init_from_point_table": staticmethod(lambda *_: None)})()
+
+        def set_event_callback(self, cb):
+            pass
+
+        def set_raw_frame_callback(self, cb):
+            pass
+
+        async def start(self):
+            pass
+
+    monkeypatch.setattr("webui.session.SlaveEngine", _FakeSlaveEngine)
+
+    cfg = AppConfig()
+    cfg.slave.spontaneous_enabled = False
+    s = _session("slave", cfg)
+    result = asyncio.run(s.start_slave("0.0.0.0", 24042, 1, _Points()))
+
+    assert result["ok"] is True
+    assert capture["kwargs"]["spontaneous_enabled"] is False
+
+
+def test_web_start_slave_spontaneous_explicit_overrides(monkeypatch):
+    """显式传入 spontaneous → 以调用方为准（旧签名行为兼容）."""
+    capture: dict = {}
+
+    class _FakeSlaveEngine:
+        def __init__(self, **kwargs):
+            capture["kwargs"] = kwargs
+            self.data_store = type("_DS", (), {"init_from_point_table": staticmethod(lambda *_: None)})()
+
+        def set_event_callback(self, cb):
+            pass
+
+        def set_raw_frame_callback(self, cb):
+            pass
+
+        async def start(self):
+            pass
+
+    monkeypatch.setattr("webui.session.SlaveEngine", _FakeSlaveEngine)
+
+    cfg = AppConfig()
+    cfg.slave.spontaneous_enabled = False
+    s = _session("slave", cfg)
+    asyncio.run(s.start_slave("0.0.0.0", 24043, 1, _Points(), spontaneous=True))
+
+    assert capture["kwargs"]["spontaneous_enabled"] is True
