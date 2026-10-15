@@ -1,0 +1,3 @@
+# Playwright 运行产物（截图/错误快照/trace），不入库
+.playwright-artifacts/
+test-results/
