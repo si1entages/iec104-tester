@@ -548,6 +548,23 @@ def _run_cli(config, point_table, history_db, logger):
             _enable_tls(engine, "slave", config, logger)
 
             await engine.start()
+
+            # 数据模拟（收尾清理）：Web 模式经 /api/slave/sim 运行时设置，
+            # CLI no-gui 此前完全不吃 config.slave.simulation_*——现接线：
+            # simulation_enabled=true 时按配置间隔启动自动模拟。
+            if config.slave.simulation_enabled:
+                await engine.start_simulation(
+                    yx_interval=config.slave.yx_interval,
+                    yc_interval=config.slave.yc_interval,
+                    yx_change_rate=config.slave.yx_change_rate,
+                    yc_change_range=config.slave.yc_change_range,
+                )
+                logger.info(
+                    "Slave simulation started "
+                    f"(yx={config.slave.yx_interval}s, yc={config.slave.yc_interval}s, "
+                    f"yx_rate={config.slave.yx_change_rate}, yc_range={config.slave.yc_change_range})"
+                )
+
             logger.info("Slave engine started. Press Ctrl+C to stop.")
 
             try:

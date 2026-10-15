@@ -12,11 +12,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import app as app_module
 from core.config import AppConfig
 from webui.session import EngineSession
 
@@ -192,3 +194,78 @@ def test_legacy_config_with_auto_clock_sync_still_loads(tmp_path):
     assert cfg.master.auto_start is True
     assert cfg.master.auto_gi is False
     assert not hasattr(cfg.master, "auto_clock_sync")
+
+
+# ── CLI no-gui 子站：config.slave.simulation_* 接线 ───────────────
+
+
+def _run_cli_slave(cfg, monkeypatch, sim_calls: list):
+    """以假 SlaveEngine 跑 _run_cli 子站路径；asyncio.sleep 注入取消以跳出常驻循环."""
+    import core.engine.slave as slave_mod
+
+    class _FakeSlaveEngine:
+        def __init__(self, **kwargs):
+            pass
+
+        def set_event_callback(self, cb):
+            pass
+
+        def set_raw_frame_callback(self, cb):
+            pass
+
+        @property
+        def data_store(self):
+            return type("_DS", (), {"init_from_point_table": staticmethod(lambda *_: None)})()
+
+        async def start(self):
+            pass
+
+        async def start_simulation(self, **kwargs):
+            sim_calls.append(kwargs)
+
+        async def stop(self):
+            pass
+
+    monkeypatch.setattr(slave_mod, "SlaveEngine", _FakeSlaveEngine)
+
+    def _cancel_sleep(_seconds):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(asyncio, "sleep", _cancel_sleep)
+    app_module._run_cli(cfg, None, None, logging.getLogger("test"))
+
+
+def test_run_cli_slave_starts_simulation_from_config(monkeypatch):
+    """simulation_enabled=true → CLI no-gui 启动后按配置启动自动模拟."""
+    sim_calls: list[dict] = []
+
+    cfg = AppConfig()
+    cfg.mode = "slave"
+    cfg.connection.reconnect = False
+    cfg.slave.simulation_enabled = True
+    cfg.slave.yx_interval = 3.0
+    cfg.slave.yc_interval = 1.5
+    cfg.slave.yx_change_rate = 0.2
+    cfg.slave.yc_change_range = 0.4
+
+    _run_cli_slave(cfg, monkeypatch, sim_calls)
+
+    assert sim_calls == [{
+        "yx_interval": 3.0,
+        "yc_interval": 1.5,
+        "yx_change_rate": 0.2,
+        "yc_change_range": 0.4,
+    }]
+
+
+def test_run_cli_slave_simulation_disabled_unchanged(monkeypatch):
+    """simulation_enabled=false（默认）→ 不启动模拟，与改动前行为一致."""
+    sim_calls: list[dict] = []
+
+    cfg = AppConfig()
+    cfg.mode = "slave"
+    cfg.connection.reconnect = False
+
+    _run_cli_slave(cfg, monkeypatch, sim_calls)
+
+    assert sim_calls == []
