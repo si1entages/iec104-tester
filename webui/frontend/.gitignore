@@ -4,4 +4,7 @@ dist/
 *.local
 *.log
 
+# 本机一次性性能/诊断脚本（Playwright 直连本地后端跑一遍就删，不入库）
+*.local.mjs
+
 # 不忽略构建产物 webui/static/app/ —— 它随仓库分发并被 PyInstaller 打包
