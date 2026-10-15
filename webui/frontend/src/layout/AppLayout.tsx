@@ -8,7 +8,7 @@ import {
   FileTextOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons'
-import { Alert, Badge, Layout, Menu, Tag, Typography } from 'antd'
+import { Alert, Badge, Layout, Menu, Tag, Typography, theme as antdTheme } from 'antd'
 
 import { useStatusQuery } from '../api/queries'
 import { useUiStore } from '../store/uiStore'
@@ -48,6 +48,8 @@ export function AppLayout({ children }: Props) {
 
   const { data: status } = useStatusQuery()
   const badge = WS_BADGE[wsStatus]
+  // 颜色一律取自主题 token，禁止硬编码（亮暗一致）
+  const { token } = antdTheme.useToken()
 
   return (
     <Layout style={{ minHeight: '100%' }}>
@@ -58,7 +60,7 @@ export function AppLayout({ children }: Props) {
             display: 'flex',
             alignItems: 'center',
             padding: '0 16px',
-            color: '#13c2c2',
+            color: token.colorPrimary,
             fontWeight: 600,
             letterSpacing: 0.5,
           }}
@@ -97,8 +99,11 @@ export function AppLayout({ children }: Props) {
           ) : null}
           {resyncing ? <Tag color="warning">同步快照中…</Tag> : null}
           <span style={{ flex: 1 }} />
-          <Badge status={badge.status} text={<span style={{ color: '#8c8c8c' }}>{badge.text}</span>} />
-          <ApiOutlined style={{ color: '#8c8c8c' }} />
+          <Badge
+            status={badge.status}
+            text={<span style={{ color: token.colorTextTertiary }}>{badge.text}</span>}
+          />
+          <ApiOutlined style={{ color: token.colorTextTertiary }} />
         </Header>
         <Content style={{ padding: 16, overflow: 'auto' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

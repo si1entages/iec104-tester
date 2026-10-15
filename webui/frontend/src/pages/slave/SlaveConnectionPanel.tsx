@@ -11,6 +11,7 @@ import {
   Input,
   InputNumber,
   Space,
+  Switch,
   Table,
   Tag,
   Typography,

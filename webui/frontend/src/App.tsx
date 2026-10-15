@@ -3,8 +3,10 @@ import { Suspense, lazy, useEffect, useRef } from 'react'
 import { Spin } from 'antd'
 
 import { useStatusQuery } from './api/queries'
-import { AppLayout } from './layout/AppLayout'
 import { useSchemaHandshake } from './hooks/useSchemaHandshake'
+import { useHashRoute } from './hooks/useHashRoute'
+import { ErrorBoundary } from './layout/ErrorBoundary'
+import { AppLayout } from './layout/AppLayout'
 import { useUiStore } from './store/uiStore'
 import { useWsBridge } from './ws/useWsBridge'
 
@@ -27,9 +29,10 @@ function PageFallback() {
 }
 
 export default function App() {
-  // 契约版本协商（GET /api/schema）+ 全局 WS（snapshot 先行 / 背压感知）
+  // 契约版本协商（GET /api/schema）+ 全局 WS（snapshot 先行 / 背压感知）+ hash 路由同步
   useSchemaHandshake()
   useWsBridge()
+  useHashRoute()
 
   const page = useUiStore((s) => s.page)
   const setPage = useUiStore((s) => s.setPage)
@@ -46,17 +49,21 @@ export default function App() {
   return (
     <AppLayout>
       <Suspense fallback={<PageFallback />}>
-        {page === 'master' ? (
-          <MasterPage />
-        ) : page === 'slave' ? (
-          <SlavePage />
-        ) : page === 'multi' ? (
-          <MultiPage />
-        ) : page === 'logs' ? (
-          <LogsPage />
-        ) : (
-          <StatusPage />
-        )}
+        {/* 页面级错误边界：单页抛错只影响本页（可重试/切页恢复），外壳不受牵连；
+            key=page 保证切页后边界状态重置 */}
+        <ErrorBoundary key={page}>
+          {page === 'master' ? (
+            <MasterPage />
+          ) : page === 'slave' ? (
+            <SlavePage />
+          ) : page === 'multi' ? (
+            <MultiPage />
+          ) : page === 'logs' ? (
+            <LogsPage />
+          ) : (
+            <StatusPage />
+          )}
+        </ErrorBoundary>
       </Suspense>
     </AppLayout>
   )
