@@ -172,28 +172,32 @@ openssl verify -CAfile ca.pem server.pem client.pem
 - `certfile` / `keyfile` / `cafile` 的校验集中在
   `build_server_context()` / `build_client_context()`，路径不存在会抛
   `TlsConfigError`（带明确中文说明），不会泄漏到 asyncio 层。
-- **已知接缝（需要后续重构）**：`MasterEngine` / `SlaveEngine` 在构造时自行创建
-  `TCPClient` / `TCPServer`，且其源码不在本次改动范围，因此
-  `configure_engine_tls()` 是**按私有属性注入**（`engine._client` /
-  `engine._server`）。若将来把 `ssl` 参数贯穿到引擎构造函数，该函数可整体删除。
-  调用必须在引擎 `start()` 之前。
-- **未覆盖**：Web UI 单站模式（`webui/server.py` → `webui/session.py` 的
-  `start_master` / `start_slave`）暂未接线 TLS——`webui/session.py` 不在本次
-  改动范围。多站模式**已支持**（走 `StationConfig.tls`）。
-  Web 单站 TLS 需要给 `EngineSession` 增一个 `tls` 参数，属独立小任务。
+- `ssl_context` 已贯穿引擎构造：`MasterEngine(..., ssl_context=ctx,
+  server_hostname=...)` / `SlaveEngine(..., ssl_context=ctx)` 在构造期注入，
+  这是**唯一**注入路径；`configure_engine_tls()` 保留为兼容入口（内部经引擎
+  公开方法 `set_ssl_context()` 走同一条传输层注入路径），调用必须在引擎
+  `start()` 之前。
+- **Web UI 单站已接线**：`POST /api/master/start` / `/api/slave/start` 接受
+  可选 `tls` 字段（形态与 `StationConfig.tls` 一致），经
+  `EngineSession.start_master` / `start_slave` → 引擎构造参数生效；
+  前端连接面板提供最小 TLS 开关。多站模式同样支持（走 `StationConfig.tls`）。
 
 ## 6. 测试
 
-`tests/test_tls_transport.py`（27 例，自签证书，无外部依赖）：
+`tests/test_tls_transport.py`（29 例，自签证书，无外部依赖）：
 
 - **传输层**：自签 CA 下握手成功 + STARTDT 往返；`verify=False` 放行不受信证书；
   不受信 CA 被拒；主机名不匹配被拒；mTLS 客户端带/不带证书的成功与失败路径；
   TLS 下 `close()` 幂等、`stop()` 有界；未启用 TLS 时行为不变。
 - **配置层**：`TlsConfig` YAML 往返、默认关闭、`TlsConfigError` 明确报错、
-  `configure_engine_tls` 的注入/禁用/缺传输对象三种分支。
+  `configure_engine_tls` 的注入/禁用/缺公开方法三种分支。
 - **真引擎端到端**：真实 `MasterEngine` + `SlaveEngine` 在 TLS 下握手成功、
-  进入 Running 并完成总召唤；不受信证书下始终无法进入 Running。
+  进入 Running 并完成总召唤（构造参数路径与兼容入口各一例）；
+  不受信证书下始终无法进入 Running。
 - **多站**：`MultiStationManager` 逐站 TLS，主站握手成功进入 Running。
+- **Web UI 单站**：`tests/test_webui_tls.py` —— `/api/slave/start` /
+  `/api/master/start` 携带 `tls` 注入生效、未传时行为不变、无效证书业务失败、
+  以及双 Web 会话 TLS 握手 E2E。
 
 ```bash
 ./venv/Scripts/python.exe -m pytest tests/test_tls_transport.py -q

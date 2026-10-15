@@ -120,12 +120,13 @@ TLS **不改变** §2 的契约：`TCPConnection.close()` 依旧幂等非阻塞�
 SSL transport 的 `wait_closed()` 同样受该超时保护；`tests/test_tls_transport.py`
 中有专门用例断言 TLS 下 `close()` 可重复调用且 `stop()` 在 3s 内返回。
 
-### 5.3 已知接缝
+### 5.3 引擎注入路径
 
-`MasterEngine` / `SlaveEngine` 自行创建传输对象，`configure_engine_tls()` 目前
-**按私有属性注入**（`engine._client` / `engine._server`）。这是为避免改动引擎
-源码而做的妥协，**属技术债**：正解是把 `ssl_context` 参数贯穿到引擎构造函数。
-详见 `docs/tls.md` §5。
+`MasterEngine` / `SlaveEngine` 构造函数接受可选 `ssl_context`（主站另有
+`server_hostname`），在构造期传给内部创建的 `TCPClient` / `TCPServer`——这是
+**唯一**注入路径。`configure_engine_tls()` 保留为兼容入口：内部经引擎公开方法
+`set_ssl_context()` 走同一条传输层注入路径，行为与构造参数完全一致（须在引擎
+`start()` 之前调用）。详见 `docs/tls.md` §5。
 
 ### 5.4 覆盖边界
 
