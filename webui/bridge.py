@@ -245,6 +245,10 @@ class EngineBridge:
     async def set_response(self, cfg: dict) -> dict:
         return await self._cmd(self.session.set_response(cfg))
 
+    def get_response(self) -> dict:
+        """只读返回当前 ``ResponseBehavior``（``GET /api/slave/response``）."""
+        return self.session.get_response()
+
     async def set_simulation(self, enabled: bool, **kwargs) -> dict:
         r = await self._cmd(self.session.set_simulation(enabled, **kwargs))
         if r.get("ok"):

@@ -392,6 +392,14 @@ def create_app(bridge: EngineBridge) -> web.Application:
             return web.json_response({"ok": False, "error": "invalid body"}, status=400)
         return web.json_response(await bridge.set_response(body))
 
+    async def api_slave_response_get(request: web.Request) -> web.Response:
+        """读取当前子站应答行为（``ResponseBehavior``），供页面刷新后回填.
+
+        返回与 ``POST /api/slave/response`` **请求体同构**的分组 dict
+        （``delays``/``errors``/``quality``/``connection``），未启动时返回暂存/默认值。
+        """
+        return web.json_response(bridge.get_response())
+
     async def api_slave_ym(request: web.Request) -> web.Response:
         """累计量置数并自发上送 (M_IT_TB_1, COT=3)."""
         try:
@@ -658,6 +666,7 @@ def create_app(bridge: EngineBridge) -> web.Application:
     app.router.add_post("/api/slave/ep", api_slave_ep)
     app.router.add_post("/api/slave/ps", api_slave_ps)
     app.router.add_post("/api/slave/response", api_slave_response)
+    app.router.add_get("/api/slave/response", api_slave_response_get)
     app.router.add_post("/api/slave/sim", api_slave_sim)
     app.router.add_post("/api/multi/start", api_multi_start)
     app.router.add_post("/api/multi/stop", api_multi_stop)

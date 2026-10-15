@@ -100,6 +100,7 @@
 | POST | `/api/slave/ep` | `ioa: int (≥0)`, `event_value: int=1 (0–65535)`, `with_time: bool=true` | `{ok, error?}` |
 | POST | `/api/slave/ps` | `ioa: int (≥0)`, `states: int[]`（长度 1–8，元素 0/1） | `{ok, error?}` |
 | POST | `/api/slave/response` | `ResponseBehavior` 字典（任意键，未启动时可暂存） | `{ok, error?}` |
+| GET | `/api/slave/response` | — | `{ok, response: ResponseBehavior}`（见 §4.8；未启动时返回暂存/默认值） |
 | POST | `/api/slave/sim` | `enabled: bool`, `yx_interval?`, `yc_interval?`, `yx_change_rate?`, `yc_change_range?` | `{ok, error?}` |
 
 ### 2.4 点表批量与导入导出
@@ -271,6 +272,27 @@ StationStatus  = { station_id, station_name, port, common_addr, running, client_
                    yx_count, yc_count, yk_count, ym_count, simulation_active }
 StationSummary = { id, name, port, clients }
 ```
+
+### 4.8 `ResponseBehavior`（子站应答行为）
+
+`GET` / `POST /api/slave/response` 共用**同一分组形态**：`GET` 返回的
+`response` 可直接作为 `POST` 的请求体回填（缺失分组/键一律取后端默认值，
+故两侧结构恒定、可无损往返）。
+
+```ts
+ResponseBehavior = {
+  delays?:     { gi?: number, command?: number, data?: number }          // 延迟（秒）
+  errors?:     { drop_frames?: boolean, drop_rate?: number (0..1),
+                 corrupt?: boolean, no_response?: boolean, wrong_cot?: boolean }
+  quality?:    { invalid?: boolean, blocked?: boolean,
+                 not_topical?: boolean, overflow?: boolean }             // 品质描述词注入
+  connection?: { reject_startdt?: boolean, auto_stopdt?: boolean,
+                 send_testfr?: boolean, testfr_interval?: number }       // 连接行为（秒）
+}
+```
+
+> 取值语义与后端默认值见 `core/engine/slave_response.py::ResponseBehavior.from_dict`。
+> `GET` 为**纯新增端点**，按 §1.2「兼容性变更」策略**不递增** `schemaVersion`。
 
 ---
 

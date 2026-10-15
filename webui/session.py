@@ -15,7 +15,7 @@ from core.engine.multi_station import (
     MultiStationManager,
     StationConfig,
 )
-from core.engine.slave import SlaveEngine, SlaveEvent
+from core.engine.slave import ResponseBehavior, SlaveEngine, SlaveEvent
 
 logger = logging.getLogger("iec104.webui")
 
@@ -57,9 +57,45 @@ def param_state_to_dict(state: Any) -> dict | None:
     }
 
 
+def response_behavior_to_dict(rb: Any) -> dict:
+    """把 ``ResponseBehavior`` 序列化为 ``POST /api/slave/response`` 接受的**同一分组形态**.
+
+    输出与 ``ResponseBehavior.from_dict`` 严格互逆（``delays``/``errors``/``quality``/
+    ``connection`` 四组），使前端可「GET 回填 → 修改 → POST」原样往返，不会因两侧
+    命名不同而丢配置。``None`` 返回空 dict（调用方另行兜底默认值）。
+    """
+    if rb is None:
+        return {}
+    return {
+        "delays": {
+            "gi": rb.gi_delay,
+            "command": rb.command_delay,
+            "data": rb.data_delay,
+        },
+        "errors": {
+            "drop_frames": rb.drop_frames,
+            "drop_rate": rb.drop_rate,
+            "corrupt": rb.corrupt,
+            "no_response": rb.no_response,
+            "wrong_cot": rb.wrong_cot,
+        },
+        "quality": {
+            "invalid": rb.force_invalid,
+            "blocked": rb.force_blocked,
+            "not_topical": rb.force_not_topical,
+            "overflow": rb.force_overflow,
+        },
+        "connection": {
+            "reject_startdt": rb.reject_startdt,
+            "auto_stopdt": rb.auto_stopdt,
+            "send_testfr": rb.send_testfr,
+            "testfr_interval": rb.testfr_interval,
+        },
+    }
+
+
 class EngineSession:
     """持有当前 MasterEngine 或 SlaveEngine，并转发命令."""
-
     def __init__(
         self,
         role: str,
@@ -438,6 +474,22 @@ class EngineSession:
         if self.engine:
             self.engine.set_response_behavior(self.pending_response)
         return {"ok": True}
+
+    def get_response(self) -> dict:
+        """返回**当前生效**的 ``ResponseBehavior``（只读，供前端刷新后回填）.
+
+        - 子站已启动：读引擎实际持有的 ``response_behavior``（权威值）。
+        - 未启动：由 ``pending_response`` 暂存项构造（与启动时应用的值一致）；
+          从未配置过则为全默认值。二者都会补齐缺失分组/键，故返回结构恒定。
+        """
+        if self.role != "slave":
+            return {"ok": False, "error": "not slave"}
+        eng = self.engine
+        if eng is not None:
+            rb = eng.response_behavior
+        else:
+            rb = ResponseBehavior.from_dict(self.pending_response)
+        return {"ok": True, "response": response_behavior_to_dict(rb)}
 
     async def set_simulation(self, enabled: bool, **kwargs: float) -> dict:
         eng = self.require_slave()
