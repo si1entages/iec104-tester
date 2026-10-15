@@ -49,6 +49,19 @@ export default defineConfig({
     emptyOutDir: false,
     sourcemap: false,
     chunkSizeWarningLimit: 1500,
+    rollupOptions: {
+      output: {
+        // 只显式隔离 ECharts：它体积最大且只被「趋势图」动态引入，
+        // 单独成 chunk 后首屏与主站页都不会下载它。
+        // 其余依赖交给 Rollup 按引用关系自动分包（手工分桶易产生循环 chunk）。
+        manualChunks(id: string) {
+          if (id.includes('node_modules/echarts') || id.includes('node_modules/zrender')) {
+            return 'vendor-echarts'
+          }
+          return undefined
+        },
+      },
+    },
   },
   server: {
     port: 5173,
