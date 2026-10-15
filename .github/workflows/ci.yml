@@ -34,7 +34,7 @@ jobs:
           pip install PyYAML aiohttp
           pip install pytest pytest-asyncio pytest-cov
       - name: Run tests
-        run: pytest tests/ -q --cov=core --cov-report=term-missing --cov-fail-under=60
+        run: pytest tests/ -q --cov=core --cov-report=term-missing --cov-fail-under=88
 
   frontend:
     runs-on: ubuntu-latest

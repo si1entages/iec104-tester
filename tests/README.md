@@ -24,7 +24,7 @@ tests/
   python -m pytest tests/test_asdu.py -q   # 单文件
   ```
 
-- 当前基线：**489 passed**。
+- 当前基线：**1049 passed**。
 
 ### 覆盖率
 
@@ -34,9 +34,15 @@ tests/
 python -m pytest tests/ -q --cov=core --cov-report=term-missing
 ```
 
-- **当前实测覆盖率：64%**（`core/` 共 7662 条语句，未覆盖 2787 条）。
-- **CI 门禁**：`--cov-fail-under=60`（略低于实测值，避免跨 Python 版本/环境的正常抖动导致误红）。
-- **提升目标**：逐步提升至 **85%**，再同步上调门禁。当前低覆盖主要集中在 `core/testing/`（YAML 脚本引擎）、`core/simulation/`（网络异常注入）、`core/capture/recorder.py`、`core/data/history.py` 等非核心链路——这些模块主要由端到端脚本覆盖，单元测试待补。
+- **当前实测覆盖率：90%**（`core/` 共 8726 条语句，未覆盖 859 条）。
+- **CI 门禁**：`--cov-fail-under=88`（略低于实测值，避免跨 Python 版本/环境的正常抖动导致误红）。
+- **提升目标：已达 85%**（当前 90%）。单模块仍未满 85% 者（均为非核心链路，主要由端到端脚本覆盖）：
+  `core/engine/scheduler.py` 55%、`core/engine/slave_session.py` 69%、
+  `core/engine/master_protocol.py` 75%、`core/engine/master_session.py` 75%、
+  `core/engine/slave_sim.py` 75%、`core/engine/multi_station.py` 82%、
+  `core/data/data_store.py` 83%；`core/transport/client.py` 与
+  `core/transport/server.py` 为 0%——两者都是仅 2 行的**兼容性 re-export 垫片**
+  （实现分别在 `connection.py` / `TcpServer`），其语句只在直接 `import` 该模块时被执行。
 
 ---
 
