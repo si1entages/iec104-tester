@@ -31,6 +31,8 @@
     python capture_tool.py show session.i104 --filter "frame_type=I direction=RX"
 """
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import logging
