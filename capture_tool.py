@@ -130,9 +130,20 @@ async def cmd_record(args):
     except KeyboardInterrupt:
         print("\n")
     finally:
+        recorded = recorder.total_frames
         total = recorder.stop()
         await engine.stop()
-        print(f"✅ Saved {total} frames to {output}")
+        # 口径说明：recorded = 已记录进内存的帧数（实时显示口径）；
+        # total = stop 刷盘时缓冲快照的落盘帧数。自动刷盘只在新帧到达且
+        # 距上次刷盘 ≥ auto_flush_interval 时触发，非优雅终止（强杀）时
+        # 自上次刷盘后的帧会留在内存、不落盘，二者即出现差异。
+        print(f"✅ Recorded {recorded} frames, saved {total} frames to {output}")
+        if recorded != total:
+            print(
+                f"⚠️  {recorded - total} frame(s) counted but not persisted: "
+                "自上次自动刷盘后记录的帧未落盘（进程被强杀或刷盘失败所致），"
+                "实时计数与落盘帧数口径不同属正常现象。"
+            )
 
 
 # ═══════════════════════════════════════════════════════════════════

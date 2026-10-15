@@ -289,6 +289,32 @@ def test_flush_failure_is_logged_and_not_raised(tmp_path, monkeypatch):
     assert rec.stop() == 1  # 帧数照常返回
 
 
+def test_graceful_stop_persists_all_counted_frames(tmp_path):
+    """O2 口径回归：优雅 stop 后，落盘帧数 == 实时计数（total_frames）.
+
+    实时计数口径 = 已记录进内存的帧数；落盘 = 刷盘点（自动刷盘/stop）的
+    缓冲快照。优雅终止时 stop 必把全部已计数帧落盘，二者相等；QA 互调
+    C11 观察到的「实时 11 / 落盘 10」差 1 来自非优雅终止时自上次自动刷盘
+    后的帧未落盘（强杀丢内存尾巴），而非 S 帧计数时机错误——计数本身无误。
+    """
+    path = tmp_path / "o2.i104"
+    rec = PacketRecorder()
+    rec.start(path)
+
+    # 模拟 QA 会话：前 9 帧（GI 闭环，RX=7/TX=2）+ TX S 帧 @11.131s 触发间隔自动刷盘
+    for i in range(9):
+        rec.record_frame(FRAME, direction="rx" if i % 3 else "tx", timestamp=float(i))
+    rec.record_frame(FRAME, direction="tx", timestamp=11.131)   # TX S → 触发自动刷盘
+    rec.record_frame(FRAME, direction="rx", timestamp=11.2)     # 第 11 帧：仅入内存
+    assert rec.total_frames == 11
+
+    total = rec.stop()
+
+    _, frames = CaptureFile.load_binary(path)
+    assert total == rec.total_frames == 11
+    assert len(frames) == 11   # 优雅终止：计数与落盘对账一致
+
+
 # ── 导出 ─────────────────────────────────────────────────────────
 
 def test_export_binary_and_json_by_suffix(tmp_path):
