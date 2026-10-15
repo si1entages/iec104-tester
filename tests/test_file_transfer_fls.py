@@ -207,7 +207,7 @@ def test_directory_terminator_uses_lsq_not_used():
     assert body[3] == LSQ_NOT_USED
 
 
-# ── ③ 缺陷钉桩：当前与标准不符，修复后需同步改断言 ────────────────
+# ── ③ 缺陷钉桩（已全部翻转为标准断言；下述用例保留为长期回归） ──────
 
 def test_fr_sr_io_body_length_matches_standard():
     """F_FR/F_SR 信息体长度与标准一致：LOF 为 24 位（3 字节）→ F_FR=6、F_SR=7.

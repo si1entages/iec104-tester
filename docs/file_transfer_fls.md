@@ -39,8 +39,9 @@
 - 「标准是否允许其它变体」「CHS 是否就是算术和 mod 256」等**仍留在第 4 节待核实**，未因新增渠道而擅自升级为"已核实"。
 
 > **4.1（CHS 算法）的进展**：go-iecp5 与 lib60870 **两者都用「该节所有段八位组的算术和 mod 256」**
-> 且在收端以 `CHS == 计算值` 判定节的肯定/否定确认。这是两个独立实现的一致做法，
-> 但因未取得标准正文，仍**列为待核实**，本次不实现校验逻辑（保持发 0、不校验）。
+> 且在收端以 `CHS == 计算值` 判定节的肯定/否定确认。本仓库已按该候选答案**实现**
+> （发送侧计算 + 接收侧告警校验，见 §4.1 与 §5）——依据来源与「非标准原文」这一
+> 事实在实现处与文档中**并列写明**，真机联调（§6 第 3 步）仍是最终确认手段。
 
 ## 2. 已核实（含依据）
 
@@ -55,17 +56,20 @@
 
 | 类型 | 标准布局（依据：lib60870 `Encode()`） | 标准长度 | 本实现长度 | 结论 |
 |---|---|---|---|---|
-| F_FR_NA_1(120) | `NOF(2,LE) + LOF(3,LE) + FRQ(1)` | **6** | 7 | ❌ 见 5.1 |
-| F_SR_NA_1(121) | `NOF(2) + NOS(1) + LOF(3) + SRQ(1)` | **7** | 8 | ❌ 见 5.1 |
-| F_SC_NA_1(122) | `NOF(2) + NOS(1) + SCQ(1)` | **4** | 4 | ✅ 长度一致；SCQ 取值表见 5.3 |
-| **F_LS_NA_1(123)** | **`NOF(2) + NOS(1) + LSQ(1) + CHS(1)`** | **5** | 5 | ✅ 长度一致；**末两字节角色本实现原先颠倒**，见 2.4 / 已修 |
+| F_FR_NA_1(120) | `NOF(2,LE) + LOF(3,LE) + FRQ(1)` | **6** | 6 | ✅ 已修（原 7，见 5.1） |
+| F_SR_NA_1(121) | `NOF(2) + NOS(1) + LOF(3) + SRQ(1)` | **7** | 7 | ✅ 已修（原 8，见 5.1） |
+| F_SC_NA_1(122) | `NOF(2) + NOS(1) + SCQ(1)` | **4** | 4 | ✅ 长度一致；SCQ 取值表已修（见 5.3/§2.6） |
+| **F_LS_NA_1(123)** | **`NOF(2) + NOS(1) + LSQ(1) + CHS(1)`** | **5** | 5 | ✅ 末两字节角色已修（a75b9da），CHS 已实现（见 4.1） |
 | F_AF_NA_1(124) | `NOF(2) + NOS(1) + AFQ(1)` | **4** | 4 | ✅ 长度与 AFQ 取值均一致 |
-| F_SG_NA_1(125) | `NOF(2) + NOS(1) + LOS(1) + 数据`（**无段号字段**） | 4+len | 5+len | ❌ 见 5.2 |
-| F_DR_TA_1(126) | `NOF(2) + LOF(3) + SOF(1) + CP56Time2a(7)` | **13** | 14 | ❌ 见 5.1 |
+| F_SG_NA_1(125) | `NOF(2) + NOS(1) + LOS(1) + 数据`（**无段号字段**） | 4+len | 4+len | ✅ 已修（原 5+len，见 5.2） |
+| F_DR_TA_1(126) | `NOF(2) + LOF(3) + SOF(1) + CP56Time2a(7)` | **13** | 13 | ✅ 已修（原 14，见 5.1） |
 
-`LOF`（length of file / section）为 **24 位（3 字节）**；本实现按 32 位写入，是 F_FR / F_SR /
-F_DR 各多 1 字节的直接原因。`FRQ`/`SRQ` 的最高位（`0x80`）分别为
-「否定确认 / 未就绪」标志。
+`LOF`（length of file / section）为 **24 位（3 字节）**；本实现曾按 32 位写入，是 F_FR / F_SR /
+F_DR 各多 1 字节的直接原因，**已改为 3 字节小端**（编解码两侧 + `ASDU.decode` 长度表同步）。
+`FRQ`/`SRQ` 的最高位（`0x80`）分别为「否定确认 / 未就绪」标志。
+
+字节级回归：`tests/test_file_transfer_golden.py`（10 个 F_* 的完整线缆帧期望 hex
+硬编码 + 4 条解码侧独立核对）——往返测试无法发现对称性错误，黄金用例补上这一环。
 
 ### 2.3 LSQ 取值表（F_LS_NA_1 第 4 字节）
 
@@ -88,7 +92,25 @@ F_DR 各多 1 字节的直接原因。`FRQ`/`SRQ` 的最高位（`0x80`）分别
 `2=NEG_ACK_FILE`、`3=POS_ACK_SECTION`、`4=NEG_ACK_SECTION`。
 本实现 `AckFileSection.qualifier` 的文档与之一致 ✅。
 
-### 2.5 FileError 取值表
+### 2.5 SCQ 取值表（F_SC_NA_1 / F_SC_NB_1 第 4 字节）
+
+依据：lib60870.NET ``enum SelectAndCallQualifier`` + go-iecp5 ``FileCallOrSelect``
+（两个互相独立的字节级实现取值一致）。
+
+| 值 | 名称 | 语义 |
+|---|---|---|
+| 0 | 缺省 | 未指定 |
+| 1 | `SELECT_FILE` | 选择文件 |
+| 2 | `REQUEST_FILE` | 请求文件 |
+| 3 | `DEACTIVATE_FILE` | 去激活文件 |
+| 4 | `DELETE_FILE` | **删除文件**（旧实现误当"选择文件"，见 5.3） |
+| 5 | `SELECT_SECTION` | 选择节（本实现暂借 5 触发目录上送，见 4.4） |
+| 6 | `REQUEST_SECTION` | 请求节 |
+| 7 | `DEACTIVATE_SECTION` | 去激活节 |
+
+实现出处：``core.protocol.types.SCQ_NAMES``（唯一取值表）。
+
+### 2.6 FileError 取值表
 
 依据：lib60870 `enum FileError`：`0=DEFAULT`、`1=REQ_MEMORY_NOT_AVAILABLE`、
 `2=CHECKSUM_FAILED`、`3=UNEXPECTED_COMM_SERVICE`、`4=UNEXPECTED_NAME_OF_FILE`、
@@ -121,12 +143,20 @@ LSQ=0、非法 LSQ、CHS 不参与判定、0/1/200/201/700 字节的分段边界
 
 ## 4. 待核实（含开放问题，未臆测、未改动）
 
-### 4.1 CHS（本节校验和）算法 —— 未取得
-- **开放问题**：CHS 是"本节所有段数据的按字节 XOR"、"累加和取低 8 位"，还是别的定义？
-  起始/结束偏移如何界定（是否含 LOS/段头）？F_LS 的 CHS 与 F_FR/F_SR 中是否另有校验？
-- **当前处置**：发送侧 CHS 固定为 `0`（占位），**接收侧不校验**；本项未做任何猜测性实现。
-- **建议**：从可获得的 IEC 60870-5-101 正文（§ 文件传输 的 F_LS 定义与校验和说明）或
-  真机抓包（对端在同一节上多次传输同一数据时 CHS 是否稳定、与数据的关系）确认后再实现。
+### 4.1 CHS（本节校验和）—— 已按候选答案实现（依据非标准原文）
+- **判定**：CHS = **本节所有段数据八位组的算术和 mod 256**。依据为两个互相独立的
+  字节级实现的一致做法：
+  ① lib60870-C `file_server.c::calculateChecksum`（`checksum += data[i]`，uint8 溢出即 mod 256）；
+  ② go-iecp5 `docs/filetransfer.md`（「该节所有段八位组的算术和 mod 256」）。
+- **非标准原文**：IEC 60870-5-101/104 正文未取得，上述仅为工程实现的一致做法；
+  依据来源与该事实在 `core/protocol/file_transfer.py`（`section_checksum` 处注释）
+  与本节**并列写明**。
+- **实现方式**：发送侧 `_send_last_section` 按 `section_checksum()` 计算并写入第 5 字节；
+  接收侧 `handle_last_section` 在 LSQ∈{1,2,3,4} 时按同算法核对，**不匹配记告警、
+  不丢弃数据、不改变完成判定**（完成判定只看 LSQ）；LSQ=0（目录结束标记）与
+  超定义域取值不校验。之所以不"校验失败即拒收"，是因为算法本身未经标准正文确认。
+- **遗留确认**：真机联调（§6 第 3 步）——构造校验和错误，观察对端是否回 AFQ=2/4
+  及是否携带 FileError（关联 4.2）；起始/结束偏移（是否含 LOS/段头）亦以真机为准。
 
 ### 4.2 否定确认是否必须携带错误码（FileError）
 - **开放问题**：AFQ=2/4（否定文件/否定节）时，信息体内是否必须/可以带 FileError 码？
@@ -144,7 +174,8 @@ LSQ=0、非法 LSQ、CHS 不参与判定、0/1/200/201/700 字节的分段边界
 ### 4.4 目录传输的表达方式（SCQ 与 NOF 的组合）
 - j60870 把 SCQ=5 定义为 `SELECT_SECTION`；而本实现用 SCQ=5 表示"请求目录"。
 - **开放问题**：请求目录究竟走「SCQ=? + NOF=?」的哪种组合？（是否 `NOF=DEFAULT` +
-  `REQUEST_FILE`？或规范另有 SCQ 值？）本实现与 SCQ 取值表一并待修（见 5.3）。
+  `REQUEST_FILE`？或规范另有 SCQ 值？）SCQ 取值表本身已修（见 5.3），但**目录组合
+  仍保持开放**：本实现暂沿用 SCQ=5 触发目录上送，未按标准推断。
 
 ### 4.5 `WITH_DEACT` 的后续动作
 - LSQ=2/4 语义上要求"随后去激活"。**开放问题**：主站收到后是否必须回
@@ -156,34 +187,44 @@ LSQ=0、非法 LSQ、CHS 不参与判定、0/1/200/201/700 字节的分段边界
   且没有"节结束 → 等待下一节"的状态迁移。**开放问题**：对端按 LSQ=3/4 分节上送时，
   主站是否应逐节校验并按节回 `F_AF`（POS_ACK_SECTION）？—— 依赖 4.1 的校验和结论。
 
-## 5. 待修（需授权，本次未改动）
+## 5. 已修（5.1~5.4 + CHS，本轮完成；提交 559636b / b61e6ff / 4f6ee97 / ee8ca58 / ed6584a）
 
-### 5.1 F_FR / F_SR / F_DR 的 LOF 应为 3 字节（各多 1 字节）
-- 落点：`core/protocol/types.py`（`FileReady`/`SectionReady`/`FileReadyAck`/
-  `SectionReadyAck`/`DirectoryEntry` 的 `to_bytes`/`from_bytes`：`struct.pack('<I')`
-  → 3 字节小端）与 `core/protocol/asdu.py`（`ASDUBuilder.build_file_ready` /
-  `build_section_ready` / `build_directory_entry` / `build_file_ready_ack` /
-  `build_section_ready_ack` 的文档与长度常量）。
-- 影响：与真机/第三方栈对不上字节（对方按 6/7/13 解析，本实现发 7/8/14）。**双方都改**
-  才能互通；本仓库自身收发自洽，故单测不会暴露。
+### 5.1 LOF 改 24 位（3 字节）—— 已修（559636b）
+`FileReady`/`SectionReady`/`FileReadyAck`/`SectionReadyAck`/`DirectoryEntry` 编解码两侧
+改为 3 字节小端（`_encode_u24le`/`_decode_u24le`）；`ASDU.decode` 的信息体长度表
+7/8/14 → 6/7/13 同步（**解码表是备份补丁曾遗漏的调用点**，e2e 由此暴露）。
+黄金用例：`test_golden_f_fr_n1_120_body_6` 等 + `test_golden_decode_f_fr_24bit_lof_boundary`
+（0xFFFFFF 上界）。
 
-### 5.2 F_SG 多出「段号」字节，且 LOS 位置被占用
-- 落点：`core/protocol/types.py::FileSegment`（去掉 `segment_number` 字段或不再编码它，
-  `LOS=len(data)` 放到第 4 字节）与 `asdu.py::build_file_segment` 的形参。
-- 影响：段数据在真机上会整体偏移 1 字节，且对端读到的"LOS"是段序号而非长度。
+### 5.2 F_SG 去掉「段号」字节 —— 已修（559636b）
+`FileSegment` 信息体 = `NOF(2)+NOS(1)+LOS(1)+数据`，`build_file_segment` 去掉
+segment_number 形参；收发两侧调用点同步（接收侧改段计数，不再有段号语义）。
 
-### 5.3 F_SC_NA_1 的 SCQ 取值表与 `handle_file_request` 分支
-- 落点：`core/protocol/types.py::FileSelectCallGet.qualifier_str`
-  （改为 1=SELECT_FILE、2=REQUEST_FILE、3=DEACTIVATE_FILE、4=DELETE_FILE、
-  5=SELECT_SECTION、6=REQUEST_SECTION、7=DEACTIVATE_SECTION）与
-  `core/protocol/file_transfer.py::FileTransferSlave.handle_file_request` 的分支。
-- 影响：真机发 SCQ=4（删除文件）会被本实现当作"选择文件"并开始上送。
-- 注：本仓库现有测试（`tests/test_file_transfer_upload.py`）按旧表编写，改表需同步调整。
+### 5.3 SCQ 取值表标准化 —— 已修（b61e6ff）
+`SCQ_NAMES`（§2.5）+ `handle_file_request` 分支重写：SCQ=4（删除文件）移出缓存并回
+F_AF_NA_1，**绝不触发上送**（旧实现把 4 当"选择文件"）；SCQ=1/2 上送流程不变；
+SCQ=5 暂借为目录触发（开放项见 4.4）；SCQ=3/7、6 仅记录不推断。
 
-### 5.4 字段命名与显示文案
-- `LastSection.last_segment`/`status` → `lsq`/`chs`（`types.py`）；
-- `core/protocol/io.py:238` 的 "最后段=… 状态=…" 显示文案应按 LSQ/CHS 重写，
-  否则现场排查时会把校验和当状态看。
+### 5.4 LastSection 字段更名 —— 已修（4f6ee97）
+`last_segment`/`status` → `lsq`/`chs`，`status_str` → `lsq_str`（复用 `types.LSQ_NAMES`）；
+`build_last_section` 形参、`handle_last_section`、`_send_directory` 结束标记、
+`io.py` 显示分支（LSQ=n(名称) CHS=n）一次闭环。
+
+### 5.5（原 4.1）CHS 校验和 —— 已实现（ed6584a，见 §4.1）
+发送侧按「算术和 mod 256」计算；接收侧校验不通过**记告警不丢弃**。
+
+### 测试状态
+- `tests/test_file_transfer_fls.py`：原 5 处缺陷钉桩（F_FR/F_SR 长度、F_SG 布局、
+  LastSection 字段名、SCQ 表、SCQ=4 分支）**全部翻转为标准断言**，docstring 同步；
+  新增 CHS 专项 5 例与 SCQ=2/4 行为回归。
+- `tests/test_file_transfer_golden.py`：新增，14 例（10 编码黄金帧 + 4 解码独立核对）。
+- `tests/test_file_transfer_upload.py` / `test_commands.py` / `test_protocol_io.py` /
+  `conftest.py`：按新布局/新表同步（无行为断言改动，仅布局与显示文案）。
+
+### 遗留的小项（非阻塞）
+- `FileReady.status_str`/`SectionReady.status` 的显示表仍是旧文案（`0=缺省`）——
+  FRQ/SRQ 的精确取值语义两处来源略有出入（Schneider 手册「0=肯定/1=否定」vs
+  lib60870「最高位 0x80=否定」），保持现状待真机确认，未臆测。
 
 ## 6. 真机联调验证建议（供后续执行）
 
