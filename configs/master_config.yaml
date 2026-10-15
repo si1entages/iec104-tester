@@ -54,6 +54,16 @@ tls:
   verify_client: false  # 主站此字段不生效（仅供子站）
   server_hostname: ""   # 按 IP 连接而证书只签域名时必填，如 "iec104.local"
 
+# 冗余双通道（T21，仅主站生效）：主/备两条 TCP 连接指向两个冗余前置机，
+# 同一时刻仅一条活动收发；主用断开 → 切换备用并重走 STARTDT+总召唤。
+# 模型与局限详见 docs/redundancy.md。
+redundancy:
+  enabled: false
+  standby_host: "127.0.0.1"  # 备用前置机地址
+  standby_port: 2404         # 备用前置机端口
+  switch_timeout: 2.0        # 切换后等待 STARTDT CON 的超时（秒）
+  dedup_window: 5.0          # 切换窗口 I 帧 ASDU 去重时间窗（秒）
+
 # 自定义（非标准厂商私有）TypeID —— 使私有类型可编解码往返（默认空）
 # custom_types:
 #   - type_id: 130

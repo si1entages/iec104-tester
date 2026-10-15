@@ -26,6 +26,7 @@ from collections import deque
 from collections.abc import Callable
 from typing import Any
 
+from ..config import RedundancyConfig
 from ..data.data_store import RealtimeDB
 from ..data.history import HistoryDB
 from ..data.point_table import PointTable
@@ -40,6 +41,7 @@ from .base import EngineBase
 from .master_commands import MasterCommandHandler
 from .master_param_state import MasterParameterTracker, ParameterResult, ParameterState
 from .master_protocol import MasterEvent, MasterProtocolHandler
+from .master_redundancy import MasterRedundancy
 from .master_session import MasterSession
 from .scheduler import TaskScheduler
 
@@ -89,6 +91,7 @@ class MasterEngine(EngineBase):
         point_table: PointTable | None = None,
         ssl_context: ssl.SSLContext | None = None,
         server_hostname: str | None = None,
+        redundancy: RedundancyConfig | None = None,
     ):
         super().__init__()
 
@@ -146,8 +149,9 @@ class MasterEngine(EngineBase):
         # 报文录制器
         self._recorder = None
 
-        # TCP 客户端（ssl_context 非空时启用 TLS / IEC 62351 传输加密）
-        self._client = TCPClient(
+        # TCP 客户端（ssl_context 非空时启用 TLS；启用冗余时由 MasterRedundancy
+        # 创建主/备两条 TCPClient 并管理切换与去重，见 docs/redundancy.md）
+        client_kwargs: dict = dict(
             host=host,
             port=port,
             reconnect_interval=reconnect_interval,
@@ -158,6 +162,13 @@ class MasterEngine(EngineBase):
             ssl_context=ssl_context,
             server_hostname=server_hostname,
         )
+        if redundancy is not None and redundancy.enabled:
+            self._redundancy: MasterRedundancy | None = MasterRedundancy(
+                self, redundancy, **client_kwargs)
+            self._client = self._redundancy.primary
+        else:
+            self._redundancy = None
+            self._client = TCPClient(**client_kwargs)
 
         # 回调
         self._event_callback: EventCallback | None = None
@@ -276,8 +287,11 @@ class MasterEngine(EngineBase):
         # 启动定时任务调度器
         await self._scheduler.start()
 
-        # 启动TCP连接
-        await self._client.start()
+        # 启动TCP连接（冗余模式下主/备一起启动，切换与去重见 MasterRedundancy）
+        if self._redundancy:
+            await self._redundancy.start()
+        else:
+            await self._client.start()
 
     async def stop(self) -> None:
         """停止主站引擎."""
@@ -306,7 +320,11 @@ class MasterEngine(EngineBase):
         if self._history_db:
             await asyncio.to_thread(self._history_db.flush)
 
-        await asyncio.wait_for(self._client.stop(), timeout=3.0)
+        # 停止传输（冗余模式下主/备一起停止）
+        if self._redundancy:
+            await asyncio.wait_for(self._redundancy.stop(), timeout=3.0)
+        else:
+            await asyncio.wait_for(self._client.stop(), timeout=3.0)
         self._state_machine.on_disconnected()
         self._fire_event(MasterEvent.STOPPED)
 

@@ -115,6 +115,30 @@ class TlsConfig:
 
 
 @dataclass
+class RedundancyConfig:
+    """主站冗余双通道配置（T21）.
+
+    模型与局限详见 ``docs/redundancy.md``：主/备两条独立 TCP 连接指向两个
+    冗余前置机，同一时刻仅一条活动收发；主用故障（TCP 断开，含 TESTFR
+    超时引发的断链）→ 切换到已预连接的备用通道并重走 STARTDT+总召唤。
+
+    Attributes:
+        enabled: 是否启用冗余双通道（默认关闭，行为与单通道完全一致）。
+        standby_host: 备用前置机地址。
+        standby_port: 备用前置机端口。
+        switch_timeout: 切换后等待新链路进入 Running（STARTDT CON）的超时秒数，
+            超时则记 ERROR 并依赖备用通道自身的重连循环继续尝试。
+        dedup_window: 切换窗口 I 帧 ASDU 去重时间窗（秒）；窗口内 ASDU 字节
+            完全相同的重复帧只处理一次。
+    """
+    enabled: bool = False
+    standby_host: str = "127.0.0.1"
+    standby_port: int = 2404
+    switch_timeout: float = 2.0
+    dedup_window: float = 5.0
+
+
+@dataclass
 class AppConfig:
     """应用总配置."""
     mode: str = "master"            # "master" / "slave"
@@ -127,6 +151,8 @@ class AppConfig:
     point_table: PointTableConfig = field(default_factory=PointTableConfig)
     history: HistoryConfig = field(default_factory=HistoryConfig)
     tls: TlsConfig = field(default_factory=TlsConfig)
+    # 主站冗余双通道（T21）；仅主站生效，子站/多站 StationConfig 不适用
+    redundancy: RedundancyConfig = field(default_factory=RedundancyConfig)
     # 自定义（非标准厂商私有）TypeID 结构定义（T22）：元素形如
     # ``{type_id: 128, name: VendorAlarm, fields: [{name: v, type: u8}]}``。
     custom_types: list = field(default_factory=list)
@@ -197,6 +223,13 @@ class AppConfig:
                 'verify': self.tls.verify,
                 'verify_client': self.tls.verify_client,
                 'server_hostname': self.tls.server_hostname,
+            },
+            'redundancy': {
+                'enabled': self.redundancy.enabled,
+                'standby_host': self.redundancy.standby_host,
+                'standby_port': self.redundancy.standby_port,
+                'switch_timeout': self.redundancy.switch_timeout,
+                'dedup_window': self.redundancy.dedup_window,
             },
             'custom_types': list(self.custom_types),
         }
@@ -278,6 +311,13 @@ def load_config(path: str | Path) -> AppConfig:
     cfg.tls.verify = tls.get('verify', cfg.tls.verify)
     cfg.tls.verify_client = tls.get('verify_client', cfg.tls.verify_client)
     cfg.tls.server_hostname = tls.get('server_hostname', cfg.tls.server_hostname)
+
+    red = data.get('redundancy', {}) or {}
+    cfg.redundancy.enabled = red.get('enabled', cfg.redundancy.enabled)
+    cfg.redundancy.standby_host = red.get('standby_host', cfg.redundancy.standby_host)
+    cfg.redundancy.standby_port = red.get('standby_port', cfg.redundancy.standby_port)
+    cfg.redundancy.switch_timeout = red.get('switch_timeout', cfg.redundancy.switch_timeout)
+    cfg.redundancy.dedup_window = red.get('dedup_window', cfg.redundancy.dedup_window)
 
     custom_types = data.get('custom_types', None)
     if isinstance(custom_types, list):

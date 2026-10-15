@@ -167,8 +167,18 @@ class MasterSession:
         if e._seq.send_window_available:
             e._window_available.set()
 
-        # 解析 ASDU
+        # 切换窗口去重（T21）：序列号消费与确认在上面已照常完成，此处仅
+        # 抑制应用层重复（同一 ASDU 在主备切换窗口内经两条链路重复送达时
+        # 不重复入库/上事件）。传输层绝不丢 I 帧——丢帧会让 VR 失步。
         asdu_data = frame[6:6 + apci.asdu_length]
+        if e._redundancy is not None and e._redundancy.is_duplicate_asdu(asdu_data):
+            logger.info(
+                "丢弃切换窗口内重复 ASDU（%d 字节，I 帧已按正常确认）",
+                len(asdu_data),
+            )
+            e._state_machine.on_i_frame_received()
+            return
+
         e._protocol.decode_and_dispatch(asdu_data)
 
         e._state_machine.on_i_frame_received()
