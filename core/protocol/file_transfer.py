@@ -182,10 +182,21 @@ class FileTransferManager:
         self._on_error = on_error
 
     def handle_file_ready(self, data: FileReady) -> None:
-        """处理文件准备就绪 (F_FR_NA_1)."""
+        """处理文件准备就绪 (F_FR_NA_1).
+
+        F_FR_NA_1 标志**一次新文件传输的开始**：此处重置累积缓冲与段计数，
+        防止同一文件（或同名文件的新一轮）重复下载时上一轮的段数据残留
+        （QA 互调 C4/D2：第二次下载 size=1200 = 600+600）。单次传输内的
+        多节累积不受影响 —— 段数据在 file_ready 之后经 handle_file_segment
+        逐段到达，仍正常累积。
+        """
         logger.info(f"File Ready: name={data.file_name} length={data.file_length} status={data.status}")
         self._context.file_name = data.file_name
         self._context.file_length = data.file_length
+        # 新传输边界：清空上一轮残留（D2）
+        self._context.data.clear()
+        self._context.segment_number = 0
+        self._context.lsq = 0
         self._context.state = FileTransferState.FILE_READY
 
     def handle_section_ready(self, data: SectionReady) -> None:
