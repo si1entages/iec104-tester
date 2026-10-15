@@ -47,6 +47,11 @@ export function SlaveConnectionPanel() {
   const [host, setHost] = useState('0.0.0.0')
   const [port, setPort] = useState(2404)
   const [addr, setAddr] = useState(1)
+  // TLS 传输加密（T20）：最小增量——启用开关 + 证书/私钥/CA 路径三项
+  const [tlsEnabled, setTlsEnabled] = useState(false)
+  const [tlsCert, setTlsCert] = useState('')
+  const [tlsKey, setTlsKey] = useState('')
+  const [tlsCa, setTlsCa] = useState('')
 
   const start = useCommand(api.slave.start)
   const stop = useCommandNoArgs(api.slave.stop)
@@ -85,7 +90,25 @@ export function SlaveConnectionPanel() {
             type="primary"
             loading={start.isPending}
             disabled={running}
-            onClick={() => void start.mutateAsync({ host, port, addr }).then((r) => report('启动监听', r))}
+            onClick={() =>
+              void start
+                .mutateAsync({
+                  host,
+                  port,
+                  addr,
+                  ...(tlsEnabled
+                    ? {
+                        tls: {
+                          enabled: true,
+                          ...(tlsCert ? { certfile: tlsCert } : {}),
+                          ...(tlsKey ? { keyfile: tlsKey } : {}),
+                          ...(tlsCa ? { cafile: tlsCa } : {}),
+                        },
+                      }
+                    : {}),
+                })
+                .then((r) => report('启动监听', r))
+            }
           >
             启动监听
           </Button>
@@ -131,6 +154,36 @@ export function SlaveConnectionPanel() {
           value={addr}
           onChange={(v) => setAddr(Number(v ?? 1))}
         />
+      </Space>
+
+      <Space wrap style={{ marginBottom: 12 }}>
+        <span style={{ color: '#8c8c8c' }}>TLS</span>
+        <Switch size="small" checked={tlsEnabled} onChange={setTlsEnabled} />
+        {tlsEnabled ? (
+          <>
+            <Input
+              prefix="服务端证书"
+              placeholder="server.pem"
+              style={{ width: 200 }}
+              value={tlsCert}
+              onChange={(e) => setTlsCert(e.target.value)}
+            />
+            <Input
+              prefix="服务端私钥"
+              placeholder="server.key"
+              style={{ width: 200 }}
+              value={tlsKey}
+              onChange={(e) => setTlsKey(e.target.value)}
+            />
+            <Input
+              prefix="CA 证书"
+              placeholder="ca.pem（双向认证时）"
+              style={{ width: 220 }}
+              value={tlsCa}
+              onChange={(e) => setTlsCa(e.target.value)}
+            />
+          </>
+        ) : null}
       </Space>
 
       <Descriptions

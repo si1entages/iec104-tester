@@ -18,6 +18,11 @@ export function ConnectionPanel() {
   const [port, setPort] = useState(2404)
   const [addr, setAddr] = useState(1)
   const [reconnect, setReconnect] = useState(true)
+  // TLS 传输加密（T20）：最小增量——启用开关 + CA/证书/私钥路径三项
+  const [tlsEnabled, setTlsEnabled] = useState(false)
+  const [tlsCa, setTlsCa] = useState('')
+  const [tlsCert, setTlsCert] = useState('')
+  const [tlsKey, setTlsKey] = useState('')
 
   const start = useCommand(api.master.start)
   const stop = useCommandNoArgs(api.master.stop)
@@ -57,7 +62,22 @@ export function ConnectionPanel() {
             disabled={running}
             onClick={() =>
               void start
-                .mutateAsync({ host, port, addr, reconnect })
+                .mutateAsync({
+                  host,
+                  port,
+                  addr,
+                  reconnect,
+                  ...(tlsEnabled
+                    ? {
+                        tls: {
+                          enabled: true,
+                          ...(tlsCa ? { cafile: tlsCa } : {}),
+                          ...(tlsCert ? { certfile: tlsCert } : {}),
+                          ...(tlsKey ? { keyfile: tlsKey } : {}),
+                        },
+                      }
+                    : {}),
+                })
                 .then(report)
             }
           >
@@ -104,6 +124,36 @@ export function ConnectionPanel() {
           value={addr}
           onChange={(v) => setAddr(Number(v ?? 1))}
         />
+      </Space>
+
+      <Space wrap style={{ marginBottom: 12 }}>
+        <span style={{ color: '#8c8c8c' }}>TLS</span>
+        <Switch size="small" checked={tlsEnabled} onChange={setTlsEnabled} />
+        {tlsEnabled ? (
+          <>
+            <Input
+              prefix="CA 证书"
+              placeholder="ca.pem"
+              style={{ width: 200 }}
+              value={tlsCa}
+              onChange={(e) => setTlsCa(e.target.value)}
+            />
+            <Input
+              prefix="客户端证书"
+              placeholder="client.pem"
+              style={{ width: 200 }}
+              value={tlsCert}
+              onChange={(e) => setTlsCert(e.target.value)}
+            />
+            <Input
+              prefix="客户端私钥"
+              placeholder="client.key"
+              style={{ width: 200 }}
+              value={tlsKey}
+              onChange={(e) => setTlsKey(e.target.value)}
+            />
+          </>
+        ) : null}
       </Space>
 
       <Descriptions

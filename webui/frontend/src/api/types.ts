@@ -126,12 +126,24 @@ export interface LogQueryParams {
 
 // ── 请求体 ─────────────────────────────────────────────────────────────
 
+/** 可选 TLS 传输加密配置（T20），形态与多站 StationConfig.tls 一致 */
+export interface TlsOptions {
+  enabled?: boolean
+  certfile?: string
+  keyfile?: string
+  cafile?: string
+  verify?: boolean
+  verify_client?: boolean
+  server_hostname?: string
+}
+
 export interface MasterStartRequest {
   host?: string
   port?: number
   addr?: number
   reconnect?: boolean
   gi_interval?: number
+  tls?: TlsOptions
 }
 
 /** 1–16 = 组召唤；20 = 站召唤（默认） */
@@ -201,6 +213,7 @@ export interface SlaveStartRequest {
   host?: string
   port?: number
   addr?: number
+  tls?: TlsOptions
 }
 
 /** `POST /api/slave/step`：置数并自发上送步位置（`M_ST_TB_1`, COT=3）（T09） */

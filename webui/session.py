@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import ssl
 from collections.abc import Callable
 from dataclasses import asdict
 from typing import Any
@@ -14,13 +15,28 @@ from core.engine.multi_station import (
     MultiStationConfig,
     MultiStationManager,
     StationConfig,
+    _coerce_tls_config,
 )
 from core.engine.slave import ResponseBehavior, SlaveEngine, SlaveEvent
+from core.transport.connection import TlsConfigError, build_context_from_config
 
 logger = logging.getLogger("iec104.webui")
 
 EventHook = Callable[[str, dict], None]
 FrameHook = Callable[[bytes, str, str], None]
+
+
+def prepare_tls(tls: Any, role: str) -> tuple[ssl.SSLContext | None, str | None]:
+    """把可选 ``tls``（dict / ``TlsConfig`` / None）解析为 (ssl_context, server_hostname).
+
+    单站启动与多站 ``StationConfig.tls`` 共用同一配置形态；未传或未启用时返回
+    ``(None, None)``（明文，与历史行为一致）。配置无效抛 ``TlsConfigError``。
+    """
+    cfg = _coerce_tls_config(tls)
+    if cfg is None or not cfg.enabled:
+        return None, None
+    ctx = build_context_from_config(cfg, role)
+    return ctx, (cfg.server_hostname or None)
 
 
 def jsonable(obj: Any) -> Any:
@@ -225,15 +241,21 @@ class EngineSession:
 
     async def start_master(self, host: str, port: int, addr: int,
                            reconnect: bool, points: Any,
-                           gi_interval: float = 0.0) -> dict:
+                           gi_interval: float = 0.0,
+                           tls: Any = None) -> dict:
         if self.engine:
             return {"ok": False, "error": "already running"}
+        try:
+            ssl_context, server_hostname = prepare_tls(tls, "master")
+        except TlsConfigError as e:
+            return {"ok": False, "error": f"TLS 配置无效: {e}"}
         eng = MasterEngine(
             host=host, port=port, common_addr=addr,
             auto_start=True, auto_gi=False, reconnect=reconnect,
             reconnect_interval=5.0,
             point_table=getattr(points, "table", None),
             gi_interval=float(gi_interval or 0.0),
+            ssl_context=ssl_context, server_hostname=server_hostname,
         )
         eng.set_event_callback(self._hook_master)
         eng.set_raw_frame_callback(self._hook_frame_master)
@@ -257,12 +279,18 @@ class EngineSession:
         return {"ok": True}
 
     async def start_slave(self, host: str, port: int, addr: int,
-                          points: Any, spontaneous: bool = True) -> dict:
+                          points: Any, spontaneous: bool = True,
+                          tls: Any = None) -> dict:
         if self.engine:
             return {"ok": False, "error": "already running"}
+        try:
+            ssl_context, _ = prepare_tls(tls, "slave")
+        except TlsConfigError as e:
+            return {"ok": False, "error": f"TLS 配置无效: {e}"}
         eng = SlaveEngine(
             host=host, port=port, common_addr=addr,
             point_table=points.table, spontaneous_enabled=spontaneous,
+            ssl_context=ssl_context,
         )
         eng.data_store.init_from_point_table(points.table)
         eng.set_event_callback(self._hook_slave)

@@ -151,12 +151,16 @@ def create_app(bridge: EngineBridge) -> web.Application:
         if not isinstance(gi_interval, (int, float)) or gi_interval < 0:
             return web.json_response({"ok": False, "error": "invalid gi_interval"},
                                      status=400)
+        tls = body.get("tls")
+        if tls is not None and not isinstance(tls, dict):
+            return web.json_response({"ok": False, "error": "invalid tls"}, status=400)
         r = await bridge.start_master(
             host,
             port,
             addr,
             bool(body.get("reconnect", True)),
             float(gi_interval),
+            tls=tls,
         )
         return web.json_response(r)
 
@@ -492,7 +496,10 @@ def create_app(bridge: EngineBridge) -> web.Application:
         addr = body.get("addr", 1)
         if not isinstance(addr, int) or addr < 0:
             return web.json_response({"ok": False, "error": "invalid addr"}, status=400)
-        return web.json_response(await bridge.start_slave(host, port, addr))
+        tls = body.get("tls")
+        if tls is not None and not isinstance(tls, dict):
+            return web.json_response({"ok": False, "error": "invalid tls"}, status=400)
+        return web.json_response(await bridge.start_slave(host, port, addr, tls=tls))
 
     async def api_slave_stop(request: web.Request) -> web.Response:
         return web.json_response(await bridge.stop_slave())

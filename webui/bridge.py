@@ -157,10 +157,10 @@ class EngineBridge:
         self.bus.publish("event", {"type": "ui", "data": {"msg": msg}})
 
     async def start_master(self, host: str, port: int, addr: int, reconnect: bool = True,
-                           gi_interval: float = 0.0) -> dict:
+                           gi_interval: float = 0.0, tls: dict | None = None) -> dict:
         self.ensure_demo_points()
         r = await self.session.start_master(host, port, addr, reconnect, self.points,
-                                            gi_interval=gi_interval)
+                                            gi_interval=gi_interval, tls=tls)
         if r.get("ok"):
             self._status.update({"running": True, "host": host, "port": port})
             self._notify_ui(f"连接中 {host}:{port}")
@@ -181,9 +181,10 @@ class EngineBridge:
         self._notify_ui("已断开")
         return r
 
-    async def start_slave(self, host: str, port: int, addr: int) -> dict:
+    async def start_slave(self, host: str, port: int, addr: int,
+                          tls: dict | None = None) -> dict:
         self.ensure_demo_points()
-        r = await self.session.start_slave(host, port, addr, self.points)
+        r = await self.session.start_slave(host, port, addr, self.points, tls=tls)
         if r.get("ok"):
             self._status.update({"running": True, "host": host, "port": port})
             self._notify_ui(f"监听 {host}:{port}")

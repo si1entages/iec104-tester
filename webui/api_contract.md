@@ -70,7 +70,7 @@
 
 | 方法 | 路径 | 请求 | 响应 |
 |------|------|------|------|
-| POST | `/api/master/start` | `host: str="127.0.0.1"`, `port: int=2404 (0-65535)`, `addr: int=1 (≥0)`, `reconnect: bool=true`, `gi_interval: number=0 (≥0)` | `{ok, error?}` |
+| POST | `/api/master/start` | `host: str="127.0.0.1"`, `port: int=2404 (0-65535)`, `addr: int=1 (≥0)`, `reconnect: bool=true`, `gi_interval: number=0 (≥0)`, `tls?: TlsOptions`（可选，见下方说明） | `{ok, error?}` |
 | POST | `/api/master/stop` | — | `{ok, error?}` |
 | POST | `/api/master/gi` | `qoi: int=20`（1–16 组召唤 ｜ 20 站召唤） | `{ok, error?}` |
 | POST | `/api/master/clock` | — | `{ok, error?}` |
@@ -88,11 +88,18 @@
 
 > `with_time=true` → 带时标类型（YK: `C_SC_TA_1` / `C_DC_TA_1`）。
 
+> `TlsOptions`（T20，纯新增可选字段，不影响 `schemaVersion`）：`{enabled: bool,
+> certfile?: str, keyfile?: str, cafile?: str, verify?: bool=true,
+> verify_client?: bool=false, server_hostname?: str}`，形态与多站
+> `StationConfig.tls` 一致。仅 `enabled=true` 时生效；证书路径无效时返回
+> `{ok: false, error: "TLS 配置无效: ..."}`。主站（客户端）通常只需 `cafile`
+> （+ 双向认证时 `certfile`/`keyfile`）；子站（服务端）需 `certfile`/`keyfile`。
+
 ### 2.3 子站命令
 
 | 方法 | 路径 | 请求 | 响应 |
 |------|------|------|------|
-| POST | `/api/slave/start` | `host: str="0.0.0.0"`, `port: int=2404 (0-65535)`, `addr: int=1 (≥0)` | `{ok, error?}` |
+| POST | `/api/slave/start` | `host: str="0.0.0.0"`, `port: int=2404 (0-65535)`, `addr: int=1 (≥0)`, `tls?: TlsOptions`（可选，见 §2.2 说明） | `{ok, error?}` |
 | POST | `/api/slave/stop` | — | `{ok, error?}` |
 | POST | `/api/slave/yx` | `ioa: int (≥0)`, `value: bool` | `{ok, error?}` |
 | POST | `/api/slave/yc` | `ioa: int (≥0)`, `value: number` | `{ok, error?}` |
