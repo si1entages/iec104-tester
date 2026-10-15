@@ -240,14 +240,22 @@ class MasterCommandHandler:
         return True
 
     async def single_command(self, ioa: int, state: bool,
-                              select: bool = False, qu: int = 0) -> None:
-        """发送单命令 (选择/执行).
+                              select: bool = False, qu: int = 0,
+                              deactivate: bool = False) -> None:
+        """发送单命令 (选择/执行/撤销).
 
         当点表已设置且该 IOA 配置为 SBO (``select_before_execute=True``)、
         且调用方未显式要求 ``select=True`` 时，自动执行两段式：先发选择并等待
         肯定确认 (ACTCON, PN=0)，成功后再发执行；选择被拒或超时则中止，
         绝不继续发送执行帧。
+
+        ``deactivate=True`` → 发送 COT=8 (DEACT) 撤销帧（D1）：撤销是对已激活
+        命令的停止激活，语义上不走选择-执行两段式，直接单帧下发。
         """
+        if deactivate:
+            await self.send_single_command_raw(ioa, state, select=select, qu=qu,
+                                               deactivate=True)
+            return
         if not select and self.sbo_required(ioa, "yk"):
             await self.send_single_command_raw(ioa, state, select=True, qu=qu)
             acked = await self.wait_select_ack(ioa, self._engine._t1)
@@ -259,28 +267,36 @@ class MasterCommandHandler:
         await self.send_single_command_raw(ioa, state, select=select, qu=qu)
 
     async def send_single_command_raw(self, ioa: int, state: bool,
-                                       select: bool, qu: int) -> None:
+                                       select: bool, qu: int,
+                                       deactivate: bool = False) -> None:
         """发送单命令单帧（不做 SBO 决策）."""
         e = self._engine
         asdu_data = ASDUBuilder.build_single_command(
-            e._common_addr, ioa, state, select, qu
+            e._common_addr, ioa, state, select, qu,
+            cot=COT.DEACT if deactivate else COT.ACT,
         )
         await e._send_command_asdu(asdu_data)
 
-        action = "SELECT" if select else "EXECUTE"
+        action = "DEACTIVATE" if deactivate else ("SELECT" if select else "EXECUTE")
         state_str = "ON" if state else "OFF"
         logger.info(f"Single Command: IOA={ioa} {action} {state_str}")
         e._fire_event(MasterEvent.COMMAND_SENT, {
             "type": "single_command", "ioa": ioa,
-            "state": state, "select": select
+            "state": state, "select": select, "deactivate": deactivate,
         })
 
     async def double_command(self, ioa: int, state: int,
-                              select: bool = False, qu: int = 0) -> None:
-        """发送双命令 (选择/执行).
+                              select: bool = False, qu: int = 0,
+                              deactivate: bool = False) -> None:
+        """发送双命令 (选择/执行/撤销).
 
-        对 SBO 点位自动两段式下发，语义同 ``single_command``。
+        对 SBO 点位自动两段式下发，语义同 ``single_command``；
+        ``deactivate=True`` → COT=8 (DEACT) 撤销帧，单帧直发（D1）。
         """
+        if deactivate:
+            await self.send_double_command_raw(ioa, state, select=select, qu=qu,
+                                               deactivate=True)
+            return
         if not select and self.sbo_required(ioa, "yk"):
             await self.send_double_command_raw(ioa, state, select=True, qu=qu)
             acked = await self.wait_select_ack(ioa, self._engine._t1)
@@ -292,24 +308,27 @@ class MasterCommandHandler:
         await self.send_double_command_raw(ioa, state, select=select, qu=qu)
 
     async def send_double_command_raw(self, ioa: int, state: int,
-                                       select: bool, qu: int) -> None:
+                                       select: bool, qu: int,
+                                       deactivate: bool = False) -> None:
         """发送双命令单帧（不做 SBO 决策）."""
         e = self._engine
         asdu_data = ASDUBuilder.build_double_command(
-            e._common_addr, ioa, state, select, qu
+            e._common_addr, ioa, state, select, qu,
+            cot=COT.DEACT if deactivate else COT.ACT,
         )
         await e._send_command_asdu(asdu_data)
 
-        action = "SELECT" if select else "EXECUTE"
+        action = "DEACTIVATE" if deactivate else ("SELECT" if select else "EXECUTE")
         logger.info(f"Double Command: IOA={ioa} {action} state={state}")
         e._fire_event(MasterEvent.COMMAND_SENT, {
             "type": "double_command", "ioa": ioa,
-            "state": state, "select": select
+            "state": state, "select": select, "deactivate": deactivate,
         })
 
     async def setpoint_normalized(self, ioa: int, value: float,
-                                    select: bool = False) -> None:
-        """发送归一化设点命令 (选择/执行).
+                                    select: bool = False,
+                                    deactivate: bool = False) -> None:
+        """发送归一化设点命令 (选择/执行/撤销).
 
         当点表已设置且该 IOA 命中 YK 点表并配置为 SBO
         (``select_before_execute=True``) 时，自动执行两段式：先发选择并等待肯定
@@ -318,7 +337,14 @@ class MasterCommandHandler:
 
         该 IOA 未在 YK 点表中时按直发执行处理（向后兼容），亦可通过 ``select``
         显式传参覆盖。
+
+        ``deactivate=True`` → COT=8 (DEACT) 撤销帧（D1，标准允许设点命令
+        停止激活），语义上不走两段式，直接单帧下发。
         """
+        if deactivate:
+            await self.send_setpoint_normalized_raw(ioa, value, select=select,
+                                                    deactivate=True)
+            return
         if not select and self.sbo_required(ioa, "yc"):
             await self.send_setpoint_normalized_raw(ioa, value, select=True)
             acked = await self.wait_select_ack(ioa, self._engine._t1)
@@ -330,28 +356,36 @@ class MasterCommandHandler:
         await self.send_setpoint_normalized_raw(ioa, value, select=select)
 
     async def send_setpoint_normalized_raw(self, ioa: int, value: float,
-                                            select: bool) -> None:
+                                            select: bool,
+                                            deactivate: bool = False) -> None:
         """发送归一化设点单帧（不做 SBO 决策）."""
         e = self._engine
         asdu_data = ASDUBuilder.build_setpoint_normalized(
-            e._common_addr, ioa, value, select
+            e._common_addr, ioa, value, select,
+            cot=COT.DEACT if deactivate else COT.ACT,
         )
         await e._send_command_asdu(asdu_data)
 
-        action = "SELECT" if select else "EXECUTE"
+        action = "DEACTIVATE" if deactivate else ("SELECT" if select else "EXECUTE")
         logger.info(f"Setpoint Normalized: IOA={ioa} {action} value={value}")
         e._fire_event(MasterEvent.COMMAND_SENT, {
             "type": "setpoint_normalized", "ioa": ioa,
-            "value": value, "select": select
+            "value": value, "select": select, "deactivate": deactivate,
         })
 
     async def setpoint_shortfloat(self, ioa: int, value: float,
-                                    select: bool = False) -> None:
-        """发送短浮点设点命令 (选择/执行).
+                                    select: bool = False,
+                                    deactivate: bool = False) -> None:
+        """发送短浮点设点命令 (选择/执行/撤销).
 
         与 ``setpoint_normalized`` 语义一致：命中 YK 点表且 SBO 配置为 True 时
-        自动两段式下发；否则直发执行（向后兼容），可用 ``select`` 显式覆盖。
+        自动两段式下发；否则直发执行（向后兼容），可用 ``select`` 显式覆盖；
+        ``deactivate=True`` → COT=8 (DEACT) 撤销帧，单帧直发（D1）。
         """
+        if deactivate:
+            await self.send_setpoint_shortfloat_raw(ioa, value, select=select,
+                                                    deactivate=True)
+            return
         if not select and self.sbo_required(ioa, "yc"):
             await self.send_setpoint_shortfloat_raw(ioa, value, select=True)
             acked = await self.wait_select_ack(ioa, self._engine._t1)
@@ -363,19 +397,21 @@ class MasterCommandHandler:
         await self.send_setpoint_shortfloat_raw(ioa, value, select=select)
 
     async def send_setpoint_shortfloat_raw(self, ioa: int, value: float,
-                                            select: bool) -> None:
+                                            select: bool,
+                                            deactivate: bool = False) -> None:
         """发送短浮点设点单帧（不做 SBO 决策）."""
         e = self._engine
         asdu_data = ASDUBuilder.build_setpoint_shortfloat(
-            e._common_addr, ioa, value, select
+            e._common_addr, ioa, value, select,
+            cot=COT.DEACT if deactivate else COT.ACT,
         )
         await e._send_command_asdu(asdu_data)
 
-        action = "SELECT" if select else "EXECUTE"
+        action = "DEACTIVATE" if deactivate else ("SELECT" if select else "EXECUTE")
         logger.info(f"Setpoint ShortFloat: IOA={ioa} {action} value={value}")
         e._fire_event(MasterEvent.COMMAND_SENT, {
             "type": "setpoint_shortfloat", "ioa": ioa,
-            "value": value, "select": select
+            "value": value, "select": select, "deactivate": deactivate,
         })
 
     async def regulating_step_command(self, ioa: int, state: int,
@@ -416,17 +452,24 @@ class MasterCommandHandler:
         })
 
     async def setpoint_scaled(self, ioa: int, value: int,
-                               select: bool = False) -> None:
+                               select: bool = False,
+                               deactivate: bool = False) -> None:
         """发送标度化设点命令 (C_SE_NB_1).
 
         命中 YK 点表且 SBO 配置为 True 时自动两段式下发；否则直发执行，可用
-        ``select`` 显式覆盖。
+        ``select`` 显式覆盖；``deactivate=True`` → COT=8 (DEACT) 撤销帧，单帧
+        直发（D1，标准允许设点命令停止激活）。
 
         Args:
             ioa: 信息对象地址
             value: 标度化值 (-32768..+32767)
             select: True=选择, False=执行
+            deactivate: True=发送撤销帧 (COT=8 DEACT)
         """
+        if deactivate:
+            await self.send_setpoint_scaled_raw(ioa, value, select=select,
+                                                deactivate=True)
+            return
         if not select and self.sbo_required(ioa, "yc"):
             await self.send_setpoint_scaled_raw(ioa, value, select=True)
             acked = await self.wait_select_ack(ioa, self._engine._t1)
@@ -438,19 +481,21 @@ class MasterCommandHandler:
         await self.send_setpoint_scaled_raw(ioa, value, select=select)
 
     async def send_setpoint_scaled_raw(self, ioa: int, value: int,
-                                        select: bool) -> None:
+                                        select: bool,
+                                        deactivate: bool = False) -> None:
         """发送标度化设点单帧（不做 SBO 决策）."""
         e = self._engine
         asdu_data = ASDUBuilder.build_setpoint_scaled(
-            e._common_addr, ioa, value, select
+            e._common_addr, ioa, value, select,
+            cot=COT.DEACT if deactivate else COT.ACT,
         )
         await e._send_command_asdu(asdu_data)
 
-        action = "SELECT" if select else "EXECUTE"
+        action = "DEACTIVATE" if deactivate else ("SELECT" if select else "EXECUTE")
         logger.info(f"Setpoint Scaled: IOA={ioa} {action} value={value}")
         e._fire_event(MasterEvent.COMMAND_SENT, {
             "type": "setpoint_scaled", "ioa": ioa,
-            "value": value, "select": select
+            "value": value, "select": select, "deactivate": deactivate,
         })
 
     async def bitstring_command(self, ioa: int, value: int) -> None:
@@ -475,30 +520,38 @@ class MasterCommandHandler:
 
     async def single_command_with_time(self, ioa: int, state: bool,
                                         select: bool = False, qu: int = 0,
-                                        time_tag: CP56Time2a | None = None) -> None:
-        """发送带时标单命令 (C_SC_TA_1)."""
+                                        time_tag: CP56Time2a | None = None,
+                                        deactivate: bool = False) -> None:
+        """发送带时标单命令 (C_SC_TA_1)；``deactivate=True`` → COT=8 (D1)."""
         e = self._engine
         asdu_data = ASDUBuilder.build_single_command_with_time(
-            e._common_addr, ioa, state, select, qu, time_tag
+            e._common_addr, ioa, state, select, qu, time_tag,
+            cot=COT.DEACT if deactivate else COT.ACT,
         )
         await e._send_command_asdu(asdu_data)
-        logger.info(f"Single Command (with time): IOA={ioa} state={state}")
+        logger.info(f"Single Command (with time): IOA={ioa} state={state} "
+                    f"{'DEACTIVATE' if deactivate else ''}")
         e._fire_event(MasterEvent.COMMAND_SENT, {
             "type": "single_command_ta", "ioa": ioa, "state": state,
+            "deactivate": deactivate,
         })
 
     async def double_command_with_time(self, ioa: int, state: int,
                                         select: bool = False, qu: int = 0,
-                                        time_tag: CP56Time2a | None = None) -> None:
-        """发送带时标双命令 (C_DC_TA_1)."""
+                                        time_tag: CP56Time2a | None = None,
+                                        deactivate: bool = False) -> None:
+        """发送带时标双命令 (C_DC_TA_1)；``deactivate=True`` → COT=8 (D1)."""
         e = self._engine
         asdu_data = ASDUBuilder.build_double_command_with_time(
-            e._common_addr, ioa, state, select, qu, time_tag
+            e._common_addr, ioa, state, select, qu, time_tag,
+            cot=COT.DEACT if deactivate else COT.ACT,
         )
         await e._send_command_asdu(asdu_data)
-        logger.info(f"Double Command (with time): IOA={ioa} state={state}")
+        logger.info(f"Double Command (with time): IOA={ioa} state={state} "
+                    f"{'DEACTIVATE' if deactivate else ''}")
         e._fire_event(MasterEvent.COMMAND_SENT, {
             "type": "double_command_ta", "ioa": ioa, "state": state,
+            "deactivate": deactivate,
         })
 
     async def regulating_step_command_with_time(self, ioa: int, state: int,
@@ -517,33 +570,39 @@ class MasterCommandHandler:
 
     async def setpoint_normalized_with_time(self, ioa: int, value: float,
                                              select: bool = False,
-                                             time_tag: CP56Time2a | None = None) -> None:
-        """发送带时标归一化设点命令 (C_SE_TA_1)."""
+                                             time_tag: CP56Time2a | None = None,
+                                             deactivate: bool = False) -> None:
+        """发送带时标归一化设点命令 (C_SE_TA_1)；``deactivate=True`` → COT=8 (D1)."""
         e = self._engine
         asdu_data = ASDUBuilder.build_setpoint_normalized_with_time(
-            e._common_addr, ioa, value, select, time_tag
+            e._common_addr, ioa, value, select, time_tag,
+            cot=COT.DEACT if deactivate else COT.ACT,
         )
         await e._send_command_asdu(asdu_data)
         logger.info(f"Setpoint Normalized (with time): IOA={ioa} value={value}")
 
     async def setpoint_scaled_with_time(self, ioa: int, value: int,
                                          select: bool = False,
-                                         time_tag: CP56Time2a | None = None) -> None:
-        """发送带时标标度化设点命令 (C_SE_TB_1)."""
+                                         time_tag: CP56Time2a | None = None,
+                                         deactivate: bool = False) -> None:
+        """发送带时标标度化设点命令 (C_SE_TB_1)；``deactivate=True`` → COT=8 (D1)."""
         e = self._engine
         asdu_data = ASDUBuilder.build_setpoint_scaled_with_time(
-            e._common_addr, ioa, value, select, time_tag
+            e._common_addr, ioa, value, select, time_tag,
+            cot=COT.DEACT if deactivate else COT.ACT,
         )
         await e._send_command_asdu(asdu_data)
         logger.info(f"Setpoint Scaled (with time): IOA={ioa} value={value}")
 
     async def setpoint_shortfloat_with_time(self, ioa: int, value: float,
                                              select: bool = False,
-                                             time_tag: CP56Time2a | None = None) -> None:
-        """发送带时标短浮点设点命令 (C_SE_TC_1)."""
+                                             time_tag: CP56Time2a | None = None,
+                                             deactivate: bool = False) -> None:
+        """发送带时标短浮点设点命令 (C_SE_TC_1)；``deactivate=True`` → COT=8 (D1)."""
         e = self._engine
         asdu_data = ASDUBuilder.build_setpoint_shortfloat_with_time(
-            e._common_addr, ioa, value, select, time_tag
+            e._common_addr, ioa, value, select, time_tag,
+            cot=COT.DEACT if deactivate else COT.ACT,
         )
         await e._send_command_asdu(asdu_data)
         logger.info(f"Setpoint ShortFloat (with time): IOA={ioa} value={value}")

@@ -78,8 +78,8 @@
 | POST | `/api/master/reset` | — | `{ok, error?}` |
 | POST | `/api/master/test` | — | `{ok, error?}` |
 | POST | `/api/master/read` | `ioa: int (≥0)` | `{ok, error?}` |
-| POST | `/api/master/yk` | `ioa: int (≥0)`, `state: 0\|1 =0`, `select: bool=false`, `double: bool=false`, `with_time: bool=false` | `{ok, error?}` |
-| POST | `/api/master/setpoint` | `ioa: int (≥0)`, `value: number`, `kind: "short_float"\|"normalized"\|"scaled" ="short_float"`, `select: bool=false`, `with_time: bool=false` | `{ok, error?}` |
+| POST | `/api/master/yk` | `ioa: int (≥0)`, `state: 0\|1 =0`, `select: bool=false`, `double: bool=false`, `with_time: bool=false`, `deactivate: bool=false` | `{ok, error?}` |
+| POST | `/api/master/setpoint` | `ioa: int (≥0)`, `value: number`, `kind: "short_float"\|"normalized"\|"scaled" ="short_float"`, `select: bool=false`, `with_time: bool=false`, `deactivate: bool=false` | `{ok, error?}` |
 | POST | `/api/master/step` | `ioa: int (≥0)`, `state: 1\|2`（1=降, 2=升）, `select: bool=false` | `{ok, error?}` |
 | POST | `/api/master/bitstring` | `ioa: int (≥0)`, `value: int (≥0, 32bit)` | `{ok, error?}` |
 | POST | `/api/master/delay` | `delay_ms: int (0–60000)` | `{ok, error?}` |
@@ -87,6 +87,13 @@
 | POST | `/api/master/file` | `action: "directory"\|"select"\|"request"`, `ioa: int=0 (≥0)`, `file_name: int=0 (≥0)` | `{ok, error?}` |
 
 > `with_time=true` → 带时标类型（YK: `C_SC_TA_1` / `C_DC_TA_1`）。
+>
+> `deactivate=true`（D1，纯新增可选字段，不影响 `schemaVersion`）→ 发送
+> **撤销命令**：传送原因 COT=8 (DEACT)。适用于 `/api/master/yk`
+> （C_SC/C_DC 及其带时标变体）与 `/api/master/setpoint`（C_SE 三种及
+> 其带时标变体；IEC 60870-5-101/104 允许设点命令停止激活）。
+> 子站应答 DEACTCON (COT=9)；撤销不走选择-执行（SBO）两段式，单帧直发。
+> 缺省 `false` → 行为与改动前一致（COT=6 ACT）。
 
 > `TlsOptions`（T20，纯新增可选字段，不影响 `schemaVersion`）：`{enabled: bool,
 > certfile?: str, keyfile?: str, cafile?: str, verify?: bool=true,

@@ -377,44 +377,60 @@ class MasterEngine(EngineBase):
         return await self._commands.wait_select_ack(ioa, timeout)
 
     async def single_command(self, ioa: int, state: bool,
-                              select: bool = False, qu: int = 0) -> None:
-        """发送单命令 (选择/执行)."""
-        await self._commands.single_command(ioa, state, select=select, qu=qu)
+                              select: bool = False, qu: int = 0,
+                              deactivate: bool = False) -> None:
+        """发送单命令 (选择/执行/撤销)."""
+        await self._commands.single_command(ioa, state, select=select, qu=qu,
+                                            deactivate=deactivate)
 
     async def _send_single_command_raw(self, ioa: int, state: bool,
-                                        select: bool, qu: int) -> None:
+                                        select: bool, qu: int,
+                                        deactivate: bool = False) -> None:
         """发送单命令单帧（不做 SBO 决策）."""
-        await self._commands.send_single_command_raw(ioa, state, select=select, qu=qu)
+        await self._commands.send_single_command_raw(ioa, state, select=select,
+                                                     qu=qu, deactivate=deactivate)
 
     async def double_command(self, ioa: int, state: int,
-                              select: bool = False, qu: int = 0) -> None:
-        """发送双命令 (选择/执行)."""
-        await self._commands.double_command(ioa, state, select=select, qu=qu)
+                              select: bool = False, qu: int = 0,
+                              deactivate: bool = False) -> None:
+        """发送双命令 (选择/执行/撤销)."""
+        await self._commands.double_command(ioa, state, select=select, qu=qu,
+                                            deactivate=deactivate)
 
     async def _send_double_command_raw(self, ioa: int, state: int,
-                                        select: bool, qu: int) -> None:
+                                        select: bool, qu: int,
+                                        deactivate: bool = False) -> None:
         """发送双命令单帧（不做 SBO 决策）."""
-        await self._commands.send_double_command_raw(ioa, state, select=select, qu=qu)
+        await self._commands.send_double_command_raw(ioa, state, select=select,
+                                                     qu=qu, deactivate=deactivate)
 
     async def setpoint_normalized(self, ioa: int, value: float,
-                                    select: bool = False) -> None:
-        """发送归一化设点命令 (选择/执行)."""
-        await self._commands.setpoint_normalized(ioa, value, select=select)
+                                    select: bool = False,
+                                    deactivate: bool = False) -> None:
+        """发送归一化设点命令 (选择/执行/撤销)."""
+        await self._commands.setpoint_normalized(ioa, value, select=select,
+                                                 deactivate=deactivate)
 
     async def _send_setpoint_normalized_raw(self, ioa: int, value: float,
-                                             select: bool) -> None:
+                                             select: bool,
+                                             deactivate: bool = False) -> None:
         """发送归一化设点单帧（不做 SBO 决策）."""
-        await self._commands.send_setpoint_normalized_raw(ioa, value, select=select)
+        await self._commands.send_setpoint_normalized_raw(ioa, value, select=select,
+                                                          deactivate=deactivate)
 
     async def setpoint_shortfloat(self, ioa: int, value: float,
-                                    select: bool = False) -> None:
-        """发送短浮点设点命令 (选择/执行)."""
-        await self._commands.setpoint_shortfloat(ioa, value, select=select)
+                                    select: bool = False,
+                                    deactivate: bool = False) -> None:
+        """发送短浮点设点命令 (选择/执行/撤销)."""
+        await self._commands.setpoint_shortfloat(ioa, value, select=select,
+                                                 deactivate=deactivate)
 
     async def _send_setpoint_shortfloat_raw(self, ioa: int, value: float,
-                                             select: bool) -> None:
+                                             select: bool,
+                                             deactivate: bool = False) -> None:
         """发送短浮点设点单帧（不做 SBO 决策）."""
-        await self._commands.send_setpoint_shortfloat_raw(ioa, value, select=select)
+        await self._commands.send_setpoint_shortfloat_raw(ioa, value, select=select,
+                                                          deactivate=deactivate)
 
     async def regulating_step_command(self, ioa: int, state: int,
                                        select: bool = False, qu: int = 0) -> None:
@@ -427,14 +443,18 @@ class MasterEngine(EngineBase):
         await self._commands.send_regulating_step_raw(ioa, state, select=select, qu=qu)
 
     async def setpoint_scaled(self, ioa: int, value: int,
-                               select: bool = False) -> None:
+                               select: bool = False,
+                               deactivate: bool = False) -> None:
         """发送标度化设点命令 (C_SE_NB_1)."""
-        await self._commands.setpoint_scaled(ioa, value, select=select)
+        await self._commands.setpoint_scaled(ioa, value, select=select,
+                                             deactivate=deactivate)
 
     async def _send_setpoint_scaled_raw(self, ioa: int, value: int,
-                                         select: bool) -> None:
+                                         select: bool,
+                                         deactivate: bool = False) -> None:
         """发送标度化设点单帧（不做 SBO 决策）."""
-        await self._commands.send_setpoint_scaled_raw(ioa, value, select=select)
+        await self._commands.send_setpoint_scaled_raw(ioa, value, select=select,
+                                                      deactivate=deactivate)
 
     async def bitstring_command(self, ioa: int, value: int) -> None:
         """发送比特串命令 (C_BO_NA_1)."""
@@ -444,18 +464,22 @@ class MasterEngine(EngineBase):
 
     async def single_command_with_time(self, ioa: int, state: bool,
                                         select: bool = False, qu: int = 0,
-                                        time_tag: CP56Time2a | None = None) -> None:
+                                        time_tag: CP56Time2a | None = None,
+                                        deactivate: bool = False) -> None:
         """发送带时标单命令 (C_SC_TA_1)."""
         await self._commands.single_command_with_time(
-            ioa, state, select=select, qu=qu, time_tag=time_tag
+            ioa, state, select=select, qu=qu, time_tag=time_tag,
+            deactivate=deactivate
         )
 
     async def double_command_with_time(self, ioa: int, state: int,
                                         select: bool = False, qu: int = 0,
-                                        time_tag: CP56Time2a | None = None) -> None:
+                                        time_tag: CP56Time2a | None = None,
+                                        deactivate: bool = False) -> None:
         """发送带时标双命令 (C_DC_TA_1)."""
         await self._commands.double_command_with_time(
-            ioa, state, select=select, qu=qu, time_tag=time_tag
+            ioa, state, select=select, qu=qu, time_tag=time_tag,
+            deactivate=deactivate
         )
 
     async def regulating_step_command_with_time(self, ioa: int, state: int,
@@ -468,26 +492,32 @@ class MasterEngine(EngineBase):
 
     async def setpoint_normalized_with_time(self, ioa: int, value: float,
                                              select: bool = False,
-                                             time_tag: CP56Time2a | None = None) -> None:
+                                             time_tag: CP56Time2a | None = None,
+                                             deactivate: bool = False) -> None:
         """发送带时标归一化设点命令 (C_SE_TA_1)."""
         await self._commands.setpoint_normalized_with_time(
-            ioa, value, select=select, time_tag=time_tag
+            ioa, value, select=select, time_tag=time_tag,
+            deactivate=deactivate
         )
 
     async def setpoint_scaled_with_time(self, ioa: int, value: int,
                                          select: bool = False,
-                                         time_tag: CP56Time2a | None = None) -> None:
+                                         time_tag: CP56Time2a | None = None,
+                                         deactivate: bool = False) -> None:
         """发送带时标标度化设点命令 (C_SE_TB_1)."""
         await self._commands.setpoint_scaled_with_time(
-            ioa, value, select=select, time_tag=time_tag
+            ioa, value, select=select, time_tag=time_tag,
+            deactivate=deactivate
         )
 
     async def setpoint_shortfloat_with_time(self, ioa: int, value: float,
                                              select: bool = False,
-                                             time_tag: CP56Time2a | None = None) -> None:
+                                             time_tag: CP56Time2a | None = None,
+                                             deactivate: bool = False) -> None:
         """发送带时标短浮点设点命令 (C_SE_TC_1)."""
         await self._commands.setpoint_shortfloat_with_time(
-            ioa, value, select=select, time_tag=time_tag
+            ioa, value, select=select, time_tag=time_tag,
+            deactivate=deactivate
         )
 
     async def bitstring_command_with_time(self, ioa: int, value: int,

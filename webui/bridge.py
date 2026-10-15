@@ -224,8 +224,10 @@ class EngineBridge:
         return await self._cmd(self.session.read_command(ioa))
 
     async def send_yk(self, ioa: int, state: int | bool, select: bool = False,
-                      double: bool = False, with_time: bool = False) -> dict:
-        return await self._cmd(self.session.send_yk(ioa, state, select, double, with_time))
+                      double: bool = False, with_time: bool = False,
+                      deactivate: bool = False) -> dict:
+        return await self._cmd(self.session.send_yk(ioa, state, select, double,
+                                                    with_time, deactivate))
 
     async def send_step_command(self, ioa: int, state: int, select: bool = False) -> dict:
         return await self._cmd(self.session.send_step_command(ioa, state, select))
@@ -237,8 +239,11 @@ class EngineBridge:
         return await self._cmd(self.session.send_delay_request(delay_ms))
 
     async def send_setpoint(self, ioa: int, value: float, select: bool = False,
-                             kind: str = "short_float", with_time: bool = False) -> dict:
-        return await self._cmd(self.session.send_setpoint(ioa, value, select, kind, with_time))
+                             kind: str = "short_float", with_time: bool = False,
+                             deactivate: bool = False) -> dict:
+        return await self._cmd(self.session.send_setpoint(ioa, value, select,
+                                                          kind, with_time,
+                                                          deactivate))
 
     async def parameter_command(self, kind: str, ioa: int, value: float, qualifier: int = 1) -> dict:
         return await self._cmd(self.session.parameter_command(kind, ioa, value, qualifier))

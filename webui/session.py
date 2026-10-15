@@ -452,20 +452,25 @@ class EngineSession:
         return {"ok": True}
 
     async def send_yk(self, ioa: int, state: Any, select: bool = False,
-                      double: bool = False, with_time: bool = False) -> dict:
-        """遥控：单命令 (C_SC) / 双命令 (C_DC)，可选带时标变体 (C_SC_TA_1 / C_DC_TA_1)."""
+                      double: bool = False, with_time: bool = False,
+                      deactivate: bool = False) -> dict:
+        """遥控：单命令 (C_SC) / 双命令 (C_DC)，可选带时标变体与撤销 (COT=8 DEACT，D1)."""
         eng = self.require_master()
         ioa, state = int(ioa), int(state)
         if double:
             if with_time:
-                await eng.double_command_with_time(ioa, state, select, 0)
+                await eng.double_command_with_time(ioa, state, select, 0,
+                                                   deactivate=deactivate)
             else:
-                await eng.double_command(ioa, state, select, 0)
+                await eng.double_command(ioa, state, select, 0,
+                                         deactivate=deactivate)
         else:
             if with_time:
-                await eng.single_command_with_time(ioa, bool(state), select)
+                await eng.single_command_with_time(ioa, bool(state), select,
+                                                   deactivate=deactivate)
             else:
-                await eng.single_command(ioa, bool(state), select, 0)
+                await eng.single_command(ioa, bool(state), select, 0,
+                                         deactivate=deactivate)
         return {"ok": True}
 
     async def send_step_command(self, ioa: int, state: int, select: bool = False) -> dict:
@@ -484,32 +489,40 @@ class EngineSession:
         return {"ok": True}
 
     async def send_setpoint(self, ioa: int, value: float, select: bool = False,
-                             kind: str = "short_float", with_time: bool = False) -> dict:
+                             kind: str = "short_float", with_time: bool = False,
+                             deactivate: bool = False) -> dict:
         """发送设点命令.
 
         Args:
             kind: short_float(C_SE_NC_1) / normalized(C_SE_NA_1) / scaled(C_SE_NB_1)
             with_time: True → 带时标变体 (C_SE_TC_1 / C_SE_TD? → 归一化无此组合时回落)
             select: True=只发选择帧；False=按点表 SBO 配置决定是否两段式
+            deactivate: True=发送撤销帧 (COT=8 DEACT，D1；标准允许设点命令停止激活)
         """
         eng = self.require_master()
         ioa, value = int(ioa), float(value)
         kind = (kind or "short_float").lower()
         if kind in ("normalized", "na"):
             if with_time:
-                await eng.setpoint_normalized_with_time(ioa, value, select)
+                await eng.setpoint_normalized_with_time(ioa, value, select,
+                                                        deactivate=deactivate)
             else:
-                await eng.setpoint_normalized(ioa, value, select)
+                await eng.setpoint_normalized(ioa, value, select,
+                                              deactivate=deactivate)
         elif kind in ("scaled", "nb"):
             if with_time:
-                await eng.setpoint_scaled_with_time(ioa, int(value), select)
+                await eng.setpoint_scaled_with_time(ioa, int(value), select,
+                                                    deactivate=deactivate)
             else:
-                await eng.setpoint_scaled(ioa, int(value), select)
+                await eng.setpoint_scaled(ioa, int(value), select,
+                                          deactivate=deactivate)
         else:
             if with_time:
-                await eng.setpoint_shortfloat_with_time(ioa, value, select)
+                await eng.setpoint_shortfloat_with_time(ioa, value, select,
+                                                        deactivate=deactivate)
             else:
-                await eng.setpoint_shortfloat(ioa, value, select)
+                await eng.setpoint_shortfloat(ioa, value, select,
+                                              deactivate=deactivate)
         return {"ok": True}
 
     async def parameter_command(self, kind: str, ioa: int, value: float, qualifier: int = 1) -> dict:

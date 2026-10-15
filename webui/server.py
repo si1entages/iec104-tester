@@ -157,10 +157,13 @@ def create_app(bridge: EngineBridge) -> web.Application:
         ioa = body.get("ioa")
         if not isinstance(ioa, int) or ioa < 0:
             return web.json_response({"ok": False, "error": "invalid ioa"}, status=400)
+        deactivate = body.get("deactivate", False)
+        if not isinstance(deactivate, bool):
+            return web.json_response({"ok": False, "error": "invalid deactivate"}, status=400)
         return web.json_response(await bridge.send_yk(
             ioa, body.get("state", 0),
             bool(body.get("select", False)), bool(body.get("double", False)),
-            bool(body.get("with_time", False)),
+            bool(body.get("with_time", False)), deactivate,
         ))
 
     async def api_step(request: web.Request) -> web.Response:
@@ -213,10 +216,13 @@ def create_app(bridge: EngineBridge) -> web.Application:
             value = float(value)
         except (TypeError, ValueError):
             return web.json_response({"ok": False, "error": "invalid value"}, status=400)
+        deactivate = body.get("deactivate", False)
+        if not isinstance(deactivate, bool):
+            return web.json_response({"ok": False, "error": "invalid deactivate"}, status=400)
         return web.json_response(await bridge.send_setpoint(
             ioa, value, bool(body.get("select", False)),
             str(body.get("kind", "short_float") or "short_float"),
-            bool(body.get("with_time", False)),
+            bool(body.get("with_time", False)), deactivate,
         ))
 
     async def api_clock(request: web.Request) -> web.Response:

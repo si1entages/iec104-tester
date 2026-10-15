@@ -1011,13 +1011,18 @@ class ASDUBuilder:
 
     @staticmethod
     def build_single_command(common_addr: int, ioa: int, state: bool,
-                              select: bool = False, qu: int = 0) -> bytes:
-        """构造单命令 (C_SC_NA_1)."""
+                              select: bool = False, qu: int = 0,
+                              cot: int = COT.ACT) -> bytes:
+        """构造单命令 (C_SC_NA_1).
+
+        Args:
+            cot: 传送原因；默认 ACT(6)，撤销（去激活）传 DEACT(8)（D1）。
+        """
         asdu = ASDU(
             type_id=TypeID.C_SC_NA_1,
             sq=False,
             num=1,
-            cot=COT.ACT,
+            cot=cot,
             common_addr=common_addr,
         )
         sc = SingleCommand(ioa=ioa, state=state, select=select, qu=qu)
@@ -1026,13 +1031,14 @@ class ASDUBuilder:
 
     @staticmethod
     def build_double_command(common_addr: int, ioa: int, state: int,
-                              select: bool = False, qu: int = 0) -> bytes:
-        """构造双命令 (C_DC_NA_1)."""
+                              select: bool = False, qu: int = 0,
+                              cot: int = COT.ACT) -> bytes:
+        """构造双命令 (C_DC_NA_1)；``cot`` 传 DEACT(8) 表示撤销（D1）."""
         asdu = ASDU(
             type_id=TypeID.C_DC_NA_1,
             sq=False,
             num=1,
-            cot=COT.ACT,
+            cot=cot,
             common_addr=common_addr,
         )
         dc = DoubleCommand(ioa=ioa, state=state, select=select, qu=qu)
@@ -1041,13 +1047,15 @@ class ASDUBuilder:
 
     @staticmethod
     def build_setpoint_normalized(common_addr: int, ioa: int, value: float,
-                                    select: bool = False) -> bytes:
-        """构造归一化设点命令 (C_SE_NA_1)."""
+                                    select: bool = False,
+                                    cot: int = COT.ACT) -> bytes:
+        """构造归一化设点命令 (C_SE_NA_1)；``cot`` 传 DEACT(8) 表示撤销（D1，
+        IEC 60870-5-101/104 中设点命令允许 DEACT 传输原因）."""
         asdu = ASDU(
             type_id=TypeID.C_SE_NA_1,
             sq=False,
             num=1,
-            cot=COT.ACT,
+            cot=cot,
             common_addr=common_addr,
         )
         sn = SetpointCommandN(ioa=ioa, value=value, select=select)
@@ -1056,13 +1064,14 @@ class ASDUBuilder:
 
     @staticmethod
     def build_setpoint_shortfloat(common_addr: int, ioa: int, value: float,
-                                    select: bool = False) -> bytes:
-        """构造短浮点设点命令 (C_SE_NC_1)."""
+                                    select: bool = False,
+                                    cot: int = COT.ACT) -> bytes:
+        """构造短浮点设点命令 (C_SE_NC_1)；``cot`` 传 DEACT(8) 表示撤销（D1）."""
         asdu = ASDU(
             type_id=TypeID.C_SE_NC_1,
             sq=False,
             num=1,
-            cot=COT.ACT,
+            cot=cot,
             common_addr=common_addr,
         )
         ss = SetpointCommandS(ioa=ioa, value=value, select=select)
@@ -1190,17 +1199,19 @@ class ASDUBuilder:
 
     @staticmethod
     def build_regulating_step_command(common_addr: int, ioa: int, state: int,
-                                        select: bool = False, qu: int = 0) -> bytes:
-        """构造升降命令 (C_RC_NA_1)."""
-        asdu = ASDU(type_id=TypeID.C_RC_NA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+                                        select: bool = False, qu: int = 0,
+                                        cot: int = COT.ACT) -> bytes:
+        """构造升降命令 (C_RC_NA_1)；``cot`` 传 DEACT(8) 表示撤销（D1）."""
+        asdu = ASDU(type_id=TypeID.C_RC_NA_1, sq=False, num=1, cot=cot, common_addr=common_addr)
         rc = RegulatingStepCommand(ioa=ioa, state=state, select=select, qu=qu)
         asdu.objects.append(InformationObject(ioa=ioa, data=rc))
         return asdu.encode()
 
     @staticmethod
-    def build_bitstring_command(common_addr: int, ioa: int, value: int) -> bytes:
-        """构造比特串命令 (C_BO_NA_1)."""
-        asdu = ASDU(type_id=TypeID.C_BO_NA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+    def build_bitstring_command(common_addr: int, ioa: int, value: int,
+                                 cot: int = COT.ACT) -> bytes:
+        """构造比特串命令 (C_BO_NA_1)；``cot`` 传 DEACT(8) 表示撤销（D1）."""
+        asdu = ASDU(type_id=TypeID.C_BO_NA_1, sq=False, num=1, cot=cot, common_addr=common_addr)
         bc = BitString32Command(ioa=ioa, value=value)
         asdu.objects.append(InformationObject(ioa=ioa, data=bc))
         return asdu.encode()
@@ -1210,11 +1221,12 @@ class ASDUBuilder:
     @staticmethod
     def build_single_command_with_time(common_addr: int, ioa: int, state: bool,
                                         select: bool = False, qu: int = 0,
-                                        time_tag: CP56Time2a | None = None) -> bytes:
-        """构造带时标单命令 (C_SC_TA_1)."""
+                                        time_tag: CP56Time2a | None = None,
+                                        cot: int = COT.ACT) -> bytes:
+        """构造带时标单命令 (C_SC_TA_1)；``cot`` 传 DEACT(8) 表示撤销（D1）."""
         if time_tag is None:
             time_tag = CP56Time2a.now()
-        asdu = ASDU(type_id=TypeID.C_SC_TA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        asdu = ASDU(type_id=TypeID.C_SC_TA_1, sq=False, num=1, cot=cot, common_addr=common_addr)
         asdu.objects.append(InformationObject(
             ioa=ioa, data=SingleCommand(ioa=ioa, state=state, select=select, qu=qu),
             time_tag=time_tag,
@@ -1224,11 +1236,12 @@ class ASDUBuilder:
     @staticmethod
     def build_double_command_with_time(common_addr: int, ioa: int, state: int,
                                         select: bool = False, qu: int = 0,
-                                        time_tag: CP56Time2a | None = None) -> bytes:
-        """构造带时标双命令 (C_DC_TA_1)."""
+                                        time_tag: CP56Time2a | None = None,
+                                        cot: int = COT.ACT) -> bytes:
+        """构造带时标双命令 (C_DC_TA_1)；``cot`` 传 DEACT(8) 表示撤销（D1）."""
         if time_tag is None:
             time_tag = CP56Time2a.now()
-        asdu = ASDU(type_id=TypeID.C_DC_TA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        asdu = ASDU(type_id=TypeID.C_DC_TA_1, sq=False, num=1, cot=cot, common_addr=common_addr)
         asdu.objects.append(InformationObject(
             ioa=ioa, data=DoubleCommand(ioa=ioa, state=state, select=select, qu=qu),
             time_tag=time_tag,
@@ -1238,11 +1251,12 @@ class ASDUBuilder:
     @staticmethod
     def build_regulating_step_command_with_time(common_addr: int, ioa: int, state: int,
                                                  select: bool = False, qu: int = 0,
-                                                 time_tag: CP56Time2a | None = None) -> bytes:
-        """构造带时标升降命令 (C_RC_TA_1)."""
+                                                 time_tag: CP56Time2a | None = None,
+                                                 cot: int = COT.ACT) -> bytes:
+        """构造带时标升降命令 (C_RC_TA_1)；``cot`` 传 DEACT(8) 表示撤销（D1）."""
         if time_tag is None:
             time_tag = CP56Time2a.now()
-        asdu = ASDU(type_id=TypeID.C_RC_TA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        asdu = ASDU(type_id=TypeID.C_RC_TA_1, sq=False, num=1, cot=cot, common_addr=common_addr)
         asdu.objects.append(InformationObject(
             ioa=ioa, data=RegulatingStepCommand(ioa=ioa, state=state, select=select, qu=qu),
             time_tag=time_tag,
@@ -1252,11 +1266,12 @@ class ASDUBuilder:
     @staticmethod
     def build_setpoint_normalized_with_time(common_addr: int, ioa: int, value: float,
                                              select: bool = False,
-                                             time_tag: CP56Time2a | None = None) -> bytes:
-        """构造带时标归一化设点命令 (C_SE_TA_1)."""
+                                             time_tag: CP56Time2a | None = None,
+                                             cot: int = COT.ACT) -> bytes:
+        """构造带时标归一化设点命令 (C_SE_TA_1)；``cot`` 传 DEACT(8) 表示撤销（D1）."""
         if time_tag is None:
             time_tag = CP56Time2a.now()
-        asdu = ASDU(type_id=TypeID.C_SE_TA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        asdu = ASDU(type_id=TypeID.C_SE_TA_1, sq=False, num=1, cot=cot, common_addr=common_addr)
         asdu.objects.append(InformationObject(
             ioa=ioa, data=SetpointCommandN(ioa=ioa, value=value, select=select),
             time_tag=time_tag,
@@ -1266,11 +1281,12 @@ class ASDUBuilder:
     @staticmethod
     def build_setpoint_scaled_with_time(common_addr: int, ioa: int, value: int,
                                          select: bool = False,
-                                         time_tag: CP56Time2a | None = None) -> bytes:
-        """构造带时标标度化设点命令 (C_SE_TB_1)."""
+                                         time_tag: CP56Time2a | None = None,
+                                         cot: int = COT.ACT) -> bytes:
+        """构造带时标标度化设点命令 (C_SE_TB_1)；``cot`` 传 DEACT(8) 表示撤销（D1）."""
         if time_tag is None:
             time_tag = CP56Time2a.now()
-        asdu = ASDU(type_id=TypeID.C_SE_TB_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        asdu = ASDU(type_id=TypeID.C_SE_TB_1, sq=False, num=1, cot=cot, common_addr=common_addr)
         asdu.objects.append(InformationObject(
             ioa=ioa, data=SetpointCommandScaled(ioa=ioa, value=value, select=select),
             time_tag=time_tag,
@@ -1280,11 +1296,12 @@ class ASDUBuilder:
     @staticmethod
     def build_setpoint_shortfloat_with_time(common_addr: int, ioa: int, value: float,
                                              select: bool = False,
-                                             time_tag: CP56Time2a | None = None) -> bytes:
-        """构造带时标短浮点设点命令 (C_SE_TC_1)."""
+                                             time_tag: CP56Time2a | None = None,
+                                             cot: int = COT.ACT) -> bytes:
+        """构造带时标短浮点设点命令 (C_SE_TC_1)；``cot`` 传 DEACT(8) 表示撤销（D1）."""
         if time_tag is None:
             time_tag = CP56Time2a.now()
-        asdu = ASDU(type_id=TypeID.C_SE_TC_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        asdu = ASDU(type_id=TypeID.C_SE_TC_1, sq=False, num=1, cot=cot, common_addr=common_addr)
         asdu.objects.append(InformationObject(
             ioa=ioa, data=SetpointCommandS(ioa=ioa, value=value, select=select),
             time_tag=time_tag,
@@ -1293,11 +1310,12 @@ class ASDUBuilder:
 
     @staticmethod
     def build_bitstring_command_with_time(common_addr: int, ioa: int, value: int,
-                                           time_tag: CP56Time2a | None = None) -> bytes:
-        """构造带时标比特串命令 (C_BO_TA_1)."""
+                                           time_tag: CP56Time2a | None = None,
+                                           cot: int = COT.ACT) -> bytes:
+        """构造带时标比特串命令 (C_BO_TA_1)；``cot`` 传 DEACT(8) 表示撤销（D1）."""
         if time_tag is None:
             time_tag = CP56Time2a.now()
-        asdu = ASDU(type_id=TypeID.C_BO_TA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        asdu = ASDU(type_id=TypeID.C_BO_TA_1, sq=False, num=1, cot=cot, common_addr=common_addr)
         asdu.objects.append(InformationObject(
             ioa=ioa, data=BitString32Command(ioa=ioa, value=value),
             time_tag=time_tag,
@@ -1349,9 +1367,10 @@ class ASDUBuilder:
 
     @staticmethod
     def build_setpoint_scaled(common_addr: int, ioa: int, value: int,
-                                select: bool = False) -> bytes:
-        """构造标度化设点命令 (C_SE_NB_1)."""
-        asdu = ASDU(type_id=TypeID.C_SE_NB_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+                                select: bool = False,
+                                cot: int = COT.ACT) -> bytes:
+        """构造标度化设点命令 (C_SE_NB_1)；``cot`` 传 DEACT(8) 表示撤销（D1）."""
+        asdu = ASDU(type_id=TypeID.C_SE_NB_1, sq=False, num=1, cot=cot, common_addr=common_addr)
         ss = SetpointCommandScaled(ioa=ioa, value=value, select=select)
         asdu.objects.append(InformationObject(ioa=ioa, data=ss))
         return asdu.encode()
