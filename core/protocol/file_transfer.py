@@ -52,6 +52,15 @@ SCQ_SELECT_SECTION = 5     # 选择节
 SCQ_REQUEST_SECTION = 6    # 请求节
 SCQ_DEACTIVATE_SECTION = 7  # 去激活节
 
+# ── F_AF_NA_1 的 AFQ（Acknowledge Qualifier）取值 ─────────────────────
+#
+# 依据：lib60870.NET ``enum AcknowledgeQualifier``（与 docs/file_transfer_fls.md §2.4 一致）。
+AFQ_NOT_USED = 0           # 未用
+AFQ_POS_ACK_FILE = 1       # 肯定文件
+AFQ_NEG_ACK_FILE = 2       # 否定文件
+AFQ_POS_ACK_SECTION = 3    # 肯定节
+AFQ_NEG_ACK_SECTION = 4    # 否定节
+
 #: 请求目录在本实现中暂用的 SCQ 值。**未核实**：标准 SCQ=5 为 SELECT_SECTION，
 #: 且参考实现以 COT=REQUEST 触发目录召唤（见 docs/file_transfer_fls.md §4.4）。
 #: 本实现暂沿用 5 触发目录上送——该组合保持开放，未按标准推断。
@@ -380,7 +389,7 @@ class FileTransferSlave(FileTransferManager):
                 logger.warning(f"Delete file (SCQ=4): file {file_name} not found")
             else:
                 logger.info(f"File deleted on request (SCQ=4): file_name={file_name}")
-            self._send_ack(ioa, qualifier=1)  # AFQ: 肯定文件
+            self._send_ack(ioa, qualifier=AFQ_POS_ACK_FILE)
         elif qualifier in (SCQ_DEACTIVATE_FILE, SCQ_DEACTIVATE_SECTION):
             # 去激活：多节/去激活流程未实现（开放项，见 docs §4.5/4.6），仅记录
             logger.info(f"Deactivate request (SCQ={qualifier}) noted, no-op (flow not implemented)")
@@ -402,7 +411,7 @@ class FileTransferSlave(FileTransferManager):
         self._context.state = FileTransferState.FILE_READY
         logger.info(f"File Ready sent: file_name={self._context.file_name} length={self._context.file_length}")
 
-    def _send_ack(self, ioa: int, qualifier: int = 1) -> None:
+    def _send_ack(self, ioa: int, qualifier: int = AFQ_POS_ACK_FILE) -> None:
         """发送文件/节确认 (F_AF_NA_1)."""
         from .asdu import ASDUBuilder
         asdu_data = ASDUBuilder.build_ack_file_section(
@@ -491,7 +500,7 @@ class FileTransferSlave(FileTransferManager):
     def handle_ack(self, ioa: int, data: AckFileSection) -> None:
         """处理确认."""
         logger.info(f"ACK received: file_name={data.file_name} section={data.section_name} qualifier={data.qualifier}")
-        if data.qualifier in (1, 3):  # 肯定文件/肯定节
+        if data.qualifier in (AFQ_POS_ACK_FILE, AFQ_POS_ACK_SECTION):
             self._context.state = FileTransferState.COMPLETED
             logger.info("File transfer completed")
         else:

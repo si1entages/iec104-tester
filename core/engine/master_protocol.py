@@ -38,6 +38,11 @@ from ..data.point_table import (
 from ..protocol.apci import APCICodec
 from ..protocol.asdu import ASDU, ASDUBuilder
 from ..protocol.file_transfer import (
+    AFQ_NEG_ACK_FILE,
+    AFQ_NEG_ACK_SECTION,
+    AFQ_NOT_USED,
+    AFQ_POS_ACK_FILE,
+    AFQ_POS_ACK_SECTION,
     SCQ_REQUEST_DIRECTORY,
     SCQ_REQUEST_FILE,
     SCQ_SELECT_FILE,
@@ -147,21 +152,28 @@ class MasterProtocolHandler:
         logger.info(f"File Request: file_name={file_name}")
 
     async def file_ack(self, ioa: int, file_name: int,
-                        section_name: int = 0, qualifier: int = 1) -> None:
+                        section_name: int = 0, qualifier: int = AFQ_POS_ACK_FILE) -> None:
         """发送文件/节确认命令 (F_AF_NA_1).
 
         Args:
             ioa: 信息对象地址
             file_name: 文件名 (16-bit)
             section_name: 节名 (8-bit)
-            qualifier: 0=缺省, 1=肯定文件, 2=否定文件, 3=肯定节, 4=否定节
+            qualifier: AFQ — 见 ``file_transfer.AFQ_*`` 常量
+                (0=未用, 1=肯定文件, 2=否定文件, 3=肯定节, 4=否定节)
         """
         e = self._engine
         asdu_data = ASDUBuilder.build_ack_file_section(
             e._common_addr, ioa, file_name, section_name, qualifier
         )
         await e._send_command_asdu(asdu_data)
-        qual_str = {0: "缺省", 1: "肯定文件", 2: "否定文件", 3: "肯定节", 4: "否定节"}.get(qualifier, f"未知({qualifier})")
+        qual_str = {
+            AFQ_NOT_USED: "缺省",
+            AFQ_POS_ACK_FILE: "肯定文件",
+            AFQ_NEG_ACK_FILE: "否定文件",
+            AFQ_POS_ACK_SECTION: "肯定节",
+            AFQ_NEG_ACK_SECTION: "否定节",
+        }.get(qualifier, f"未知({qualifier})")
         logger.info(f"File ACK: file_name={file_name} section={section_name} qualifier={qual_str}")
 
     async def request_file(self, ioa: int, file_name: int) -> None:
@@ -538,7 +550,7 @@ class MasterProtocolHandler:
         elif type_id == TypeID.F_LS_NA_1:
             e._file_transfer.handle_last_section(obj.data)
             # 收到"最后的节/段"后回复 F_AF_NA_1 (肯定节) 完成握手
-            e._file_transfer.send_ack(obj.ioa, qualifier=3)  # AFQ 3=肯定节（AFQ 表，非 SCQ）
+            e._file_transfer.send_ack(obj.ioa, qualifier=AFQ_POS_ACK_SECTION)
         elif type_id == TypeID.F_DR_TA_1:
             e._file_transfer.handle_directory_entry(obj.data)
         elif type_id == TypeID.F_FR_NB_1:
