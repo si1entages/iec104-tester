@@ -8,6 +8,7 @@ import { usePointsQuery } from '../api/queries'
 import type { Point } from '../api/types'
 import { formatValue } from '../lib/format'
 import { pointKey } from '../lib/pointValue'
+import { useResizableColumns } from '../hooks/useResizableColumns'
 import { PointsTools } from './PointsTools'
 
 /** 类型页签（第二批体验改造 ②）：全部 + 五类点；默认「全部」 */
@@ -16,7 +17,8 @@ const TYPE_TABS = ['全部', 'YX', 'YC', 'YK', 'YM', 'STEP'].map((v) => ({ value
 const COLUMNS: TableColumnsType<Point> = [
   { title: 'IOA', dataIndex: 'ioa', width: 100, className: 'mono' },
   { title: '类型', dataIndex: 'type', width: 80 },
-  { title: '名称', dataIndex: 'name', width: 360, ellipsis: true },
+  // 名称/品质是长文本列：给宽默认值（可拖拽扩大），不再写死省略
+  { title: '名称', dataIndex: 'name', width: 360 },
   { title: '组', dataIndex: 'group', width: 70 },
   {
     title: '使能',
@@ -32,8 +34,7 @@ const COLUMNS: TableColumnsType<Point> = [
     width: 150,
     render: (value: Point['value']) => {
       const text = formatValue(value)
-      const color =
-        text === 'ON' ? '#52c41a' : text === 'OFF' ? undefined : undefined
+      const color = text === 'ON' ? '#52c41a' : undefined
       return (
         <span className="mono" style={{ color }}>
           {text}
@@ -41,11 +42,10 @@ const COLUMNS: TableColumnsType<Point> = [
       )
     },
   },
-  { title: '品质', dataIndex: 'quality', width: 220, ellipsis: true, className: 'mono' },
+  { title: '品质', dataIndex: 'quality', width: 220, className: 'mono' },
 ]
 
 const SCROLL_Y = 520
-const SCROLL_X = COLUMNS.reduce((sum, c) => sum + Number(c?.width ?? 0), 0)
 
 interface Props {
   selected: Point | null
@@ -76,6 +76,8 @@ export function PointsTable({
 }: Props) {
   const { data: points = [], isLoading, isError, error } = usePointsQuery()
   const { token } = antdTheme.useToken()
+  // 列宽拖拽（第二批改造③）：会话内记忆，virtual 表需要确定列宽故保留默认基线
+  const { columns, headerComponents, totalWidth } = useResizableColumns(COLUMNS)
   const [keyword, setKeyword] = useState('')
   // 类型页签：'全部' = 不过滤；'YX'/'YC'/… = 只看该类型（取代原下拉选择器）
   const [typeTab, setTypeTab] = useState<string>('全部')
@@ -164,10 +166,11 @@ export function PointsTable({
         rowKey={pointKey}
         size="small"
         loading={isLoading}
-        columns={COLUMNS}
+        columns={columns}
+        components={headerComponents}
         dataSource={rows}
         pagination={false}
-        scroll={{ y: SCROLL_Y, x: SCROLL_X }}
+        scroll={{ y: SCROLL_Y, x: totalWidth + 40 }}
         rowSelection={{
           type: 'radio',
           columnWidth: 40,

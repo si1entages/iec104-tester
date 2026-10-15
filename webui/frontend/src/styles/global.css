@@ -28,3 +28,26 @@ body {
   font-family: 'JetBrains Mono', 'Cascadia Mono', Consolas, 'Courier New', monospace;
   font-size: 12px;
 }
+
+/* 列宽拖拽热区（第二批改造③）：贴表头单元格右缘 */
+.ant-table-thead > tr > th {
+  position: relative;
+}
+
+.col-resizer {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 2;
+  user-select: none;
+}
+
+/* 报文 HEX 列换行展示（第二批改造④）：去截断，行高自适应 */
+.hex-wrap {
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.6;
+}

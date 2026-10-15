@@ -17,6 +17,7 @@ import {
 } from '../lib/frame'
 import type { ParsedFrame } from '../lib/frame'
 import { normalizeFrames } from '../lib/records'
+import { useResizableColumns } from '../hooks/useResizableColumns'
 
 interface Row {
   key: string
@@ -26,11 +27,13 @@ interface Row {
 
 const COLUMNS: TableColumnsType<Row> = [
   {
+    key: 'time',
     title: '时间',
     width: 130,
     render: (_v, row) => <span className="mono">{formatClock(row.frame.ts ?? 0)}</span>,
   },
   {
+    key: 'direction',
     title: '方向',
     width: 80,
     render: (_v, row) => (
@@ -39,14 +42,16 @@ const COLUMNS: TableColumnsType<Row> = [
       </Tag>
     ),
   },
-  { title: '长度', width: 70, render: (_v, row) => row.frame.len },
+  { key: 'len', title: '长度', width: 70, render: (_v, row) => row.frame.len },
   {
+    key: 'format',
     title: '格式',
     width: 70,
     render: (_v, row) =>
       row.parsed ? <Tag color={FORMAT_COLOR[row.parsed.format]}>{row.parsed.format}</Tag> : '-',
   },
   {
+    key: 'type',
     title: '类型 / U 功能',
     width: 240,
     ellipsis: true,
@@ -54,12 +59,14 @@ const COLUMNS: TableColumnsType<Row> = [
       row.parsed?.uFunc ?? row.parsed?.typeName ?? '-',
   },
   {
+    key: 'cot',
     title: 'COT',
     width: 130,
     ellipsis: true,
     render: (_v, row) => row.parsed?.cotName ?? '-',
   },
   {
+    key: 'seq',
     title: '序号',
     width: 110,
     className: 'mono',
@@ -72,29 +79,30 @@ const COLUMNS: TableColumnsType<Row> = [
     },
   },
   {
+    key: 'firstIoa',
     title: '首 IOA',
     width: 90,
     className: 'mono',
     render: (_v, row) => row.parsed?.firstIoa ?? '-',
   },
   {
+    key: 'count',
     title: '个数',
     width: 70,
     render: (_v, row) => row.parsed?.count ?? '-',
   },
   {
-    title: 'HEX',
+    key: 'hex',
+    title: '报文 (HEX)',
     width: 420,
-    ellipsis: true,
+    // 行高自适应直接显示全部报文（第二批改造④）：hex 串按字节分组换行，不再截断
     render: (_v, row) => (
       <Tooltip title={<span className="mono">{groupHex(row.frame.hex)}</span>}>
-        <span className="mono">{groupHex(row.frame.hex)}</span>
+        <span className="mono hex-wrap">{groupHex(row.frame.hex)}</span>
       </Tooltip>
     ),
   },
 ]
-
-const SCROLL_X = COLUMNS.reduce((sum, c) => sum + Number(c?.width ?? 0), 0)
 
 /**
  * 报文查看器（T12）：HEX + 协议解析 + 收发配色 + 过滤 + 暂停/清空。
@@ -106,6 +114,8 @@ const SCROLL_X = COLUMNS.reduce((sum, c) => sum + Number(c?.width ?? 0), 0)
 export function FrameViewer() {
   const queryClient = useQueryClient()
   const frames = useLiveFrames()
+  // 列宽拖拽（第二批改造③）：会话内记忆
+  const { columns, headerComponents, totalWidth } = useResizableColumns(COLUMNS)
   const [paused, setPaused] = useState(false)
   const [frozen, setFrozen] = useState<Frame[]>([])
   const [direction, setDirection] = useState<string | undefined>(undefined)
@@ -238,10 +248,11 @@ export function FrameViewer() {
         virtual
         rowKey="key"
         size="small"
-        columns={COLUMNS}
+        columns={columns}
+        components={headerComponents}
         dataSource={rows}
         pagination={false}
-        scroll={{ y: 380, x: SCROLL_X }}
+        scroll={{ y: 380, x: totalWidth }}
       />
     </Card>
   )
