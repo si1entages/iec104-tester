@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import pytest
 
 from core.capture import format as capture_format
-from core.capture.format import CaptureFile
+from core.capture.format import CaptureFile, FrameEntry
 from core.capture.recorder import PacketRecorder
 
 FRAME = b"\x68\x0e\x00\x00\x00\x00\x01\x01\x03\x00\x01\x00\x64\x00\x00"
@@ -326,12 +326,12 @@ def test_export_without_format_dispatches_by_suffix(tmp_path):
     assert bin_path.read_bytes()[:4] == b"I104"
 
 
-def test_export_format_argument_is_currently_ignored(tmp_path):
-    """**缺陷 D1（已上报 team-lead，未修源码）**：``export(path, format=...)`` 的
-    ``format`` 形参被计算后从未使用——数据一律由 ``CaptureFile.save`` 按扩展名分派。
+def test_export_format_argument_overrides_suffix(tmp_path):
+    """**D1 已修**：显式 ``format`` 优先于扩展名。
 
-    本用例**钉住当前行为**：即使显式传 ``format="binary"``，``.json`` 路径仍写出 JSON。
-    修复后（按显式 format 写文件）本用例需同步改为断言 ``b"I104"``。
+    旧行为（已被本用例替换）：``export(path, format=...)`` 的 ``format`` 被计算后
+    从未使用，一律按扩展名分派——``export("out.json", format="binary")`` 会静默
+    写出 JSON。现改为显式参数胜出，并记 WARNING（不静默）。
     """
     rec = PacketRecorder()
     rec.start()
@@ -340,5 +340,140 @@ def test_export_format_argument_is_currently_ignored(tmp_path):
     path = tmp_path / "explicit.json"
     rec.export(path, format="binary")
 
-    assert path.read_bytes()[:4] != b"I104"          # 当前：format 被忽略
-    assert path.read_text(encoding="utf-8").lstrip().startswith("{")
+    assert path.read_bytes()[:4] == b"I104"           # 显式 format 胜出
+    assert not path.read_text(encoding="utf-8", errors="ignore").lstrip().startswith("{")
+
+
+def test_export_format_aliases_and_case_insensitive(tmp_path):
+    """``format`` 别名与大小写：i104/bin→binary、ntar→pcapng、PCAP→pcap."""
+    rec = PacketRecorder()
+    rec.start()
+    rec.record_frame(FRAME, direction="rx", timestamp=1.0)
+
+    as_i104 = tmp_path / "a.dat"
+    rec.export(as_i104, format="I104")               # 别名 + 大写
+    assert as_i104.read_bytes()[:4] == b"I104"
+
+    as_pcap = tmp_path / "b.dat"
+    rec.export(as_pcap, format="PCAP")
+    assert as_pcap.read_bytes()[:4] == bytes([0xD4, 0xC3, 0xB2, 0xA1])
+
+    as_pcapng = tmp_path / "c.dat"
+    rec.export(as_pcapng, format="ntar")
+    assert as_pcapng.read_bytes()[:4] == bytes([0x0A, 0x0D, 0x0D, 0x0A])
+
+
+def test_export_format_auto_is_same_as_unspecified(tmp_path):
+    """``format="auto"`` 等价于未指定：严格按扩展名分派（不破坏既有行为）."""
+    rec = PacketRecorder()
+    rec.start()
+    rec.record_frame(FRAME, direction="rx", timestamp=1.0)
+
+    json_path = tmp_path / "auto2.json"
+    rec.export(json_path, format="auto")
+    assert json_path.read_text(encoding="utf-8").lstrip().startswith("{")
+
+    bin_path = tmp_path / "auto2.i104"
+    rec.export(bin_path, format="auto")
+    assert bin_path.read_bytes()[:4] == b"I104"
+
+
+def test_export_format_conflict_warns_but_explicit_wins(tmp_path, caplog):
+    """扩展名与显式 ``format`` 冲突：显式胜出，且必须**可见告警**（不静默）."""
+    rec = PacketRecorder()
+    rec.start()
+    rec.record_frame(FRAME, direction="rx", timestamp=1.0)
+
+    path = tmp_path / "conflict.i104"
+    with caplog.at_level("WARNING", logger="iec104.capture.format"):
+        rec.export(path, format="pcap")
+
+    assert path.read_bytes()[:4] == bytes([0xD4, 0xC3, 0xB2, 0xA1])   # 按 format 写 pcap
+    assert any("格式冲突" in r.getMessage() for r in caplog.records), \
+        f"冲突必须记 WARNING，实际日志={[r.getMessage() for r in caplog.records]}"
+
+
+def test_export_unknown_format_raises_visible_error(tmp_path):
+    """未知 ``format`` → 明确 ``ValueError``，**不得**静默回退到扩展名分派."""
+    rec = PacketRecorder()
+    rec.start()
+    rec.record_frame(FRAME, direction="rx", timestamp=1.0)
+
+    path = tmp_path / "x.json"
+    with pytest.raises(ValueError, match="未知的 format"):
+        rec.export(path, format="xml")
+
+    assert not path.exists(), "未知 format 不应产生任何文件"
+
+
+def test_capture_file_save_format_kwarg_is_backward_compatible(tmp_path):
+    """``CaptureFile.save(..., format=...)`` 为新增关键字；不传时行为不变."""
+    frames = [FrameEntry(direction=0, timestamp=1.0, frame_data=FRAME)]
+
+    by_suffix = tmp_path / "legacy.json"
+    CaptureFile.save(by_suffix, frames)
+    assert by_suffix.read_text(encoding="utf-8").lstrip().startswith("{")
+
+    explicit = tmp_path / "explicit2.json"
+    CaptureFile.save(explicit, frames, format="binary")
+    assert explicit.read_bytes()[:4] == b"I104"
+
+    assert CaptureFile.resolve_format("x.json") == "json"
+    assert CaptureFile.resolve_format("x.json", None) == "json"
+    assert CaptureFile.resolve_format("x.json", "auto") == "json"
+    assert CaptureFile.resolve_format("x.i104", "pcap") == "pcap"
+    assert CaptureFile.resolve_format("no_suffix", None) == "binary"
+
+
+# ── 同类缺陷：start(format=...) 曾被静默忽略（D1 的姊妹缺陷）────────
+
+def test_start_format_argument_reaches_flush(tmp_path):
+    """``start(path, format=...)`` 的 ``format`` 必须真正作用于刷盘（旧实现忽略它）.
+
+    旧实现把 ``format`` 存入 ``self._file_format`` 后从未读取，``_flush_to_file``
+    一律按扩展名分派——``start("out.i104", format="json")`` 会静默写二进制。
+    """
+    path = tmp_path / "session.i104"
+    rec = PacketRecorder()
+    rec.start(path, description="显式 json", format="json")
+    rec.record_frame(FRAME, direction="rx", timestamp=1.0)
+    rec.stop()
+
+    assert path.read_text(encoding="utf-8").lstrip().startswith("{")  # 按 format 写 JSON
+
+
+def test_start_format_default_still_dispatches_by_suffix(tmp_path):
+    """不传 ``format``（默认 None）时严格按扩展名分派，不破坏既有行为."""
+    json_path = tmp_path / "auto.json"
+    rec = PacketRecorder()
+    rec.start(json_path)
+    rec.record_frame(FRAME, direction="rx", timestamp=1.0)
+    rec.stop()
+    assert json_path.read_text(encoding="utf-8").lstrip().startswith("{")
+
+    bin_path = tmp_path / "auto.i104"
+    rec2 = PacketRecorder()
+    rec2.start(bin_path)
+    rec2.record_frame(FRAME, direction="rx", timestamp=1.0)
+    rec2.stop()
+    assert bin_path.read_bytes()[:4] == b"I104"
+
+
+def test_start_unknown_format_fails_fast(tmp_path):
+    """``start`` 的未知 ``format`` 立即抛 ``ValueError``，不等首次刷盘、不静默."""
+    rec = PacketRecorder()
+    with pytest.raises(ValueError, match="未知的 format"):
+        rec.start(tmp_path / "x.i104", format="xml")
+    assert not rec.is_recording, "非法 format 不应进入录制态"
+
+
+def test_start_format_conflict_warns(tmp_path, caplog):
+    """``start`` 显式 format 与扩展名冲突 → 可见告警（不静默）."""
+    with caplog.at_level("WARNING", logger="iec104.capture.format"):
+        rec = PacketRecorder()
+        rec.start(tmp_path / "conflict.i104", format="json")
+    assert any("格式冲突" in r.getMessage() for r in caplog.records)
+    rec.record_frame(FRAME, direction="rx", timestamp=1.0)
+    rec.stop()
+    assert (tmp_path / "conflict.i104").read_text(encoding="utf-8").lstrip().startswith("{")
+

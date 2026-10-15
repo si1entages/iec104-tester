@@ -30,14 +30,34 @@
 from __future__ import annotations
 
 import json
+import logging
 import struct
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+logger = logging.getLogger("iec104.capture.format")
+
 # 格式常量
 MAGIC = b"I104"
 VERSION = 1
+
+#: 已知扩展名 → 规范格式名（用于「显式 format 与扩展名冲突」检测）。
+_SUFFIX_FORMATS: dict[str, str] = {
+    ".json": "json",
+    ".i104": "binary",
+    ".pcap": "pcap",
+    ".pcapng": "pcapng",
+    ".ntar": "pcapng",
+}
+
+#: ``format=`` 接受的别名 → 规范格式名（``None`` / ``"auto"`` 单独处理）。
+_FORMAT_ALIASES: dict[str, str] = {
+    "binary": "binary", "i104": "binary", "bin": "binary",
+    "json": "json",
+    "pcap": "pcap",
+    "pcapng": "pcapng", "ntar": "pcapng",
+}
 HEADER_SIZE = 64
 DIRECTION_RX = 0
 DIRECTION_TX = 1
@@ -461,6 +481,11 @@ class CaptureFile:
         APDU（Wireshark 需手工 Decode As）。**合成头非真实网络信息**，详见模块内
         「诚实性声明」。
 
+        .. note::
+           ``description`` 仅为与 :meth:`save` 的统一分派签名保持一致而保留；
+           pcap 文件头**没有**可承载描述的字段，故该参数不被写入（非静默忽略错误，
+           而是格式本身无此能力）。
+
         Returns:
             导出的帧数。
         """
@@ -538,6 +563,10 @@ class CaptureFile:
         """导出为 pcapng（.pcapng，EPB 结构，µs 时间戳，4 字节对齐）.
 
         与 :meth:`save_pcap` 相同的合成头约定与 ``raw`` 语义。
+
+        .. note::
+           ``description`` 同 :meth:`save_pcap`，为统一分派签名而保留且不被写入
+           （pcapng SHB 无描述字段）。
         """
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -605,6 +634,54 @@ class CaptureFile:
         return CaptureFile.load_binary(path)
 
     @staticmethod
+    def resolve_format(path: str | Path, format: str | None = None) -> str:
+        """解析最终写出格式，并检测「显式 ``format`` 与扩展名冲突」.
+
+        **语义（优先级）**：显式 ``format`` **优先于**扩展名推断；
+        仅当 ``format`` 为 ``None`` 或 ``"auto"`` 时才按扩展名分派（既有行为）。
+        扩展名对应另一种**已知**格式时，以 ``format`` 为准并记 WARNING
+        ——**不静默忽略**用户显式指定的格式；未知 ``format`` 抛 ``ValueError``
+        （不静默回退，避免"以为导出了 pcap、实际写出别的格式"）。
+
+        Args:
+            path: 目标路径（只读取其扩展名）。
+            format: ``None``/``"auto"`` 或别名（binary/i104/bin、json、
+                pcap、pcapng/ntar），大小写不敏感。
+
+        Returns:
+            规范格式名之一：``"binary"`` / ``"json"`` / ``"pcap"`` / ``"pcapng"``。
+
+        Raises:
+            ValueError: ``format`` 不是受支持的取值。
+        """
+        path = Path(path)
+        canonical = CaptureFile._canonical_format(format)
+        inferred = _SUFFIX_FORMATS.get(path.suffix.lower())
+
+        if canonical is None:                     # format 未指定 → 按扩展名
+            return inferred or "binary"
+
+        if inferred is not None and inferred != canonical:
+            logger.warning(
+                f"导出格式冲突：显式 format={format!r}({canonical}) 与扩展名 "
+                f"{path.suffix!r}(推断 {inferred}) 不一致 → 以显式 format 为准"
+            )
+        return canonical
+
+    @staticmethod
+    def _canonical_format(format: str | None) -> str | None:
+        """把 ``format`` 归一化为规范名；``None``/``"auto"`` 返回 ``None``."""
+        if format is None:
+            return None
+        key = str(format).strip().lower()
+        if key in ("", "auto"):
+            return None
+        if key not in _FORMAT_ALIASES:
+            supported = "auto, " + ", ".join(sorted(set(_FORMAT_ALIASES)))
+            raise ValueError(f"未知的 format={format!r}；支持: {supported}")
+        return _FORMAT_ALIASES[key]
+
+    @staticmethod
     def save(
         path: str | Path,
         frames: list[FrameEntry],
@@ -612,19 +689,25 @@ class CaptureFile:
         created: float = 0.0,
         *,
         raw: bool = False,
+        format: str | None = None,
     ) -> None:
-        """根据扩展名自动选择格式保存（.i104/.json/.pcap/.pcapng）.
+        """保存帧数据；``format`` 优先于扩展名推断.
+
+        ``format=None``（或 ``"auto"``）时与既有行为完全一致：按扩展名分派
+        （``.json`` → JSON、``.pcap`` → pcap、``.pcapng``/``.ntar`` → pcapng、
+        其余 → 二进制 ``.i104``）。显式给出 ``format`` 时按该格式写出，
+        即使与扩展名不一致（此时记 WARNING，见 ``resolve_format``）。
 
         ``raw`` 仅对 pcap/pcapng 生效：True 时导出裸 APDU（LINKTYPE_USER0），
         否则**合成**以太网/IP/TCP 头以便 Wireshark 原生识别（见模块诚实性声明）。
         """
         path = Path(path)
-        suffix = path.suffix.lower()
-        if suffix == ".json":
+        chosen = CaptureFile.resolve_format(path, format)
+        if chosen == "json":
             CaptureFile.save_json(path, frames, description, created)
-        elif suffix == ".pcap":
+        elif chosen == "pcap":
             CaptureFile.save_pcap(path, frames, description, created, raw=raw)
-        elif suffix in (".pcapng", ".ntar"):
+        elif chosen == "pcapng":
             CaptureFile.save_pcapng(path, frames, description, created, raw=raw)
         else:
             CaptureFile.save_binary(path, frames, description, created)

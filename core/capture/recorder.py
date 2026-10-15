@@ -51,7 +51,7 @@ class PacketRecorder:
         self._lock = threading.Lock()
         self._start_time: float = 0.0
         self._file_path: Path | None = None
-        self._file_format: str = "binary"  # binary / json
+        self._file_format: str | None = None  # None=按扩展名；否则 binary/json/pcap/pcapng
         self._description: str = ""
 
         # 状态
@@ -122,20 +122,39 @@ class PacketRecorder:
         self,
         path: str | Path = None,
         description: str = "",
-        format: str = "binary",
+        format: str | None = None,
     ) -> None:
         """开始录制.
 
         Args:
             path: 保存路径。None 则仅在内存中录制。
             description: 录制描述
-            format: "binary" 或 "json"
+            format: 刷盘格式。``None``（默认）按 ``path`` 扩展名分派（既有行为）；
+                显式给出时**优先于扩展名**（取值同 :meth:`export`：``binary``/
+                ``i104``/``bin``、``json``、``pcap``、``pcapng``/``ntar``）。
+
+        Raises:
+            ValueError: 显式 ``format`` 不是受支持的取值（立即失败，不静默回退）。
+
+        Notes:
+            早期实现把 ``format`` 存入 ``self._file_format`` 后**从未读取**，
+            ``_flush_to_file`` 一律由 ``CaptureFile.save`` 按扩展名分派，
+            于是 ``start("out.i104", format="json")`` 会**静默写二进制**——
+            与 :meth:`export` 的 D1 属同一类缺陷。现于 :meth:`_flush_to_file`
+            透传 ``format``，使参数真正生效。
         """
         if self._recording:
             logger.warning("Already recording, stopping previous session")
             self.stop()
 
-        self._file_path = Path(path) if path else None
+        file_path = Path(path) if path else None
+
+        # 早早失败：显式 format 非法 / 与扩展名冲突时立即报错或告警，而非等首次刷盘；
+        # 校验先于任何状态变更，保证不进入半初始化的录制态
+        if file_path is not None and format is not None:
+            CaptureFile.resolve_format(file_path, format)
+
+        self._file_path = file_path
         self._file_format = format
         self._description = description
         self._start_time = time.time()
@@ -283,6 +302,7 @@ class PacketRecorder:
                 frames,
                 description=self._description,
                 created=self._start_time,
+                format=self._file_format,
             )
             self._last_flush_time = time.time()
             self._frames_since_flush = 0
@@ -297,18 +317,48 @@ class PacketRecorder:
     def export(
         self,
         path: str | Path,
-        format: str = None,
+        format: str | None = None,
     ) -> int:
-        """导出当前缓冲区到文件（不停止录制）."""
-        path = Path(path)
-        if format is None:
-            format = "json" if path.suffix.lower() == ".json" else "binary"
+        """导出当前缓冲区到文件（不停止录制）.
 
+        Args:
+            path: 目标路径。
+            format: 导出格式。**显式传参优先于扩展名推断**；``None``（或
+                ``"auto"``）时回退为按扩展名分派，与既有行为一致。
+                取值：``binary``/``i104``/``bin``、``json``、``pcap``、
+                ``pcapng``/``ntar``（大小写不敏感）。
+
+        Returns:
+            写出的帧数。
+
+        Raises:
+            ValueError: ``format`` 不是受支持的取值（**不静默回退**——避免
+                「以为导出了 pcap、实际写出别的格式」这类更难发现的错误）。
+
+        Notes:
+            **语义选择与理由**：早期实现在此计算出 ``format`` 后从未使用，一律由
+            ``CaptureFile.save`` 按扩展名分派，于是 ``export("out.i104",
+            format="pcap")`` 会**静默写出 .i104**——用户明确指定了格式、程序接受
+            了参数、然后无声地无视它。现改为：显式参数胜出；扩展名对应另一种
+            **已知**格式时以显式参数为准并记 WARNING（可见，不静默）；未指定时
+            严格保持按扩展名分派，不破坏既有行为。选择"显式胜出 + 告警"而非
+            "冲突即报错"，是因为调用方往往是程序化导出（扩展名可能是历史遗留），
+            强行报错会打断流程；而 WARNING 足以让问题可见、可查。
+        """
+        path = Path(path)
         with self._lock:
             frames = list(self._buffer)
 
-        CaptureFile.save(path, frames, description=self._description, created=self._start_time)
-        logger.info(f"Exported {len(frames)} frames to {path}")
+        CaptureFile.save(
+            path, frames,
+            description=self._description,
+            created=self._start_time,
+            format=format,
+        )
+        logger.info(
+            f"Exported {len(frames)} frames to {path} "
+            f"(format={format or 'auto'})"
+        )
         return len(frames)
 
     def get_stats(self) -> dict:
