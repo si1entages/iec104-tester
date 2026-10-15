@@ -500,6 +500,9 @@ def _run_cli(config, point_table, history_db, logger):
                 auto_gi=config.master.auto_gi,
                 reconnect=config.connection.reconnect,
                 reconnect_interval=config.connection.reconnect_interval,
+                # D4 修复：冗余双通道配置（--config YAML 的 redundancy 节）
+                # 必须传入引擎，否则 enabled=True 被静默忽略（QA C8/D4）
+                redundancy=config.redundancy,
             )
             engine.set_event_callback(on_event)
             engine.set_raw_frame_callback(on_frame)

@@ -291,6 +291,9 @@ class EngineSession:
             point_table=getattr(points, "table", None),
             gi_interval=float(gi_interval or 0.0),
             ssl_context=ssl_context, server_hostname=server_hostname,
+            # D4 修复：CLI/--config 启用的冗余双通道配置经会话配置传入；
+            # 默认 enabled=False 时引擎行为与单通道完全一致（无回归）。
+            redundancy=self.config.redundancy,
         )
         eng.set_event_callback(self._hook_master)
         eng.set_raw_frame_callback(self._hook_frame_master)
