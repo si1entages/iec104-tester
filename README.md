@@ -13,58 +13,55 @@
   <img src="https://img.shields.io/badge/WebUI-aiohttp-41CD52" alt="Web UI">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/IEC--104-Complete-brightgreen.svg" alt="IEC 104">
-  <img src="https://img.shields.io/badge/Tests-489-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-1151-brightgreen.svg" alt="Tests">
 </p>
 
 ---
 
-工业级 IEC 60870-5-104 协议测试工具：主站/子站**浏览器 Web UI**（纯 web 形态，浏览器作为唯一界面，可同时开两个标签页联调），协议引擎完整，附多站并发、报文录制回放、网络异常模拟、YAML 自动化测试。
+工业级 IEC 60870-5-104 协议测试工具：主站/子站**浏览器 Web UI**（纯 web 形态，浏览器作为唯一界面，可同时开两个标签页联调），协议引擎完整，附多站并发、报文录制回放、网络异常模拟、YAML 自动化测试、TLS 传输加密与历史库。
 
 ## ✨ 功能特性
 
 ### 协议实现（`core/protocol`）
 
-- 59 种 ASDU 类型标识；APCI I/S/U 帧；k-w 流控；t0/t1/t2/t3 定时器
-- STARTDT/STOPDT/TESTFR 状态机；CP24Time2a / CP56Time2a；品质描述词
-- 文件传输；参数命令；时标与品质
+- 59 种标准 ASDU 类型标识 + **非标厂商私有 TypeID 注册**（YAML 声明字段即可编解码往返，未注册仍按标准回 COT=42）
+- APCI I/S/U 帧；k-w 流控；t0/t1/t2/t3 定时器；STARTDT/STOPDT/TESTFR 状态机
+- CP24Time2a / CP56Time2a；品质描述词
+- **文件传输**（F_FR/F_SR/F_SC/F_LS/F_AF/F_SG/F_DR）字节级语义已按多个独立参考实现逐字节核实（详见 [`docs/file_transfer_fls.md`](docs/file_transfer_fls.md)）
+- **TLS 传输层加密**（证书/CA 校验、双向认证 mTLS；⚠ 仅传输层加密，**不等于 IEC 62351 合规**，边界见 [`docs/tls.md`](docs/tls.md)）
 
-### 界面（Web UI，浅色工业风）
+### Web UI（浅色工业风，按 ISA-101 高性能 HMI 惯例设计）
 
-- 按 **ISA-101 高性能 HMI** 惯例设计：中性浅灰底、颜色只用于状态与类型标签、扁平无装饰、字段带标签
-- 数据表全边框 + 表头吸顶 + 统一左对齐 + 数值等宽（tabular-nums），便于逐格比读
-- 按钮可用性由服务端状态驱动，禁用态显式灰化；点值经 WebSocket 实时刷新（无需手动刷新页面）
-- 主站/子站各一个页面，两个标签页即可联调
+- **主站工作台**：十万行点表虚拟滚动（只渲染可视窗口）、命令面板（系统命令/遥控/设点/文件命令）、实时报文查看器、点位趋势图（只采样被订阅点位）
+- **子站工作台**：手动置数、**应答行为配置**（延迟/丢帧/损坏/不响应/品质/错误 COT）、数据模拟（手动/自动）
+- **多站页**：多子站卡片管理与聚合状态
+- **日志页**：历史库报文查询（含过滤与订阅）
+- 点值经 WebSocket 实时刷新；按钮可用性由服务端状态驱动；数据表表头吸顶、数值等宽（tabular-nums）
 
-### 主站（Web UI + `core/engine/master.py`）
+### 主站（`core/engine/master.py`）
 
-- 连接管理、断线重连
-- 总召唤 / **组召唤（QOI 0–23）**、累计量召、时钟同步、复位进程、测试命令
-- 单/双命令、设点（短浮点/归一化/标度化）、读命令、参数命令、文件目录/选择/请求
-- 定义表（YX/YC/YK/YM 分页）、批量改组/启用禁用、YAML 导入导出、CSV/会话 JSON 导出
+- 连接管理、断线重连；总召唤 / **组召唤（QOI 0–23）**、累计量召唤、时钟同步、复位进程、测试命令
+- 单/双命令（SBO 两段式/直发）、设点（短浮点/归一化/标度化）、读命令、参数命令、文件目录/选择/请求/确认
+- 点位自学习（报文中出现而定义表没有的 IOA 自动补点）、周期总召唤、定义表批量改组/启用禁用、YAML 导入导出、CSV/会话 JSON 导出
 - 实时报文列表（U/S/I + TypeID 摘要）、事件日志
 
-### 子站（Web UI + `core/engine/slave.py`）
+### 子站（`core/engine/slave.py`）
 
 - TCP 多客户端监听；系统命令响应；DEACT；SOE/自发上送
 - 可编辑点表（点 YX 切换、改 YC 自发上送）
-- **响应注入**（延迟、丢帧、损坏、不响应、品质、**错误 COT**）
+- **响应注入**（延迟、丢帧、损坏、不响应、品质、错误 COT）
 - **命令联动**（真机语义：遥控→同 IOA 遥信变位、遥调→同 IOA 遥测更新，带时标 COT=3 上送）
 - 数据模拟（手动/自动）；YAML 点表
 
-### 多站 / 录制 / 模拟（CLI）
+### 数据与运维
 
-- `run_multi_station.py` — 多子站并发，端口/公共地址/点表独立
-- `capture_tool.py` — 录制/回放/分析 `.i104`/`.json`
-- `sim_tool.py` — 延迟/丢包/损坏/乱序/断线预设
+- **历史库默认开启**（SQLite，按角色分库），`--no-history` 可关闭；保留期/条数/容量三重清理
+- **报文导出**：`.i104` / `.json` / **pcap / pcapng**（Wireshark 可直接打开）
+- 多站并发（`run_multi_station.py`）、网络异常模拟（`sim_tool.py`）、YAML 自动化测试（`run_tests.py`）
 
-### 测试
+### 打包产物
 
-- 单元 + 集成：`pytest tests/`（**489**，含 Web API、协议符合性、类型覆盖、日志模块与报告生成器用例）
-- 全流程验收：`python tests/e2e/qa_full_flow.py [--shots]`（从零复位→启动→系统/控制命令→参数文件→模拟→注入→点表→多客户端→前端→关停重连，可选截图）
-- 浏览器/WS 端到端：`python tests/e2e/qa_webui_e2e.py --spawn`（真实 HTTP/WS 双端联调：SBO 两段式/直发、设点、错误 COT 注入）
-- 真机功能矩阵：`python tests/e2e/qa_real_device.py`（对运行中的主站跑只读类功能并核对应答）
-- 一致性：`tests/conformance/test_conformance.py`（42 用例）
-- 脚本：`run_tests.py tests/scripts/`（YAML 动作 + 断言）
+- `python build/build_all.py` 一键产出 **`dist/iec104-master` / `dist/iec104-slave`** 两个免安装目录（含 Web 前端、配置、资源），双击 exe 即用（详见 [`docs/user_guide.md`](docs/user_guide.md)）
 
 ## 🚀 快速开始
 
@@ -86,6 +83,18 @@ python app.py --mode master --no-browser --http-port 8765
 服务启动后会在默认浏览器自动打开对应页面；用 `--no-browser` 可关闭自动打开。
 联调：开两个终端分别启动主站与子站 → 子站页「启动监听」→ 主站页「连本地」→「立即总召」。
 
+### 最小联调示例（一条命令起子站 + 主站连接总召）
+
+```bash
+# 终端 1：子站（默认生成演示点表，历史库开启）
+python app.py --mode slave --port 2404 --no-browser
+
+# 终端 2：主站（连接后自动 STARTDT，手动点总召；或 --mode master --no-browser 后看日志）
+python app.py --mode master --host 127.0.0.1 --port 2404 --no-browser
+```
+
+主站页面连接成功后点「立即总召」，子站演示点表的遥信/遥测即出现在主站定义表。
+
 ## 📦 安装
 
 ```bash
@@ -98,7 +107,7 @@ venv\Scripts\pip install -r requirements.txt
 pip install -r requirements.txt
 ```
 
-依赖：`PyYAML`、`aiohttp`。开发测试另需 `pytest`、`pytest-asyncio`。
+运行依赖：`PyYAML`、`aiohttp`。开发测试另需 `pytest`、`pytest-asyncio`、`ruff`；打包另需 `pyinstaller>=6.0`（见 `pyproject.toml` 可选依赖组）。
 
 ## 💻 命令行
 
@@ -110,16 +119,19 @@ python app.py --mode slave --port 2404
 # 无界面引擎
 python app.py --mode slave --no-gui --log-level DEBUG
 
+# 关闭历史库
+python app.py --mode slave --no-history
+
+# TLS（测试证书见 tests/certs/，生成方式见该目录 README）
+python app.py --mode slave --tls --tls-cert tests/certs/server.pem --tls-key tests/certs/server.key
+python app.py --mode master --tls --tls-ca tests/certs/ca1.pem --host 127.0.0.1
+
 # 自动化测试脚本
 python run_tests.py tests/scripts/
 
-# 一致性测试
-python tests/conformance/test_conformance.py
-
-# 报文录制
+# 报文录制 / 导出 pcap
 python capture_tool.py record --mode master --host 127.0.0.1 -o session.i104
-python capture_tool.py play session.i104 --speed 2.0
-python capture_tool.py analyze session.i104
+python capture_tool.py convert session.i104 -o session.pcap
 
 # 多站
 python run_multi_station.py --stations 3
@@ -136,15 +148,21 @@ python sim_tool.py --preset poor_wifi --mode master --host 127.0.0.1
 | `--config` | 配置文件路径 (YAML) | — |
 | `--host` / `--port` | 目标 TCP 地址 / 端口 | 127.0.0.1 / 2404 |
 | `--point-table` | 点表文件路径 (YAML) | — |
-| `--log-level` | 日志级别 DEBUG…ERROR | INFO |
-| `--log-file` | 日志文件路径 | — |
+| `--log-level` / `--log-file` | 日志级别 / 日志文件 | INFO / — |
 | `--history-db` | 历史数据库路径 (SQLite) | — |
+| `--no-history` | 关闭历史库（默认开启） | false |
 | `--no-gui` | headless CLI 模式（仅日志输出） | false |
 | `--test` | 运行自动化测试脚本 (YAML 文件或目录) | — |
 | `--http-port` | Web UI HTTP 端口 | 主站 8765 / 子站 8766 |
 | `--no-browser` | 启动 Web 服务时不自动打开浏览器 | false |
+| `--tls` | 启用 TLS 传输加密 | false |
+| `--tls-cert` / `--tls-key` | 本端证书 / 私钥 (PEM) | — |
+| `--tls-ca` | 受信 CA (PEM) | — |
+| `--no-verify` | 主站跳过服务端证书校验（仅自签联调，生产禁用） | false |
+| `--verify-client` | 子站要求并校验客户端证书（mTLS） | false |
+| `--tls-hostname` | 主站 TLS 主机名校验域名 | — |
 
-> 共 12 个参数，与 `python app.py --help` 一致。`--http-port` / `--no-browser` 仅 Web UI 入口生效。
+> 共 23 个参数，与 `python app.py --help` 一致。`--http-port` / `--no-browser` 仅 Web UI 入口生效。
 
 ## ⚙️ 配置
 
@@ -157,26 +175,19 @@ mode: master
 connection: { host: "192.168.1.100", port: 2404, common_addr: 1, reconnect: true }
 timers: { t0: 30, t1: 15, t2: 10, t3: 20 }
 flow_control: { k: 12, w: 8 }
+history:   { enabled: true, retention_days: 7, max_size_mb: 512 }
+tls:       { enabled: false }
+custom_types: []   # 非标厂商私有 TypeID 注册
 ```
 
-多站配置见 `configs/multi_station_example.yaml`。
+完整字段说明见 [`docs/user_guide.md`](docs/user_guide.md) 第 9 节；多站配置见 `configs/multi_station_example.yaml`。
 
-## 🧪 测试脚本
-
-```bash
-python run_tests.py tests/scripts/basic_connection_gi.yaml
-python run_tests.py tests/scripts/ -v
-python -m pytest tests/ -q
-```
-
-脚本动作包括：`connect`、`general_interrogation`、`single_command`、`slave_set_yx`、`apply_network_condition` 等（完整列表见 `core/testing/actions.py`）。
-
-## 📡 报文录制 / 网络模拟 / 多站
+## 🧪 测试
 
 ```bash
-python capture_tool.py record|play|analyze|show|convert ...
-python sim_tool.py --preset poor_wifi|congested|satellite|unreliable|stress
-python run_multi_station.py --stations 5
+python -m pytest tests/ -q          # 单元 + 集成（1151 例，含 Web API、协议符合性、TLS、类型覆盖）
+python run_tests.py tests/scripts/  # YAML 脚本
+python tests/e2e/qa_full_flow.py    # 全流程验收
 ```
 
 ## 🏗 项目结构
@@ -184,25 +195,32 @@ python run_multi_station.py --stations 5
 ```
 iec104-tester/
 ├── app.py                 # CLI/Web 兼容入口
-├── apps/                  # 瘦入口 web_master / web_slave
-├── webui/                 # aiohttp REST+WS + 静态工业深色 UI
+├── apps/                  # 瘦入口 web_master / web_slave（打包入口）
+├── webui/                 # aiohttp REST+WS + React 前端（构建产物在 webui/static/app/）
 │   ├── bridge.py          # 引擎桥
 │   ├── server.py
 │   └── static/
 ├── core/
-│   ├── protocol/          # APCI/ASDU/类型/流控/文件传输
+│   ├── protocol/          # APCI/ASDU/类型/流控/文件传输/自定义类型
 │   ├── engine/            # master / slave / multi_station
-│   ├── transport/         # TCP asyncio
-│   ├── data/              # 点表、实时库
-│   ├── capture/           # 录制回放
+│   ├── transport/         # TCP / TLS
+│   ├── data/              # 点表、实时库、历史库
+│   ├── capture/           # 录制回放（.i104/.json/pcap/pcapng）
 │   ├── simulation/        # 网络异常
 │   └── testing/           # YAML 脚本引擎
+├── build/build_all.py     # PyInstaller 打包（产出 dist/iec104-master|slave）
 ├── run_tests.py / run_multi_station.py / capture_tool.py / sim_tool.py
-├── configs/ resources/ tests/ build/
+├── configs/ resources/ tests/ docs/
 └── requirements.txt
 ```
 
-> 详细架构、依赖规则与任务分解见 [`docs/architecture_plan.md`](docs/architecture_plan.md)。
+## 📖 文档
+
+- 用户手册：[`docs/user_guide.md`](docs/user_guide.md)（含 Web UI 各工作台、TLS、历史库、配置参考、已知限制）
+- TLS 边界与排查：[`docs/tls.md`](docs/tls.md)
+- 文件传输字节语义核实：[`docs/file_transfer_fls.md`](docs/file_transfer_fls.md)
+- pcap 导出：[`docs/pcap_export.md`](docs/pcap_export.md)
+- 历史库实测数据：[`docs/history.md`](docs/history.md)
 
 ## 🤝 贡献 / 许可
 

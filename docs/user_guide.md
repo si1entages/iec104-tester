@@ -12,7 +12,8 @@
 8. [自动化测试](#8-自动化测试)
 9. [配置说明](#9-配置说明)
 10. [快捷键](#10-快捷键)
-11. [常见问题](#11-常见问题)
+11. [已知限制与待核实项](#11-已知限制与待核实项)
+12. [常见问题](#12-常见问题)
 
 ---
 
@@ -36,8 +37,12 @@ IEC 60870-5-104 测试工具是一款面向电力系统 SCADA 调试和测试的
 | 状态机 | STARTDT/STOPDT/TESTFR 完整生命周期 |
 | 数据模拟 | 手动/自动遥信遥测变化 |
 | 点表管理 | YAML 导入/导出，可视化编辑 |
-| 报文录制 | 支持 .i104/.json 格式 |
+| 报文录制 | 支持 .i104/.json 格式，可导出 **pcap/pcapng**（Wireshark 直接打开） |
 | 网络模拟 | 丢包、延迟、乱序、损坏等异常 |
+| TLS 传输加密 | 证书/CA 校验、双向认证（mTLS）；**仅传输层加密，不等于 IEC 62351 合规**（见 [`tls.md`](tls.md)） |
+| 历史库 | 默认开启（SQLite 按角色分库），保留期/条数/容量三重清理，`--no-history` 关闭 |
+| 非标 TypeID | YAML 注册厂商私有类型即可编解码往返（未注册按标准回 COT=42） |
+| 文件传输 | F_FR/F_SR/F_SC/F_LS/F_AF/F_SG/F_DR，字节级语义经多实现交叉核实（见 [`file_transfer_fls.md`](file_transfer_fls.md)） |
 
 ---
 
@@ -61,6 +66,27 @@ pip install -r requirements.txt
 # 开发环境（可选）
 pip install pytest pytest-asyncio
 ```
+
+### 打包产物（免安装 exe，可选）
+
+不想装 Python 环境时，用 PyInstaller 打出的免安装目录：
+
+```bash
+pip install pyinstaller
+python build/build_all.py              # 含前端构建（需 node/npm）
+python build/build_all.py --skip-frontend   # 复用仓库内 webui/static/app 现有产物
+python build/build_all.py --onefile    # 单文件形态
+```
+
+产物为 `dist/iec104-master/` 与 `dist/iec104-slave/` 两个目录（含前端、configs、
+resources），双击其中 exe 即启动对应角色的 Web 服务（保留控制台查看启动提示）。
+注意事项：
+
+- Web 前端托管在 `/app/`（React/Vite 产物随 `webui/static` 打入包内）；
+- 打包形态下历史库落在 **`dist/<角色>/_internal/data/history_<角色>.db`**
+  （`_internal` 即打包后的"项目根"），`--no-history` / `--history-db` 照常可用；
+- `run_multi_station.py` / `capture_tool.py` / `sim_tool.py` 等 CLI 工具**不在打包产物内**，
+  需在源码环境运行。
 
 ### 验证安装
 
@@ -130,6 +156,18 @@ python app.py --mode slave --no-gui --log-level DEBUG --log-file slave.log
 └──────────┴──────────────────────────────────────────────────┘
 ```
 
+### 主站工作台（新前端 `/app/`）
+
+T10 起前端迁移到 React/Vite（托管于 `/app/`），主站工作台要点：
+
+- **十万行虚拟滚动**：定义表用 `virtual` + 固定 `scroll.y`，只渲染可视窗口内的行，
+  十万级点表不掉帧；过滤输入走低优先级更新
+- **命令面板**：系统命令（STARTDT/总召/时钟/复位/测试…）、遥控（SBO 两段式/直发）、
+  设点、读命令、参数、文件命令集中在一个面板
+- **报文查看器**：I/S/U 帧实时列表，TypeID 中文摘要，十万行虚拟滚动
+- **趋势图**：只采样**被订阅**的点位（全量采样会打满内存），环形缓冲
+- 点值由 WebSocket 增量补丁/快照驱动，不做全量轮询
+
 ### 操作流程
 
 1. **建立连接**
@@ -171,10 +209,11 @@ python app.py --mode slave --no-gui --log-level DEBUG --log-file slave.log
 
 ### 界面布局
 
-子站模式的界面与主站类似，但功能面板包含：
+子站模式的界面与主站类似，但功能面板包含（新前端 `/app/`）：
 
-- **模拟面板**：手动/自动数据变化
-- **响应配置**：配置对主站命令的响应行为
+- **手动置数**（ManualSetPanel）：按点位手动设置遥信/遥测/累计量值
+- **应答行为**（ResponsePanel）：配置对主站命令的应答行为（见下文「响应注入」）
+- **模拟面板**（SimulationPanel）：手动/自动数据变化
 - **点表编辑**：可视化编辑点表
 
 ### 响应注入
@@ -294,7 +333,16 @@ python capture_tool.py show session.i104 --limit 100 --filter "frame_type=I"
 
 # 格式转换
 python capture_tool.py convert session.i104 -o session.json
+
+# 导出 Wireshark 可直接打开的 pcap/pcapng
+python capture_tool.py convert session.i104 -o session.pcap
+python capture_tool.py convert session.i104 -o session.pcapng
+python capture_tool.py convert session.i104 -o session_raw.pcap --raw   # 裸 APDU(LINKTYPE_USER0)
 ```
+
+> pcap 导出默认**合成以太网/IP/TCP 头**（目的端口 2404；IP 恒为 TEST-NET-1
+> 192.0.2.0/24）以便 Wireshark 原生解析——该头部是**合成信息，非真实网络层数据**。
+> 细节见 [`pcap_export.md`](pcap_export.md)。
 
 ---
 
@@ -577,7 +625,36 @@ stations:
 
 ---
 
-## 11. 常见问题
+## 11. 已知限制与待核实项
+
+### 文件传输（详见 [`file_transfer_fls.md`](file_transfer_fls.md)）
+
+以下开放项**未臆测实现**，待标准正文或真机联调确认：
+
+- **NOF 语义**：Ed.1「文件名」vs Ed.2「文件类型」，目标装置用哪版未知；
+- **目录请求的 SCQ/NOF 组合**：本实现用 **SCQ=5 触发目录上送，是项目约定值**
+  （标准表 5=`SELECT_SECTION`），主/子站内部已闭环，真机联调后定夺（§4.4）；
+- **`WITH_DEACT` 后续动作**：LSQ=2/4 是否必须回去激活确认，未实现；
+- **多节流程**：管理器把整个文件按单节发送，真正的多节累积/逐节校验未实现；
+- **FRQ/SRQ 显示表**：`FileReady`/`SectionReady` 的状态显示文案仍是旧表
+  （两处依据有出入：Schneider「0=肯定/1=否定」vs lib60870「最高位 0x80=否定」），待真机确认。
+
+### 平台与打包
+
+- `run_multi_station.py` 在 **Windows 上不可用**（使用了 Unix-only 的
+  `loop.add_signal_handler`）；多站能力本身（`MultiStationManager`）与 Web 多站页
+  不受影响，可经 Python API 或 Web UI 使用；
+- 打包形态下历史库落在 `dist/<角色>/_internal/data/`（见 §2「打包产物」）；
+- CLI 工具（run_multi_station/capture_tool/sim_tool）不在打包产物内，需源码环境运行。
+
+### 冗余双通道（T21，开发中）
+
+传输层冗余双通道（主备链路自动切换）**正在开发**，本节为占位；落定后此处将补充
+配置项、切换行为与验证矩阵。
+
+---
+
+## 12. 常见问题
 
 ### Q: 连接失败怎么办？
 
