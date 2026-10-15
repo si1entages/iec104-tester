@@ -36,3 +36,13 @@ point_table:
   yc_count: 50
   yk_count: 20
   ym_count: 10
+
+# 自定义（非标准厂商私有）TypeID —— 使私有类型可编解码往返（默认空）
+# custom_types:
+#   - type_id: 128
+#     name: VendorAlarm
+#     fields:
+#       - {name: level, type: u8}
+#       - {name: value, type: i16}
+#       - {name: qds,   type: qds}     # 品质描述词(1B)
+#       - {name: ts,    type: cp56}    # CP56Time2a 时标(7B)

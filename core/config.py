@@ -80,6 +80,9 @@ class AppConfig:
     slave: SlaveConfig = field(default_factory=SlaveConfig)
     display: DisplayConfig = field(default_factory=DisplayConfig)
     point_table: PointTableConfig = field(default_factory=PointTableConfig)
+    # 自定义（非标准厂商私有）TypeID 结构定义（T22）：元素形如
+    # ``{type_id: 128, name: VendorAlarm, fields: [{name: v, type: u8}]}``。
+    custom_types: list = field(default_factory=list)
 
     def save(self, path: str | Path) -> None:
         """保存配置到 YAML."""
@@ -132,6 +135,7 @@ class AppConfig:
                 'yk_count': self.point_table.yk_count,
                 'ym_count': self.point_table.ym_count,
             },
+            'custom_types': list(self.custom_types),
         }
         with open(path, 'w', encoding='utf-8') as f:
             yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
@@ -195,5 +199,15 @@ def load_config(path: str | Path) -> AppConfig:
     cfg.point_table.yc_count = pt.get('yc_count', cfg.point_table.yc_count)
     cfg.point_table.yk_count = pt.get('yk_count', cfg.point_table.yk_count)
     cfg.point_table.ym_count = pt.get('ym_count', cfg.point_table.ym_count)
+
+    custom_types = data.get('custom_types', None)
+    if isinstance(custom_types, list):
+        cfg.custom_types = custom_types
+    elif isinstance(custom_types, dict):
+        # 映射式：键即 type_id
+        cfg.custom_types = [
+            {**dict(v or {}), 'type_id': int(k)}
+            for k, v in custom_types.items()
+        ]
 
     return cfg

@@ -9,6 +9,7 @@ ASDU 结构:
 
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
@@ -70,6 +71,226 @@ class InformationObject:
     ioa: int = 0                # 信息对象地址 (1-3字节)
     data: Any = None            # 具体数据 (SinglePoint/NormalizedValue/etc.)
     time_tag: CP56Time2a | None = None  # 时标（可选）
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  自定义（非标准厂商私有）TypeID 支持（T22）
+# ═══════════════════════════════════════════════════════════════════
+#
+# 现场存在厂商私有类型（如 71/108/109/128/129）。标准 72 类型之外的 TypeID
+# 默认无法解码 → 触发 COT=42（未知类型标识）错误应答。本模块提供**按配置注册**
+# 自定义类型的机制，使这类报文可编解码往返；**未注册**的类型行为保持不变
+# （仍回 COT=42/43/44），标准类型不受影响。
+#
+# 配置形态（YAML / dict / JSON）二选一：
+#
+#   custom_types:                # 列表式
+#     - type_id: 128
+#       name: VendorAlarm
+#       fields:
+#         - {name: level, type: u8}
+#         - {name: value, type: i16}
+#         - {name: qds,   type: qds}     # 品质描述词(1B)
+#         - {name: ts,    type: cp56}    # CP56Time2a 时标(7B)
+#
+#   128: {name: VendorAlarm, fields: [...]}   # 映射式（键即 type_id）
+#
+# 字段类型（小端编码，符合 IEC 104 数值约定）：
+#   u8/i8/bool/qds(1B)  u16/i16(2B)  u32/i32/f32(4B)  f64(8B)
+#   cp56(7B)  cp24(3B)  bytes(需 length)
+#
+# 注：自定义类型的时标以显式字段（cp56/cp24）表达，而非 ASDU 通用时标机制；
+# 这样无需改动 *_TIMED_TYPES 集合，语义更直白，也避免与标准类型交叉影响。
+
+_CUSTOM_FIELD_SIZES: dict[str, int] = {
+    "u8": 1, "i8": 1, "bool": 1, "qds": 1,
+    "u16": 2, "i16": 2,
+    "u32": 4, "i32": 4, "f32": 4,
+    "f64": 8,
+    "cp56": 7, "cp24": 3,
+}
+_CUSTOM_FIELD_FMT: dict[str, str] = {
+    "u8": "<B", "i8": "<b", "bool": "<B", "qds": "<B",
+    "u16": "<H", "i16": "<h",
+    "u32": "<I", "i32": "<i", "f32": "<f", "f64": "<d",
+}
+
+
+@dataclass
+class CustomField:
+    """自定义类型的一个字段描述."""
+    name: str
+    type: str = "u8"
+    length: int = 0     # 仅 type == "bytes" 有效
+
+    def size(self) -> int:
+        if self.type == "bytes":
+            if self.length <= 0:
+                raise ValueError(f"field '{self.name}': bytes 类型需 length>0")
+            return self.length
+        if self.type not in _CUSTOM_FIELD_SIZES:
+            raise ValueError(f"field '{self.name}': 未知字段类型 '{self.type}'")
+        return _CUSTOM_FIELD_SIZES[self.type]
+
+
+@dataclass
+class CustomTypeDef:
+    """自定义 TypeID 的结构定义."""
+    type_id: int
+    name: str = ""
+    fields: list[CustomField] = field(default_factory=list)
+
+    def data_size(self) -> int:
+        """信息体数据段固定长度（不含 IOA）."""
+        return sum(f.size() for f in self.fields)
+
+
+@dataclass
+class CustomObject:
+    """自定义类型的信息体数据对象（``values`` 按字段名取值）."""
+    type_id: int = 0
+    values: dict = field(default_factory=dict)
+
+    def to_bytes(self) -> bytes:
+        """按注册的结构定义编码为字节（小端）."""
+        typedef = CUSTOM_TYPES.get(self.type_id)
+        if typedef is None:
+            raise ValueError(f"custom type {self.type_id} 未注册")
+        out = bytearray()
+        for f in typedef.fields:
+            v = self.values.get(f.name)
+            if f.type == "bytes":
+                b = bytes(v or b"")
+                out += b[:f.length].ljust(f.length, b"\x00")
+            elif f.type == "cp56":
+                out += (v if isinstance(v, CP56Time2a) else CP56Time2a.now()).to_bytes()
+            elif f.type == "cp24":
+                out += (v if isinstance(v, CP24Time2a) else CP24Time2a.now()).to_bytes()
+            elif f.type == "bool":
+                out += struct.pack(_CUSTOM_FIELD_FMT["bool"], 1 if v else 0)
+            else:
+                out += struct.pack(_CUSTOM_FIELD_FMT[f.type], v if v is not None else 0)
+        return bytes(out)
+
+    @classmethod
+    def decode(cls, type_id: int, data: bytes,
+               typedef: CustomTypeDef) -> tuple[CustomObject, int]:
+        """按结构定义解码，返回 (对象, 消耗字节数)."""
+        obj = cls(type_id=int(type_id), values={})
+        pos = 0
+        for f in typedef.fields:
+            size = f.size()
+            if len(data) - pos < size:
+                raise ValueError(
+                    f"custom type {type_id} 数据不足: 字段 '{f.name}' 需 {size}B"
+                )
+            chunk = data[pos:pos + size]
+            pos += size
+            if f.type == "bytes":
+                obj.values[f.name] = bytes(chunk)
+            elif f.type == "cp56":
+                obj.values[f.name] = CP56Time2a.from_bytes(chunk)
+            elif f.type == "cp24":
+                obj.values[f.name] = CP24Time2a.from_bytes(chunk)
+            elif f.type == "bool":
+                obj.values[f.name] = bool(struct.unpack(_CUSTOM_FIELD_FMT["bool"], chunk)[0])
+            else:
+                obj.values[f.name] = struct.unpack(_CUSTOM_FIELD_FMT[f.type], chunk)[0]
+        return obj, pos
+
+
+def _custom_typedef_from_dict(d: dict) -> CustomTypeDef:
+    fields: list[CustomField] = []
+    for fs in d.get("fields", []) or []:
+        if isinstance(fs, str):
+            fields.append(CustomField(name=fs, type="u8"))
+        else:
+            fields.append(CustomField(
+                name=str(fs.get("name", "")),
+                type=str(fs.get("type", "u8")).lower(),
+                length=int(fs.get("length", 0) or 0),
+            ))
+    return CustomTypeDef(
+        type_id=int(d["type_id"]),
+        name=str(d.get("name", "")),
+        fields=fields,
+    )
+
+
+class CustomTypeRegistry:
+    """自定义 TypeID 注册表.
+
+    注册后 ``ASDU.decode`` 即可解析对应类型；``unregister`` / ``clear`` 可撤销。
+    标准类型（``TypeID`` 已定义者）**不允许**注册为自定义，避免遮蔽既有语义。
+    """
+
+    def __init__(self) -> None:
+        self._defs: dict[int, CustomTypeDef] = {}
+
+    def register(self, typedef: CustomTypeDef) -> None:
+        tid = int(typedef.type_id)
+        if tid < 0 or tid > 255:
+            raise ValueError(f"type_id {tid} 超出 0-255")
+        try:
+            TypeID(tid)
+        except ValueError:
+            pass
+        else:
+            raise ValueError(f"type_id {tid} 是标准类型，不能注册为自定义类型")
+        for f in typedef.fields:      # 触发字段类型校验
+            f.size()
+        self._defs[tid] = typedef
+
+    def unregister(self, type_id: int) -> bool:
+        return self._defs.pop(int(type_id), None) is not None
+
+    def get(self, type_id: int) -> CustomTypeDef | None:
+        try:
+            return self._defs.get(int(type_id))
+        except (TypeError, ValueError):
+            return None
+
+    def clear(self) -> None:
+        self._defs.clear()
+
+    def ids(self) -> list[int]:
+        return sorted(self._defs)
+
+    def load_dict(self, config: dict) -> int:
+        """从 dict 装载（支持 ``{custom_types: [...]}`` 或 ``{type_id: {...}}``），返回加载数."""
+        entries: Any = config
+        if isinstance(config, dict) and "custom_types" in config:
+            entries = config["custom_types"]
+        count = 0
+        if isinstance(entries, list):
+            for item in entries:
+                self.register(_custom_typedef_from_dict(item))
+                count += 1
+        elif isinstance(entries, dict):
+            for key, item in entries.items():
+                d = dict(item or {})
+                d.setdefault("type_id", int(key))
+                self.register(_custom_typedef_from_dict(d))
+                count += 1
+        return count
+
+    def load_yaml(self, path) -> int:
+        """从 YAML 文件装载配置."""
+        import yaml
+
+        with open(path, encoding="utf-8") as f:
+            return self.load_dict(yaml.safe_load(f) or {})
+
+    def load_json(self, path) -> int:
+        """从 JSON 文件装载配置."""
+        import json
+
+        with open(path, encoding="utf-8") as f:
+            return self.load_dict(json.load(f) or {})
+
+
+# 全局默认注册表（引擎/ASDU 编解码共用）
+CUSTOM_TYPES = CustomTypeRegistry()
 
 
 @dataclass
@@ -240,6 +461,20 @@ class ASDU:
             TypeID.C_BO_TA_1,
         }
 
+    @classmethod
+    def _coerce_type_id(cls, raw: int):
+        """把原始 TypeID 字节转为 ``TypeID``；**已注册**的自定义类型返回整数值.
+
+        未注册（既非标准 ``TypeID``、也不在 ``CUSTOM_TYPES`` 中）时抛出
+        ``ValueError``，与既有行为一致（调用方据此回送 COT=42 未知类型标识）。
+        """
+        try:
+            return TypeID(raw)
+        except ValueError:
+            if CUSTOM_TYPES.get(raw) is not None:
+                return int(raw)
+            raise
+
     # ── 编码 ────────────────────────────────────────────────────────
 
     def encode(self) -> bytes:
@@ -322,8 +557,9 @@ class ASDU:
 
         pos = 0
 
-        # Type ID
-        type_id = TypeID(data[pos])
+        # Type ID（未注册的自定义类型会抛出 ValueError，行为与既有一致）
+        raw_type = data[pos]
+        type_id = cls._coerce_type_id(raw_type)
         pos += 1
 
         # VSQ
@@ -456,7 +692,11 @@ class ASDU:
         cls._ensure_decoders()
 
         if type_id not in cls._DECODERS:
-            # 未知类型 — 跳过
+            typedef = CUSTOM_TYPES.get(type_id)
+            if typedef is not None:
+                obj, consumed = CustomObject.decode(type_id, data, typedef)
+                return obj, None, consumed
+            # 未注册的未知类型 — 跳过（调用方据解码失败回 COT=42）
             return None, None, 0
 
         data_size, decoder = cls._DECODERS[type_id]

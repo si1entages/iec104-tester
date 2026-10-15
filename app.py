@@ -202,6 +202,16 @@ def cli(default_role: str | None = None) -> int:
     if args.point_table:
         config.point_table.file = args.point_table
 
+    # 自定义（非标准厂商私有）TypeID 注册（T22）。
+    # 未配置时注册表为空 → 未知 TypeID 行为与既有一致（仍回 COT=42）。
+    if config.custom_types:
+        from core.protocol.asdu import CUSTOM_TYPES
+        try:
+            count = CUSTOM_TYPES.load_dict({"custom_types": config.custom_types})
+            logger.info(f"Registered {count} custom TypeID(s): {CUSTOM_TYPES.ids()}")
+        except Exception as e:
+            logger.error(f"Failed to register custom TypeIDs: {e}")
+
     # 点表
     from core.data.point_table import PointTable
     point_table = PointTable()

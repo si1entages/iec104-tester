@@ -1,0 +1,53 @@
+# 非标准厂商私有 TypeID 配置示例（T22）
+#
+# 用途：现场设备常使用 IEC 60870-5-104 标准 72 类型之外的私有 TypeID。
+# 未注册时，本工具解到这类报文会按标准回送 COT=42（未知类型标识）错误应答；
+# 在此登记其数据结构后，即可正常编解码**往返**。
+#
+# ⚠ 注意本代码库已将 71/108/109/128/129 实现为标准类型
+#   （M_PS_TB_1 / C_TS_NB_1 / P_ME_ND_1 / F_FR_NB_1 / F_SR_NB_1），
+#   这些 ID **不能**再登记为自定义类型（注册会拒绝，避免遮蔽既有语义）。
+#   自定义类型请使用真正空闲的 ID：22-29、41-44、52-57、65-69、72-99、
+#   114-119、130-255。
+#
+# 字段类型（小端编码，符合 IEC 104 数值约定）：
+#   u8 / i8 / bool / qds(1B)
+#   u16 / i16(2B)
+#   u32 / i32 / f32(4B)
+#   f64(8B)
+#   cp24(3B 短时标) / cp56(7B 时标)
+#   bytes(需 length)
+#
+# 两种写法等价，任选其一：
+#   ① 列表式（推荐，可读性好）
+#   ② 映射式（键即 type_id）
+#
+# 启用方式：
+#   python app.py --config configs/custom_types_example.yaml
+# 或把下面的 custom_types 段并入你自己的配置文件。
+
+mode: master
+
+custom_types:
+  # ① 列表式
+  - type_id: 130
+    name: VendorAlarm
+    fields:
+      - {name: level,   type: u8}     # 告警等级
+      - {name: value,   type: i16}    # 遥测值
+      - {name: qds,     type: qds}    # 品质描述词
+      - {name: ts,      type: cp56}   # CP56Time2a 时标
+
+  - type_id: 131
+    name: VendorCounter
+    fields:
+      - {name: count,   type: u32}
+      - {name: flag,    type: bool}
+      - {name: payload, type: bytes, length: 4}
+
+# ② 映射式（等价写法，键即 type_id；与列表式二选一）
+# custom_types:
+#   140:
+#     name: VendorStatus
+#     fields:
+#       - {name: status, type: u8}
