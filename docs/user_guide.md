@@ -414,7 +414,45 @@ point_table:
   yc_count: 50
   yk_count: 20
   ym_count: 10
+history:              # 历史库，默认开启
+  enabled: true       # false = 不建库（等价 --no-history）
+  dir: ""             # 空 = <项目根>/data
+  retention_days: 7   # 保留天数，<=0 不按时间清理
+  max_size_mb: 512    # 容量上限(MB)，超出按最旧优先淘汰
+  flush_interval: 5.0 # 后台批量落盘间隔(秒)
+custom_types: []      # 非标准厂商私有 TypeID，见 configs/custom_types_example.yaml
 ```
+
+### 历史库
+
+历史库**默认开启**，落盘到 `<项目根目录>/data/history.db`；
+`--no-history` 可临时关闭，`--history-db <path>` 可指定文件。
+
+清理策略：保留期（`retention_days`）+ 记录条数 + 容量上限（`max_size_mb`），
+刷盘间隔由 `flush_interval` 控制。
+
+容量/写放大实测：**写放大约 3.4×~4.3×，单条记录约 96 B，100 万条 ≈ 91 MiB**，
+默认 512 MB 上限约可容纳 550 万条。完整数据、结论与复现脚本见
+[`docs/history.md`](history.md)。
+
+### 非标准厂商私有 TypeID
+
+现场设备的私有 TypeID 默认会触发 `COT=42`（未知类型标识）错误应答。
+在配置里登记其数据结构后即可正常编解码往返：
+
+```yaml
+custom_types:
+  - type_id: 130          # 须是标准 72 类型之外的空闲 ID
+    name: VendorAlarm
+    fields:
+      - {name: level, type: u8}
+      - {name: value, type: i16}
+      - {name: qds,   type: qds}     # 品质描述词(1B)
+      - {name: ts,    type: cp56}    # CP56Time2a 时标(7B)
+```
+
+完整字段类型表、写法说明与可用 ID 区间见
+[`configs/custom_types_example.yaml`](../configs/custom_types_example.yaml)。
 
 ### 多站配置
 
