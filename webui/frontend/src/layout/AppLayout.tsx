@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 
 import {
   ApiOutlined,
+  CloudServerOutlined,
   DashboardOutlined,
   DeploymentUnitOutlined,
   FileTextOutlined,
@@ -19,6 +20,7 @@ const { Header, Sider, Content } = Layout
 const MENU_ITEMS = [
   { key: 'master', icon: <ThunderboltOutlined />, label: '主站工作台' },
   { key: 'slave', icon: <DeploymentUnitOutlined />, label: '子站工作台' },
+  { key: 'multi', icon: <CloudServerOutlined />, label: '多站' },
   { key: 'status', icon: <DashboardOutlined />, label: '状态总览' },
   { key: 'logs', icon: <FileTextOutlined />, label: '日志' },
 ]

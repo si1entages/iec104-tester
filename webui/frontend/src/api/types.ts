@@ -391,9 +391,17 @@ export interface MultiStartRequest {
   stations: StationConfig[]
 }
 
+/**
+ * `POST /api/multi/start` 响应。
+ *
+ * 注意：契约 §2.8 只写了 `{ok, stations?, error?}` 而**未规定 `stations` 的类型**；
+ * 实现（`webui/session.py::multi_start`）返回的是**已启动站数（int）**，
+ * 不是 `StationStatus[]`。这里按实现投影，并在测试里锁住该形状。
+ */
 export interface MultiStartResponse {
   ok: boolean
-  stations?: StationStatus[]
+  /** 已启动站数（int，非数组） */
+  stations?: number
   error?: string
 }
 
@@ -409,6 +417,11 @@ export interface MultiSummaryResponse {
   station_count: number
   total_clients: number
   uptime: number
+  /** 以下四项为实现的额外字段（契约 §4.7 只列了最小集） */
+  total_yx?: number
+  total_yc?: number
+  total_yk?: number
+  total_ym?: number
   stations: StationSummary[]
 }
 

@@ -12,6 +12,7 @@ import { useWsBridge } from './ws/useWsBridge'
 // 首屏只加载外壳 + 当前页。
 const MasterPage = lazy(() => import('./pages/master/MasterPage'))
 const SlavePage = lazy(() => import('./pages/slave/SlavePage'))
+const MultiPage = lazy(() => import('./pages/multi/MultiPage'))
 const StatusPage = lazy(() => import('./pages/StatusPage').then((m) => ({ default: m.StatusPage })))
 const LogsPage = lazy(() => import('./pages/LogsPage').then((m) => ({ default: m.LogsPage })))
 
@@ -49,6 +50,8 @@ export default function App() {
           <MasterPage />
         ) : page === 'slave' ? (
           <SlavePage />
+        ) : page === 'multi' ? (
+          <MultiPage />
         ) : page === 'logs' ? (
           <LogsPage />
         ) : (

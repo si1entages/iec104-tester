@@ -9,6 +9,8 @@ import type {
   Frame,
   LogQueryParams,
   LogRow,
+  MultiStatusResponse,
+  MultiSummaryResponse,
   OkResponse,
   Point,
   RecentResponse,
@@ -32,6 +34,8 @@ export const queryKeys = {
   liveLogs: ['logs', 'live'] as const,
   liveFrames: ['frames', 'live'] as const,
   liveEvents: ['events', 'live'] as const,
+  multiStatus: ['multi', 'status'] as const,
+  multiSummary: ['multi', 'summary'] as const,
 }
 
 // ── 查询 ───────────────────────────────────────────────────────────────
@@ -70,6 +74,26 @@ export function useRecentQuery() {
     queryKey: queryKeys.recent,
     queryFn: api.recent,
     refetchInterval: 5000,
+  })
+}
+
+/**
+ * 多站运行状态（T16）。只在多站页挂载时轮询——页面卸载即停止，不新增常驻资源。
+ */
+export function useMultiStatusQuery() {
+  return useQuery<MultiStatusResponse>({
+    queryKey: queryKeys.multiStatus,
+    queryFn: api.multi.status,
+    refetchInterval: 2000,
+  })
+}
+
+/** 多站聚合汇总（T16）。同样只在页面挂载期间轮询。 */
+export function useMultiSummaryQuery() {
+  return useQuery<MultiSummaryResponse>({
+    queryKey: queryKeys.multiSummary,
+    queryFn: api.multi.summary,
+    refetchInterval: 2000,
   })
 }
 
@@ -171,10 +195,13 @@ export function patchPoints(client: QueryClient, patches: PointPatch[]): void {
 function useInvalidateAfterCommand() {
   const client = useQueryClient()
   // 命令会改变运行状态与点值：返回后立刻让 status/points 失效，
-  // 不等 WS 快照（断线时也能对齐）
+  // 不等 WS 快照（断线时也能对齐）；
+  // 多站命令同理，顺带刷新多站状态/汇总，避免等下一个轮询周期。
   return () => {
     void client.invalidateQueries({ queryKey: queryKeys.status })
     void client.invalidateQueries({ queryKey: queryKeys.points })
+    void client.invalidateQueries({ queryKey: queryKeys.multiStatus })
+    void client.invalidateQueries({ queryKey: queryKeys.multiSummary })
   }
 }
 
