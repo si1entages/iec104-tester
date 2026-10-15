@@ -247,7 +247,9 @@ async def test_wait_frames_polls_then_succeeds(monkeypatch, registry, ctx):
         polls.append(delay)
         ctx.add_rx_frame(b"\x68\x04\x0b\x00\x00\x00")
 
-    monkeypatch.setattr(actions_mod.asyncio, "sleep", fake_sleep)
+    # 只替换被测模块命名空间的 asyncio 绑定（actions 仅用 asyncio.sleep），
+    # 避免篡改进程级 asyncio 模块污染同循环上的其它任务/用例。
+    monkeypatch.setattr(actions_mod, "asyncio", SimpleNamespace(sleep=fake_sleep))
 
     result = await registry.execute(
         "wait_frames", ctx, {"direction": "rx", "count": 1, "timeout": 5}
@@ -268,7 +270,9 @@ async def test_wait_asdu_polls_then_succeeds(monkeypatch, registry, ctx):
         polls.append(delay)
         ctx.received_asdus.append({"type_id": 100, "cot": 7})
 
-    monkeypatch.setattr(actions_mod.asyncio, "sleep", fake_sleep)
+    # 只替换被测模块命名空间的 asyncio 绑定（actions 仅用 asyncio.sleep），
+    # 避免篡改进程级 asyncio 模块污染同循环上的其它任务/用例。
+    monkeypatch.setattr(actions_mod, "asyncio", SimpleNamespace(sleep=fake_sleep))
 
     result = await registry.execute("wait_asdu", ctx,
                                     {"type_id": 100, "cot": 7, "timeout": 5})
@@ -288,7 +292,9 @@ async def test_wait_state_polls_then_succeeds(monkeypatch, registry, ctx):
         polls.append(delay)
         ctx.engine.is_running = True
 
-    monkeypatch.setattr(actions_mod.asyncio, "sleep", fake_sleep)
+    # 只替换被测模块命名空间的 asyncio 绑定（actions 仅用 asyncio.sleep），
+    # 避免篡改进程级 asyncio 模块污染同循环上的其它任务/用例。
+    monkeypatch.setattr(actions_mod, "asyncio", SimpleNamespace(sleep=fake_sleep))
 
     result = await registry.execute("wait_state", ctx, {"state": "running", "timeout": 5})
 

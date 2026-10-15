@@ -10,8 +10,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
+import random
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -30,6 +33,49 @@ FRAME = b"\x68\x04\x0b\x00\x00\x00"
 def _proxy(**cond_kwargs) -> NetworkProxy:
     cond = NetworkCondition(active=True, **cond_kwargs)
     return NetworkProxy(cond)
+
+
+# ── 打桩辅助：只改被测模块的命名空间，不碰进程级模块 ──────────────
+#
+# ``proxy_mod.random`` / ``proxy_mod.asyncio`` / ``proxy_mod.time`` 都是
+# **进程级单例模块**。直接 ``monkeypatch.setattr(proxy_mod.random, "random", ...)``
+# 会篡改整个进程的 ``random.random``：凡在此窗口内运行的同循环任务/其它调用方
+# 都会看到被替换的行为——这是典型的跨用例全局状态残留（全量偶发、单测通过的
+# 典型来源）。下面统一改为替换 ``proxy_mod`` 自身命名空间里的绑定，作用域严格
+# 限定在被测模块内。
+
+def _patch_random(monkeypatch, **overrides):
+    """替换 ``core.simulation.proxy`` 命名空间的 ``random`` 绑定.
+
+    用独立 ``random.Random`` 实例承载注入值：未被覆盖的 ``shuffle`` /
+    ``uniform`` / ``randint`` 仍是真实实现，进程级 ``random`` 模块不被改动。
+    """
+    stub = random.Random()
+    for name, value in overrides.items():
+        setattr(stub, name, value)
+    monkeypatch.setattr(proxy_mod, "random", stub)
+    return stub
+
+
+def _patch_asyncio(monkeypatch, **overrides):
+    """替换 ``core.simulation.proxy`` 命名空间的 ``asyncio`` 绑定."""
+    stub = SimpleNamespace(
+        sleep=asyncio.sleep,
+        get_running_loop=asyncio.get_running_loop,
+    )
+    for name, value in overrides.items():
+        setattr(stub, name, value)
+    monkeypatch.setattr(proxy_mod, "asyncio", stub)
+    return stub
+
+
+def _patch_time(monkeypatch, **overrides):
+    """替换 ``core.simulation.proxy`` 命名空间的 ``time`` 绑定."""
+    stub = SimpleNamespace(monotonic=time.monotonic)
+    for name, value in overrides.items():
+        setattr(stub, name, value)
+    monkeypatch.setattr(proxy_mod, "time", stub)
+    return stub
 
 
 class _RecordingLoop:
@@ -115,7 +161,7 @@ def test_rx_dropped_when_disconnected():
 
 def test_rx_dropped_by_loss(monkeypatch):
     proxy = _proxy(loss_rate=0.5)
-    monkeypatch.setattr(proxy_mod.random, "random", lambda: 0.0)   # < loss_rate
+    _patch_random(monkeypatch, random=lambda: 0.0)   # < loss_rate
     seen = []
     proxy.wrap_rx_callback(lambda f, *a, **k: seen.append(f))
 
@@ -127,7 +173,7 @@ def test_rx_dropped_by_loss(monkeypatch):
 
 def test_rx_delivered_when_no_loss(monkeypatch):
     proxy = _proxy(loss_rate=0.5)
-    monkeypatch.setattr(proxy_mod.random, "random", lambda: 0.99)  # >= loss_rate
+    _patch_random(monkeypatch, random=lambda: 0.99)  # >= loss_rate
     seen = []
     proxy.wrap_rx_callback(lambda f, *a, **k: seen.append(f))
 
@@ -139,8 +185,7 @@ def test_rx_delivered_when_no_loss(monkeypatch):
 
 def test_rx_corruption_changes_frame(monkeypatch):
     proxy = _proxy(corrupt_rate=1.0, corrupt_bits=1)
-    monkeypatch.setattr(proxy_mod.random, "random", lambda: 0.0)
-    monkeypatch.setattr(proxy_mod.random, "randint", lambda a, b: 3)  # 固定翻转字节
+    _patch_random(monkeypatch, random=lambda: 0.0, randint=lambda a, b: 3)  # 固定翻转字节
     seen = []
     proxy.wrap_rx_callback(lambda f, *a, **k: seen.append(f))
 
@@ -153,7 +198,7 @@ def test_rx_corruption_changes_frame(monkeypatch):
 
 def test_rx_no_corruption_when_rate_zero(monkeypatch):
     proxy = _proxy(corrupt_rate=0.0)
-    monkeypatch.setattr(proxy_mod.random, "random", lambda: 0.0)
+    _patch_random(monkeypatch, random=lambda: 0.0)
     seen = []
     proxy.wrap_rx_callback(lambda f, *a, **k: seen.append(f))
 
@@ -165,7 +210,7 @@ def test_rx_no_corruption_when_rate_zero(monkeypatch):
 
 def test_rx_duplicate_delivers_twice(monkeypatch):
     proxy = _proxy(duplicate_rate=1.0)
-    monkeypatch.setattr(proxy_mod.random, "random", lambda: 0.0)
+    _patch_random(monkeypatch, random=lambda: 0.0)
     seen = []
     proxy.wrap_rx_callback(lambda f, *a, **k: seen.append(f))
 
@@ -179,8 +224,8 @@ def test_rx_delay_schedules_via_call_later(monkeypatch):
     """有事件循环：延迟走 call_later（用伪循环捕获，不真实等待）."""
     proxy = _proxy(delay_ms=50.0)
     loop = _RecordingLoop()
-    monkeypatch.setattr(proxy_mod.asyncio, "get_running_loop", lambda: loop)
-    monkeypatch.setattr(proxy_mod.random, "uniform", lambda a, b: 0.0)
+    _patch_asyncio(monkeypatch, get_running_loop=lambda: loop)
+    _patch_random(monkeypatch, uniform=lambda a, b: 0.0)
     seen = []
     proxy.wrap_rx_callback(lambda f, *a, **k: seen.append(f))
 
@@ -266,7 +311,7 @@ async def test_tx_dropped_when_disconnected():
 async def test_tx_dropped_by_loss(monkeypatch):
     proxy = _proxy(loss_rate=0.9)
     proxy._original_tx = AsyncMock()
-    monkeypatch.setattr(proxy_mod.random, "random", lambda: 0.1)
+    _patch_random(monkeypatch, random=lambda: 0.1)
 
     await proxy._process_tx(FRAME)
 
@@ -278,8 +323,7 @@ async def test_tx_dropped_by_loss(monkeypatch):
 async def test_tx_corrupt_then_deliver(monkeypatch):
     proxy = _proxy(corrupt_rate=1.0, corrupt_bits=1)
     proxy._original_tx = AsyncMock()
-    monkeypatch.setattr(proxy_mod.random, "random", lambda: 0.0)
-    monkeypatch.setattr(proxy_mod.random, "randint", lambda a, b: 3)
+    _patch_random(monkeypatch, random=lambda: 0.0, randint=lambda a, b: 3)
 
     await proxy._process_tx(FRAME)
 
@@ -293,7 +337,7 @@ async def test_tx_corrupt_then_deliver(monkeypatch):
 async def test_tx_duplicate_delivers_twice(monkeypatch):
     proxy = _proxy(duplicate_rate=1.0)
     proxy._original_tx = AsyncMock()
-    monkeypatch.setattr(proxy_mod.random, "random", lambda: 0.0)
+    _patch_random(monkeypatch, random=lambda: 0.0)
 
     await proxy._process_tx(FRAME)
 
@@ -313,7 +357,7 @@ async def test_tx_bandwidth_limit_waits(monkeypatch):
     async def fake_sleep(delay):
         waits.append(delay)
 
-    monkeypatch.setattr(proxy_mod.asyncio, "sleep", fake_sleep)
+    _patch_asyncio(monkeypatch, sleep=fake_sleep)
 
     await proxy._process_tx(FRAME)
 
@@ -332,7 +376,7 @@ async def test_tx_bandwidth_no_wait_when_enough_time_passed(monkeypatch):
     async def fake_sleep(delay):
         waits.append(delay)
 
-    monkeypatch.setattr(proxy_mod.asyncio, "sleep", fake_sleep)
+    _patch_asyncio(monkeypatch, sleep=fake_sleep)
 
     await proxy._process_tx(FRAME)
 
@@ -350,7 +394,7 @@ async def test_tx_delay_waits_and_counts(monkeypatch):
     async def fake_sleep(delay):
         waits.append(delay)
 
-    monkeypatch.setattr(proxy_mod.asyncio, "sleep", fake_sleep)
+    _patch_asyncio(monkeypatch, sleep=fake_sleep)
 
     await proxy._process_tx(FRAME)
 
@@ -363,7 +407,7 @@ async def test_tx_delay_waits_and_counts(monkeypatch):
 async def test_tx_disconnect_triggered(monkeypatch):
     proxy = _proxy(disconnect_rate=1.0, disconnect_duration_s=2.0)
     proxy._original_tx = AsyncMock()
-    monkeypatch.setattr(proxy_mod.random, "random", lambda: 0.0)
+    _patch_random(monkeypatch, random=lambda: 0.0)
 
     await proxy._process_tx(FRAME)
 
@@ -378,7 +422,7 @@ async def test_tx_reorder_buffers_until_window_full(monkeypatch):
     """乱序：先缓存不投递，缓冲满（W 帧）后打乱一次性释放."""
     proxy = _proxy(reorder_rate=1.0, reorder_window=2)
     proxy._original_tx = AsyncMock()
-    monkeypatch.setattr(proxy_mod.random, "random", lambda: 0.0)
+    _patch_random(monkeypatch, random=lambda: 0.0)
 
     await proxy._process_tx(b"\x01")
     assert proxy._original_tx.await_count == 0        # 第一帧仅入缓冲
@@ -395,7 +439,7 @@ async def test_tx_non_reorder_frame_flushes_pending_buffer(monkeypatch):
     """非乱序帧到来时先把积压帧打乱发出，再发当前帧."""
     proxy = _proxy(reorder_rate=0.5, reorder_window=5)
     proxy._original_tx = AsyncMock()
-    monkeypatch.setattr(proxy_mod.random, "random", lambda: 0.99)   # 当前帧不触发乱序
+    _patch_random(monkeypatch, random=lambda: 0.99)   # 当前帧不触发乱序
 
     proxy._reorder_buffer.append(b"\x01")     # 模拟此前积压的乱序帧
 
@@ -430,10 +474,10 @@ def test_calc_delay_with_and_without_variance(monkeypatch):
     assert fixed._calc_delay() == pytest.approx(40.0)
 
     jitter = _proxy(delay_ms=40.0, delay_variance_ms=10.0)
-    monkeypatch.setattr(proxy_mod.random, "uniform", lambda a, b: 5.0)
+    _patch_random(monkeypatch, uniform=lambda a, b: 5.0)
     assert jitter._calc_delay() == pytest.approx(45.0)
 
-    monkeypatch.setattr(proxy_mod.random, "uniform", lambda a, b: -100.0)
+    _patch_random(monkeypatch, uniform=lambda a, b: -100.0)
     assert jitter._calc_delay() == 0.0                # 负值被钳制为 0
 
 
@@ -442,7 +486,7 @@ def test_maybe_corrupt_skips_when_rate_zero_or_roll_too_high(monkeypatch):
     assert proxy._maybe_corrupt(FRAME, "rx") == FRAME
 
     proxy = _proxy(corrupt_rate=0.5)
-    monkeypatch.setattr(proxy_mod.random, "random", lambda: 0.99)
+    _patch_random(monkeypatch, random=lambda: 0.99)
     assert proxy._maybe_corrupt(FRAME, "rx") == FRAME
     assert proxy.stats["rx_corrupted"] == 0
 
@@ -450,8 +494,7 @@ def test_maybe_corrupt_skips_when_rate_zero_or_roll_too_high(monkeypatch):
 def test_maybe_corrupt_breaks_on_very_short_frame(monkeypatch):
     """帧长 <2 时无法跳过起始符 → 直接跳出循环，不越界."""
     proxy = _proxy(corrupt_rate=1.0, corrupt_bits=3)
-    monkeypatch.setattr(proxy_mod.random, "random", lambda: 0.0)
-    monkeypatch.setattr(proxy_mod.random, "randint", lambda a, b: 0)
+    _patch_random(monkeypatch, random=lambda: 0.0, randint=lambda a, b: 0)
 
     result = proxy._maybe_corrupt(b"\x68", "tx")
 
@@ -461,7 +504,7 @@ def test_maybe_corrupt_breaks_on_very_short_frame(monkeypatch):
 
 def test_trigger_disconnect_sets_deadline(monkeypatch):
     proxy = _proxy(disconnect_duration_s=3.0)
-    monkeypatch.setattr(proxy_mod.time, "monotonic", lambda: 1000.0)
+    _patch_time(monkeypatch, monotonic=lambda: 1000.0)
 
     proxy._trigger_disconnect()
 
@@ -542,7 +585,7 @@ def test_installed_rx_wrapper_actually_delivers(monkeypatch):
 
     proxy = _proxy()
     proxy.install_on_engine(engine)
-    monkeypatch.setattr(proxy_mod.random, "random", lambda: 0.99)
+    _patch_random(monkeypatch, random=lambda: 0.99)
 
     engine._client._on_frame(FRAME)
 

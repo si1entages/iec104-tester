@@ -77,6 +77,31 @@ class _FakeEngine:
             raise RuntimeError("stop failed")
 
 
+class _AdvancingClock:
+    """受控时钟：每次读表前进 ``step`` 秒（用于替换真实 ``time`` 模块）.
+
+    脚本超时判定是 ``time.time() - result.start_time > script.timeout``。若用真实
+    时钟，粗粒度平台两次读表可能落在同一刻度（``elapsed`` 恒为 0）而漏判，或因
+    执行耗时抖动而漂移——属「依赖真实调度时机」的偶发来源。注入受控时钟后该判定
+    由时间差**确定**触发，断言不再依赖机器负载与系统时钟粒度。
+    """
+
+    def __init__(self, start: float = 1000.0, step: float = 1.0) -> None:
+        self._now = start
+        self._step = step
+
+    def _tick(self) -> float:
+        value = self._now
+        self._now += self._step
+        return value
+
+    def time(self) -> float:
+        return self._tick()
+
+    def monotonic(self) -> float:
+        return self._tick()
+
+
 @pytest.fixture
 def runner(tmp_path) -> ScriptRunner:
     r = ScriptRunner(report_dir=str(tmp_path / "reports"))
@@ -361,8 +386,12 @@ steps:
 
 
 @pytest.mark.asyncio
-async def test_run_script_timeout_marks_step_error(runner):
-    """脚本级超时：timeout 极小 → 每个步骤被标记为 ERROR."""
+async def test_run_script_timeout_marks_step_error(runner, monkeypatch):
+    """脚本级超时：受控时钟使 elapsed 确定超过 timeout → 每个步骤被标记 ERROR."""
+    import core.testing.runner as runner_mod
+
+    monkeypatch.setattr(runner_mod, "time", _AdvancingClock())
+
     yaml_text = """
 name: 脚本超时
 config:
