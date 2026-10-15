@@ -83,6 +83,10 @@ logs/
 *.pcap
 *.pcapng
 
+# 历史库默认落盘目录（运行时生成，见 docs/history.md）。
+# 必须用前导 / 锚定仓库根：裸写 data/ 会连 core/data/ 源码包一起忽略。
+/data/
+
 # Config
 config.local.yaml
 
