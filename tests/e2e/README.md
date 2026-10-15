@@ -62,6 +62,20 @@ CI（ubuntu runner）上每次 push/PR 自动运行，与既有 lint/test/fronte
 `reuseExistingServer` 自动关闭（`process.env.CI` 判断）——不会复用也不会
 误撞 runner 上不存在的服务。
 
+> **本机并行开发跑 e2e 的提醒**：非 CI 环境下 `reuseExistingServer` 是开启的，
+> 若 8765/8766 已被**别人的**服务（队友在跑测试/调试）占用，Playwright 会
+> 直接复用那个服务，造成跨工程串台的假失败/假通过。因此并行开发时跑 e2e
+> 务必 `CI=1`（强制新起 webServer）或先清端口：
+>
+> ```bash
+> netstat -ano | grep -E ":(8765|8766|2404) .*LISTENING"   # 先看占用
+> CI=1 E2E_CHANNEL=msedge webui/frontend/node_modules/.bin/playwright test \
+>   --config tests/e2e/playwright.config.ts
+> ```
+>
+> 另外 Windows 上连环跑两轮 e2e 时，2404 的 TIME_WAIT 可能尚未消散，
+> 第二轮 `/api/slave/start` 绑定会失败——两轮间隔 ≥60s（CI/Linux 无此问题）。
+
 用例清单（15 个，见 `specs/*.spec.ts`）：
 
 - 主站：UI 连接建立 → 点表虚拟滚动（**DOM 行数远小于总行数**，T12 验收）→ 选中行 →
