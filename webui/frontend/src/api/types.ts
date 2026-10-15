@@ -74,6 +74,23 @@ export interface RecentResponse {
   events: unknown[]
 }
 
+/** 报文逐段翻译（契约 §2.9，第二批体验改造 ④） */
+export interface FrameSegment {
+  title: string
+  lines: string[]
+}
+
+export interface FrameTranslation {
+  format: 'I' | 'S' | 'U' | '?'
+  segments: FrameSegment[]
+}
+
+export interface FrameDecodeResponse {
+  ok: boolean
+  error?: string
+  translation?: FrameTranslation
+}
+
 /** `GET /api/schema` */
 export interface SchemaResponse {
   ok: true

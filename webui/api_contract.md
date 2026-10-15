@@ -176,6 +176,17 @@
 > `StationStatus.tls_enabled` 只有 启用(`true`)/未启用(`false`) 两种实况，
 > **不存在降级态**。`failed` 为纯新增字段，不影响 `schemaVersion`。
 
+### 2.9 报文逐段翻译（第二批体验改造 ④）
+
+| 方法 | 路径 | 请求 | 响应 |
+|------|------|------|------|
+| GET | `/api/frames/decode` | query：`hex: str`（单帧 HEX，≤4096 字符） | `{ok, error?}` 或 `{ok: true, format: "I"\|"S"\|"U"\|"?", segments: Segment[]}` |
+
+> `Segment = {title: str, lines: str[]}`。逐段拆解：APCI（起始/长度/控制域 →
+> I/U/S 帧类型与序号）→ ASDU（TypeID 含义 / VSQ 与 SQ / COT 含义 / 源发与公共
+> 地址 / 逐个信息体 IOA+值+品质+时标）。解析失败段只记备注行，不抛 5xx；
+> `hex` 非法/过短返回 `{ok: false, error}`。前端报文查看器悬停 HEX 单元格时调用。
+
 ---
 
 ## 3. WebSocket `/ws`

@@ -11,6 +11,7 @@ from aiohttp import WSMsgType, web
 
 from .bridge import EngineBridge
 from .events import SCHEMA_VERSION
+from .frame_translate import translate_hex
 
 logger = logging.getLogger("iec104.webui")
 STATIC = Path(__file__).parent / "static"
@@ -105,6 +106,15 @@ def create_app(bridge: EngineBridge) -> web.Application:
             "frames": bridge.recent("frame", 200),
             "events": bridge.recent("event", 200),
         })
+
+    async def api_frames_decode(request: web.Request) -> web.Response:
+        """单帧逐段翻译（第二批体验改造 ④）：?hex=<hex> → {ok, format, segments}."""
+        hex_str = request.query.get("hex", "")
+        if not hex_str:
+            return web.json_response({"ok": False, "error": "missing hex"}, status=400)
+        if len(hex_str) > 4096:
+            return web.json_response({"ok": False, "error": "hex too long"}, status=400)
+        return web.json_response(translate_hex(hex_str))
 
     async def api_master_start(request: web.Request) -> web.Response:
         try:
@@ -623,6 +633,7 @@ def create_app(bridge: EngineBridge) -> web.Application:
     app.router.add_get("/api/status", api_status)
     app.router.add_get("/api/points", api_points)
     app.router.add_get("/api/recent", api_recent)
+    app.router.add_get("/api/frames/decode", api_frames_decode)
     app.router.add_post("/api/master/start", api_master_start)
     app.router.add_post("/api/master/stop", api_master_stop)
     app.router.add_post("/api/master/gi", api_gi)

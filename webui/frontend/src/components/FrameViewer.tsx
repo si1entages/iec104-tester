@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { ClearOutlined, PauseCircleOutlined, PlayCircleOutlined } from '@ant-design/icons'
 import { useQueryClient } from '@tanstack/react-query'
-import { Button, Card, Input, InputNumber, Select, Space, Table, Tag, Tooltip, Typography } from 'antd'
+import { Button, Card, Input, InputNumber, Select, Space, Table, Tag, Typography } from 'antd'
 import type { TableColumnsType } from 'antd'
 
 import { api } from '../api/endpoints'
@@ -18,6 +18,7 @@ import {
 import type { ParsedFrame } from '../lib/frame'
 import { normalizeFrames } from '../lib/records'
 import { useResizableColumns } from '../hooks/useResizableColumns'
+import { FrameTranslatePopover } from './FrameTranslatePopover'
 
 interface Row {
   key: string
@@ -66,6 +67,18 @@ const COLUMNS: TableColumnsType<Row> = [
     render: (_v, row) => row.parsed?.cotName ?? '-',
   },
   {
+    key: 'hex',
+    title: '报文 (HEX)',
+    width: 420,
+    // 第二批改造④：报文列移到序号列前面；行高自适应直接显示全部报文
+    // （hex 串按字节分组换行，不再截断）；悬停 300ms 拉起逐段翻译
+    render: (_v, row) => (
+      <FrameTranslatePopover hex={row.frame.hex}>
+        <span className="mono hex-wrap">{groupHex(row.frame.hex)}</span>
+      </FrameTranslatePopover>
+    ),
+  },
+  {
     key: 'seq',
     title: '序号',
     width: 110,
@@ -90,17 +103,6 @@ const COLUMNS: TableColumnsType<Row> = [
     title: '个数',
     width: 70,
     render: (_v, row) => row.parsed?.count ?? '-',
-  },
-  {
-    key: 'hex',
-    title: '报文 (HEX)',
-    width: 420,
-    // 行高自适应直接显示全部报文（第二批改造④）：hex 串按字节分组换行，不再截断
-    render: (_v, row) => (
-      <Tooltip title={<span className="mono">{groupHex(row.frame.hex)}</span>}>
-        <span className="mono hex-wrap">{groupHex(row.frame.hex)}</span>
-      </Tooltip>
-    ),
   },
 ]
 

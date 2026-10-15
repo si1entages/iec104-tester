@@ -12,6 +12,7 @@ import type {
   DelayRequest,
   EpRequest,
   FileRequest,
+  FrameDecodeResponse,
   GiRequest,
   ImportFormat,
   LogQueryParams,
@@ -63,6 +64,9 @@ export const api = {
   status: () => apiGet<Status>('/api/status'),
   points: () => apiGet<PointsResponse>('/api/points'),
   recent: () => apiGet<RecentResponse>('/api/recent'),
+  /** 单帧逐段翻译（契约 §2.9，第二批体验改造 ④） */
+  framesDecode: (hex: string) =>
+    apiGet<FrameDecodeResponse>('/api/frames/decode', { hex }),
 
   // ── 主站命令 ─────────────────────────────────────────────────────────
   master: {
