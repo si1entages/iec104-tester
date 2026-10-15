@@ -108,7 +108,7 @@ def _open_browser_when_ready(
 
 def run_web(role: str, http_port: int | None = None, open_browser: bool = True,
             point_table=None, connection: dict | None = None,
-            history_db=None) -> None:
+            history_db=None, engine_config=None) -> None:
     """启动 Web 服务（阻塞）并在就绪后打开浏览器.
 
     Args:
@@ -120,6 +120,10 @@ def run_web(role: str, http_port: int | None = None, open_browser: bool = True,
             否则 UI 的输入框回落到默认 2404，「启动监听/连接」会忽略 --port。
         history_db: 已打开的 ``HistoryDB``；非 None 时 Web 模式会把收发报文
             落盘（此前 Web 模式只建库、不记录）。为 None 则 Web 层不记录。
+        engine_config: CLI 解析出的 ``AppConfig``（D3 接线）。经
+            run_server → EngineBridge → EngineSession 传入引擎构造，使
+            ``--tls*`` / 冗余等 CLI 配置在默认 Web 模式下真实生效；
+            为 None 时 Web 层使用默认配置（与改动前行为一致）。
     """
     from webui.server import run_server
 
@@ -137,7 +141,8 @@ def run_web(role: str, http_port: int | None = None, open_browser: bool = True,
 
     try:
         run_server(role, "127.0.0.1", port, point_table=point_table,
-                   connection=connection, history_db=history_db)
+                   connection=connection, history_db=history_db,
+                   app_config=engine_config)
     except KeyboardInterrupt:
         pass
 
@@ -362,6 +367,22 @@ def cli(default_role: str | None = None) -> int:
                 return 2
             return 0
 
+        # TLS 失败策略（T20 统一，D3 修复延伸到默认 Web 模式）：
+        # 配置显式启用 TLS 但配置无效（证书/密钥/CA 缺失等）→ 启动前即拒绝，
+        # **非零退出并给出原因**，绝不静默降级为明文。纯 --no-gui 路径由
+        # _run_cli → _enable_tls 在引擎启动前执行同一校验（既有行为不变）。
+        if config.tls.enabled and not args.no_gui:
+            from core.transport.connection import (
+                TlsConfigError,
+                build_context_from_config,
+            )
+
+            try:
+                build_context_from_config(config.tls, role)
+            except TlsConfigError as e:
+                logger.error(f"TLS 配置无效，拒绝启动（不降级明文）: {e}")
+                return 2
+
         # Web UI 模式（主站/子站）—— role 已在上方历史库接线处解析
         connection = {
             "host": config.connection.host,
@@ -370,7 +391,7 @@ def cli(default_role: str | None = None) -> int:
         }
         run_web(role, args.http_port, open_browser=not args.no_browser,
                 point_table=point_table, connection=connection,
-                history_db=history_db)
+                history_db=history_db, engine_config=config)
         return 0
     finally:
         # 保证异常路径也会关闭历史数据库
@@ -478,6 +499,7 @@ def _run_cli(config, point_table, history_db, logger):
                 auto_start=config.master.auto_start,
                 auto_gi=config.master.auto_gi,
                 reconnect=config.connection.reconnect,
+                reconnect_interval=config.connection.reconnect_interval,
             )
             engine.set_event_callback(on_event)
             engine.set_raw_frame_callback(on_frame)
@@ -511,7 +533,9 @@ def _run_cli(config, point_table, history_db, logger):
             engine = SlaveEngine(
                 port=config.connection.port,
                 common_addr=config.connection.common_addr,
+                max_connections=config.connection.max_connections,
                 point_table=point_table,
+                spontaneous_enabled=config.slave.spontaneous_enabled,
             )
             engine.set_event_callback(on_event)
             engine.set_raw_frame_callback(on_frame)

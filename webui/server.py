@@ -663,9 +663,9 @@ def create_app(bridge: EngineBridge) -> web.Application:
 
 async def _run(role: str, host: str = "127.0.0.1", port: int = 8765,
                point_table=None, connection: dict | None = None,
-               history_db=None) -> None:
+               history_db=None, app_config=None) -> None:
     bridge = EngineBridge(role, point_table=point_table, connection=connection,
-                          history_db=history_db)
+                          history_db=history_db, app_config=app_config)
     bridge.ensure_demo_points()
     app = create_app(bridge)
     runner = web.AppRunner(app)
@@ -682,7 +682,7 @@ async def _run(role: str, host: str = "127.0.0.1", port: int = 8765,
 
 def run_server(role: str, host: str = "127.0.0.1", port: int = 8765,
                point_table=None, connection: dict | None = None,
-               history_db=None) -> None:
+               history_db=None, app_config=None) -> None:
     """启动 Web 服务（阻塞）.
 
     Args:
@@ -692,10 +692,14 @@ def run_server(role: str, host: str = "127.0.0.1", port: int = 8765,
         history_db: 可选的 ``HistoryDB``（已 open）；提供时 Web 模式会把
             收发报文落盘（见 ``EngineBridge._on_raw_frame``）。None 则不记录，
             与改动前行为一致。
+        app_config: CLI / ``--config`` 解析出的 ``AppConfig``（D3 接线）；
+            提供 TLS、冗余等配置经 EngineBridge → EngineSession 生效。
+            None 时使用默认配置（与改动前行为一致）。
     """
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     try:
         asyncio.run(_run(role, host, port, point_table=point_table,
-                         connection=connection, history_db=history_db))
+                         connection=connection, history_db=history_db,
+                         app_config=app_config))
     except KeyboardInterrupt:
         pass

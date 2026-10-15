@@ -21,10 +21,13 @@ class EngineBridge:
     """在独立 asyncio 循环上运行主站或子站引擎，并向 UI 推送事件."""
 
     def __init__(self, role: str = "master", point_table: PointTable | None = None,
-                 connection: dict | None = None, history_db=None):
+                 connection: dict | None = None, history_db=None,
+                 app_config: AppConfig | None = None):
         assert role in ("master", "slave")
         self.role = role
-        self.config = AppConfig()
+        # D3 接线：CLI/`--config` 解析出的 AppConfig 经 app.py → run_server 传入。
+        # 未传入（既有测试/契约自检路径）时保持原有行为：新建默认配置。
+        self.config = app_config if app_config is not None else AppConfig()
         self.config.mode = role
         # 历史库（T17 决策 1）：Web 模式下把收发报文落盘。
         # 为 None 时不记录，行为与改动前一致。

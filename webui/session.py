@@ -271,10 +271,19 @@ class EngineSession:
                            tls: Any = None) -> dict:
         if self.engine:
             return {"ok": False, "error": "already running"}
+        # TLS 来源优先级（D3 修复）：HTTP body 显式传入 > 会话配置
+        # （CLI --tls* / --config 经 app.py 传入的 config.tls）。
+        # body 未带 tls 时回落 config.tls，使 CLI 入口声明的 TLS 真实生效；
+        # body 显式传入时仍以 body 为准（既有路径行为不变）。
+        effective_tls = tls if tls is not None else self.config.tls
         try:
-            ssl_context, server_hostname = prepare_tls(tls, "master")
+            ssl_context, server_hostname = prepare_tls(effective_tls, "master")
         except TlsConfigError as e:
             return {"ok": False, "error": f"TLS 配置无效: {e}"}
+        if ssl_context is not None:
+            logger.info("TLS enabled (master, verify=%s, source=%s)",
+                        getattr(effective_tls, "verify", True),
+                        "request body" if tls is not None else "CLI/config")
         eng = MasterEngine(
             host=host, port=port, common_addr=addr,
             auto_start=True, auto_gi=False, reconnect=reconnect,
@@ -309,10 +318,17 @@ class EngineSession:
                           tls: Any = None) -> dict:
         if self.engine:
             return {"ok": False, "error": "already running"}
+        # TLS 来源优先级（D3 修复）：HTTP body 显式传入 > 会话配置
+        # （CLI --tls* / --config 经 app.py 传入的 config.tls）。
+        effective_tls = tls if tls is not None else self.config.tls
         try:
-            ssl_context, _ = prepare_tls(tls, "slave")
+            ssl_context, _ = prepare_tls(effective_tls, "slave")
         except TlsConfigError as e:
             return {"ok": False, "error": f"TLS 配置无效: {e}"}
+        if ssl_context is not None:
+            logger.info("TLS enabled (slave, verify_client=%s, source=%s)",
+                        getattr(effective_tls, "verify_client", False),
+                        "request body" if tls is not None else "CLI/config")
         eng = SlaveEngine(
             host=host, port=port, common_addr=addr,
             point_table=points.table, spontaneous_enabled=spontaneous,
