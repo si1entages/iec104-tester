@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import ssl
 from collections import deque
 from collections.abc import Callable
 from typing import Any
@@ -86,6 +87,8 @@ class MasterEngine(EngineBase):
         reconnect_interval: float = 5.0,
         history_db: HistoryDB | None = None,
         point_table: PointTable | None = None,
+        ssl_context: ssl.SSLContext | None = None,
+        server_hostname: str | None = None,
     ):
         super().__init__()
 
@@ -143,7 +146,7 @@ class MasterEngine(EngineBase):
         # 报文录制器
         self._recorder = None
 
-        # TCP 客户端
+        # TCP 客户端（ssl_context 非空时启用 TLS / IEC 62351 传输加密）
         self._client = TCPClient(
             host=host,
             port=port,
@@ -152,6 +155,8 @@ class MasterEngine(EngineBase):
             on_frame=self._on_frame_received,
             on_connected=self._on_tcp_connected,
             on_disconnected=self._on_tcp_disconnected,
+            ssl_context=ssl_context,
+            server_hostname=server_hostname,
         )
 
         # 回调
@@ -245,6 +250,16 @@ class MasterEngine(EngineBase):
     def set_packet_recorder(self, recorder) -> None:
         """设置报文录制器."""
         self._recorder = recorder
+
+    def set_ssl_context(self, ssl_context: ssl.SSLContext | None,
+                        server_hostname: str | None = None) -> None:
+        """注入/清除 TLS 上下文（须在 ``start()`` 之前调用；None 表示明文）.
+
+        推荐在构造时直接传 ``ssl_context`` / ``server_hostname`` 参数；
+        本方法供兼容入口 ``configure_engine_tls`` 使用，内部走同一条
+        ``TCPClient.set_ssl_context`` 路径，行为与构造参数完全一致。
+        """
+        self._client.set_ssl_context(ssl_context, server_hostname)
 
     # ── 生命周期 ──────────────────────────────────────────────────
 

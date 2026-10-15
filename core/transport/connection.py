@@ -672,12 +672,12 @@ def build_context_from_config(tls_cfg, role: str) -> ssl.SSLContext:
 
 
 def configure_engine_tls(engine, role: str, tls_cfg) -> bool:
-    """把 TLS 注入引擎内部的传输对象；返回是否已启用.
+    """把 TLS 注入引擎（兼容入口）；返回是否已启用.
 
-    ⚠ 已知接缝：``MasterEngine`` / ``SlaveEngine`` 在构造时**自行**创建
-    ``TCPClient`` / ``TCPServer``，且其源码不在 T20 可改范围，故这里按私有
-    属性（``_client`` / ``_server``）注入上下文。若将来把 ``ssl`` 参数贯穿到
-    引擎构造函数，本函数可整体删除。**必须在引擎 ``start()`` 之前调用。**
+    推荐做法：在构造 ``MasterEngine`` / ``SlaveEngine`` 时直接传
+    ``ssl_context``（主站另可传 ``server_hostname``）参数。本函数保留给
+    已持有引擎实例的旧调用方，内部经引擎公开方法 ``engine.set_ssl_context``
+    走与构造参数完全相同的传输层注入路径。**必须在引擎 ``start()`` 之前调用。**
 
     Args:
         engine: ``MasterEngine`` 或 ``SlaveEngine`` 实例。
@@ -688,22 +688,22 @@ def configure_engine_tls(engine, role: str, tls_cfg) -> bool:
         True 表示已注入；``tls_cfg.enabled`` 为 False 时返回 False（不注入）。
 
     Raises:
-        TlsConfigError: 上下文构造失败，或引擎未暴露预期的传输对象。
+        TlsConfigError: 上下文构造失败，或引擎未暴露 ``set_ssl_context`` 公开方法。
     """
     if not getattr(tls_cfg, "enabled", False):
         return False
 
     ctx = build_context_from_config(tls_cfg, role)
+    setter = getattr(engine, "set_ssl_context", None)
+    if not callable(setter):
+        raise TlsConfigError(
+            f"{type(engine).__name__} 未暴露 set_ssl_context 公开方法；"
+            "请在构造 MasterEngine / SlaveEngine 时传入 ssl_context 参数"
+        )
     if role == "slave":
-        transport = getattr(engine, "_server", None)
-        if transport is None or not hasattr(transport, "set_ssl_context"):
-            raise TlsConfigError("SlaveEngine 未暴露可注入 TLS 的 TCPServer")
-        transport.set_ssl_context(ctx)
+        setter(ctx)
         logger.info("TLS enabled on slave (server side)")
     else:
-        transport = getattr(engine, "_client", None)
-        if transport is None or not hasattr(transport, "set_ssl_context"):
-            raise TlsConfigError("MasterEngine 未暴露可注入 TLS 的 TCPClient")
-        transport.set_ssl_context(ctx, getattr(tls_cfg, "server_hostname", "") or None)
+        setter(ctx, getattr(tls_cfg, "server_hostname", "") or None)
         logger.info("TLS enabled on master (client side)")
     return True

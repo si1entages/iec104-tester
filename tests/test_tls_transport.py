@@ -345,10 +345,17 @@ class TestConfigIntegration:
 
         class _FakeEngine:
             def __init__(self, role):
+                self.role = role
                 if role == "slave":
                     self._server = TCPServer()
                 else:
                     self._client = TCPClient()
+
+            def set_ssl_context(self, ctx, server_hostname=None):
+                if self.role == "slave":
+                    self._server.set_ssl_context(ctx)
+                else:
+                    self._client.set_ssl_context(ctx, server_hostname)
 
         client_eng = _FakeEngine("master")
         assert configure_engine_tls(
@@ -453,8 +460,67 @@ class TestConfigFileAndCli:
 # ── 真引擎端到端：自签证书下主子站握手 + 总召唤 ───────────────────
 
 class TestEngineEndToEndTls:
-    """用真实 MasterEngine / SlaveEngine 验证 configure_engine_tls 的接线，
-    而不是只测传输层——这是 T20 的核心验收。"""
+    """用真实 MasterEngine / SlaveEngine 验证 TLS 接线（构造参数正解路径 +
+    ``configure_engine_tls`` 兼容入口），而不是只测传输层——这是 T20 的核心验收。"""
+
+    def test_engine_constructors_accept_ssl_context(self):
+        """构造参数贯穿：ssl_context 传入引擎构造函数即生效，默认为明文."""
+        from core.engine.master import MasterEngine
+        from core.engine.slave import SlaveEngine
+
+        master = MasterEngine(ssl_context=build_client_context(verify=False),
+                              server_hostname="localhost")
+        assert master._client.tls_enabled is True
+        assert MasterEngine()._client.tls_enabled is False
+
+        slave = SlaveEngine(ssl_context=build_server_context(
+            certfile=SERVER_CRT, keyfile=SERVER_KEY))
+        assert slave._server.tls_enabled is True
+        assert SlaveEngine()._server.tls_enabled is False
+
+    @pytest.mark.asyncio
+    async def test_engine_ssl_context_via_constructor_handshake_and_gi(self):
+        """构造参数路径 E2E：自签证书下主子站握手 + 总召唤成功."""
+        from core.engine.master import MasterEngine
+        from core.engine.slave import SlaveEngine, SlaveEvent
+
+        port = _free_port()
+        points = _demo_point_table()
+
+        slave = SlaveEngine(host="127.0.0.1", port=port, common_addr=1,
+                            point_table=points,
+                            ssl_context=build_server_context(
+                                certfile=SERVER_CRT, keyfile=SERVER_KEY))
+        slave.data_store.init_from_point_table(points)
+
+        master = MasterEngine(host="127.0.0.1", port=port, common_addr=1,
+                              auto_start=True, auto_gi=False, reconnect=False,
+                              ssl_context=build_client_context(cafile=CA1, verify=True),
+                              server_hostname="localhost")
+
+        slave_events: list = []
+        slave.set_event_callback(lambda e, d: slave_events.append(e))
+
+        await slave.start()
+        try:
+            await master.start()
+            try:
+                assert await _wait_until(lambda: master.is_running, timeout=10.0), \
+                    f"TLS 下未进入 Running: state={master.state}"
+                assert await _wait_until(lambda: slave.client_count > 0, timeout=5.0)
+
+                await master.general_interrogation()
+                stats_ok = await _wait_until(
+                    lambda: (master.data_store.stats.get("yx_count", 0) > 0
+                             or master.data_store.stats.get("yc_count", 0) > 0),
+                    timeout=10.0,
+                )
+                assert stats_ok, f"TLS 下总召唤无数据: {master.data_store.stats}"
+                assert SlaveEvent.GI_RECEIVED in slave_events
+            finally:
+                await asyncio.wait_for(master.stop(), timeout=5.0)
+        finally:
+            await asyncio.wait_for(slave.stop(), timeout=5.0)
 
     @pytest.mark.asyncio
     async def test_self_signed_engines_handshake_and_gi(self):

@@ -208,6 +208,21 @@ class MultiStationManager:
             logger.info(f"Generated demo points for {config.station_id}: "
                        f"YX={config.yx_count}, YC={config.yc_count}")
 
+        # TLS（T20）：dict 形态先归一化为 TlsConfig，再在构造期把 SSLContext
+        # 传给引擎（构造参数是唯一注入路径）；无效配置降级为明文并记错误
+        ssl_context = None
+        tls_cfg = _coerce_tls_config(config.tls)
+        if tls_cfg is not None and tls_cfg.enabled:
+            from ..transport.connection import TlsConfigError, build_context_from_config
+
+            try:
+                ssl_context = build_context_from_config(tls_cfg, "slave")
+                logger.info(f"TLS enabled for station {config.station_id}")
+            except TlsConfigError as e:
+                logger.error(
+                    f"Station {config.station_id} TLS 配置无效，已回退为明文: {e}"
+                )
+
         # 创建引擎
         engine = SlaveEngine(
             host=config.host,
@@ -222,25 +237,13 @@ class MultiStationManager:
             t1=config.timers.t1,
             t2=config.timers.t2,
             t3=config.timers.t3,
+            ssl_context=ssl_context,
         )
 
         # 设置事件回调
         engine.set_event_callback(
             lambda event, data, sid=config.station_id: self._on_station_event(sid, event, data)
         )
-
-        # TLS（T20）：dict 形态先归一化为 TlsConfig；无效配置降级为明文并记错误
-        tls_cfg = _coerce_tls_config(config.tls)
-        if tls_cfg is not None and tls_cfg.enabled:
-            from ..transport.connection import TlsConfigError, configure_engine_tls
-
-            try:
-                configure_engine_tls(engine, "slave", tls_cfg)
-                logger.info(f"TLS enabled for station {config.station_id}")
-            except TlsConfigError as e:
-                logger.error(
-                    f"Station {config.station_id} TLS 配置无效，已回退为明文: {e}"
-                )
 
         # 启动引擎
         await engine.start()
