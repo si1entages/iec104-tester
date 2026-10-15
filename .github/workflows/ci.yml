@@ -7,10 +7,10 @@ on:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - name: Install ruff
@@ -19,14 +19,14 @@ jobs:
         run: ruff check .
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
@@ -41,13 +41,13 @@ jobs:
         run: pytest tests/ -q --cov=core --cov-report=term-missing --cov-fail-under=88 --basetemp=.pytest-tmp
 
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: webui/frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: "npm"
@@ -59,7 +59,7 @@ jobs:
       - name: Unit tests
         run: npm test
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: webui-spa
           path: webui/static/app
@@ -73,17 +73,17 @@ jobs:
   # - 串行（workers=1，配置内定）：主/子站引擎共用 IEC 2404，不可并行；
   # - 失败时上传 Playwright 产物（trace/报告输出目录）辅助排查。
   frontend-e2e:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - name: Create backend venv (e2e webServer 启动 app.py 所需)
         run: |
           python -m venv venv
           venv/bin/pip install -r requirements.txt
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: "npm"
@@ -108,7 +108,7 @@ jobs:
             webui/frontend/node_modules/.bin/playwright test --config tests/e2e/playwright.config.ts
       - name: Upload e2e artifacts on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-artifacts
           path: tests/e2e/.playwright-artifacts/
