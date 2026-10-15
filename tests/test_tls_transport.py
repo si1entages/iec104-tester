@@ -427,25 +427,35 @@ class TestConfigFileAndCli:
             assert load_config(root / "configs" / name).tls.enabled is False
 
     def test_cli_flags_apply(self, tmp_path, monkeypatch):
-        """--tls / --tls-cert / --tls-* → config.tls（不真起引擎）."""
+        """--tls / --tls-cert / --tls-* → config.tls（不真起引擎）.
+
+        D3 后 CLI Web 模式在启动前即校验 TLS 配置（坏路径拒绝启动），
+        故本测试改用真实存在的测试证书以通过启动前校验。
+        """
         import app as app_module
 
+        certs = Path(__file__).parent / "certs"
         captured = {}
 
         def _fake_run_web(role, http_port=None, open_browser=True,
-                          point_table=None, connection=None, history_db=None):
+                          point_table=None, connection=None, history_db=None,
+                          **kwargs):
             captured["role"] = role
+            captured["engine_config"] = kwargs.get("engine_config")
 
         monkeypatch.setattr(app_module, "run_web", _fake_run_web)
         monkeypatch.setattr(
             sys, "argv",
             ["app.py", "--mode", "master", "--no-history", "--no-browser",
-             "--tls", "--no-verify", "--tls-cert", "c.pem",
-             "--tls-key", "c.key", "--tls-ca", "ca.pem",
+             "--tls", "--no-verify", "--tls-cert", str(certs / "server.pem"),
+             "--tls-key", str(certs / "server.key"),
+             "--tls-ca", str(certs / "ca1.pem"),
              "--tls-hostname", "iec104.local"],
         )
         assert app_module.cli() == 0
         assert captured["role"] == "master"
+        # D3 接线：解析结果随 engine_config 完整传入 Web 层
+        assert captured["engine_config"].tls.enabled is True
 
         # 直接验证参数解析到 config 的映射（等价于上面 monkeypatch 的路径）
         from core.config import AppConfig
