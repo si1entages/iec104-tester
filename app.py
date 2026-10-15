@@ -352,7 +352,14 @@ def cli(default_role: str | None = None) -> int:
         # 无GUI模式
         if args.no_gui:
             logger.info("Running in CLI mode (no GUI)")
-            _run_cli(config, point_table, history_db, logger)
+            from core.transport.connection import TlsConfigError
+
+            try:
+                _run_cli(config, point_table, history_db, logger)
+            except TlsConfigError as e:
+                # TLS 失败策略与 Web 单站/多站一致（T20 统一）：拒绝明文降级
+                logger.error(f"TLS 配置无效，拒绝启动（不降级明文）: {e}")
+                return 2
             return 0
 
         # Web UI 模式（主站/子站）—— role 已在上方历史库接线处解析
@@ -420,23 +427,23 @@ def _run_tests(script_path: str, logger) -> int:
 
 
 def _enable_tls(engine, role: str, config, logger) -> None:
-    """按配置为引擎注入 TLS 上下文（T20）；未启用或失败时保持明文.
+    """按配置为引擎注入 TLS 上下文（T20）；未启用时不做任何事.
 
-    TLS 失败（证书缺失/路径错误）降级为 ERROR 日志并继续明文启动——
-    避免因为一个配置笔误导致整个连接彻底不可用，同时错误必须显式可见。
+    TLS 配置无效（证书/密钥/CA 路径不存在、格式错误等）→ 直接抛
+    ``TlsConfigError``，由 CLI 启动流程捕获并**以非零退出码终止**——
+    与 Web 单站 ``ok=false``、多站「该站不启动」的失败策略完全一致
+    （T20 统一）：**绝不静默降级为明文**，否则用户以为在测 TLS 实际是
+    明文，测试结论不可信。
     """
     if not config.tls.enabled:
         return
-    from core.transport.connection import TlsConfigError, configure_engine_tls
+    from core.transport.connection import configure_engine_tls
 
-    try:
-        configure_engine_tls(engine, role, config.tls)
-        logger.info(
-            f"TLS enabled ({role}, verify={config.tls.verify}, "
-            f"verify_client={config.tls.verify_client})"
-        )
-    except TlsConfigError as e:
-        logger.error(f"TLS 配置无效，已回退为明文传输: {e}")
+    configure_engine_tls(engine, role, config.tls)
+    logger.info(
+        f"TLS enabled ({role}, verify={config.tls.verify}, "
+        f"verify_client={config.tls.verify_client})"
+    )
 
 
 def _run_cli(config, point_table, history_db, logger):

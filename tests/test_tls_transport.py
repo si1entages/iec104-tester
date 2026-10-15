@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import socket
 import ssl
 import sys
@@ -455,6 +456,85 @@ class TestConfigFileAndCli:
         cfg.tls.cafile = "ca.pem"
         cfg.tls.server_hostname = "iec104.local"
         assert cfg.tls.verify is False
+
+    def _app_cfg(self, **tls_fields):
+        """构造 ``AppConfig``（``_enable_tls`` 接收的是 AppConfig 而非 TlsConfig）."""
+        from core.config import AppConfig
+
+        cfg = AppConfig()
+        for k, v in tls_fields.items():
+            setattr(cfg.tls, k, v)
+        return cfg
+
+    def test_enable_tls_disabled_is_noop(self):
+        """未启用 TLS → 完全不触碰引擎（CLI 不带 --tls 行为不变）."""
+        import app as app_module
+
+        class _Eng:
+            def __init__(self):
+                self.called = False
+
+            def set_ssl_context(self, ctx, server_hostname=None):
+                self.called = True
+
+        eng = _Eng()
+        app_module._enable_tls(eng, "master", self._app_cfg(),
+                               logging.getLogger("t"))
+        assert eng.called is False
+
+    def test_enable_tls_valid_injects(self):
+        """有效证书 → 注入成功."""
+        import app as app_module
+
+        class _Eng:
+            def __init__(self):
+                self.ctx = None
+
+            def set_ssl_context(self, ctx, server_hostname=None):
+                self.ctx = ctx
+
+        eng = _Eng()
+        app_module._enable_tls(eng, "slave",
+                               self._app_cfg(enabled=True, certfile=SERVER_CRT,
+                                             keyfile=SERVER_KEY),
+                               logging.getLogger("t"))
+        assert eng.ctx is not None
+
+    def test_enable_tls_invalid_config_raises_no_plaintext_fallback(self):
+        """红线：CLI 侧 TLS 配置无效 → 抛 TlsConfigError，绝不降级明文."""
+        import app as app_module
+
+        class _Eng:
+            def __init__(self):
+                self.ctx = None
+
+            def set_ssl_context(self, ctx, server_hostname=None):
+                self.ctx = ctx
+
+        eng = _Eng()
+        with pytest.raises(TlsConfigError, match="不存在"):
+            app_module._enable_tls(eng, "slave",
+                                   self._app_cfg(enabled=True, certfile="nope.pem",
+                                                 keyfile="nope.key"),
+                                   logging.getLogger("t"))
+        assert eng.ctx is None  # 未注入任何上下文（无明文替身）
+
+    def test_cli_invalid_tls_exits_nonzero_with_reason(self, monkeypatch, caplog):
+        """CLI + 无效 TLS → 退出码 2 且错误信息含具体原因（不降级明文）.
+
+        _enable_tls 在 engine.start() 之前抛出，因此本用例不产生真实网络行为。
+        """
+        import app as app_module
+
+        monkeypatch.setattr(sys, "argv", [
+            "app.py", "--mode", "slave", "--no-gui", "--no-history",
+            "--tls", "--tls-cert", "nope.pem", "--tls-key", "nope.key",
+        ])
+        with caplog.at_level(logging.ERROR, logger="iec104"):
+            rc = app_module.cli()
+        assert rc == 2, "CLI 无效 TLS 必须非零退出"
+        assert "拒绝启动" in caplog.text
+        assert "不存在" in caplog.text or "nope.pem" in caplog.text
 
 
 # ── 真引擎端到端：自签证书下主子站握手 + 总召唤 ───────────────────
