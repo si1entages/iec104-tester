@@ -34,9 +34,9 @@ tests/
 python -m pytest tests/ -q --cov=core --cov-report=term-missing
 ```
 
-- **当前实测覆盖率：90%**（`core/` 共 8726 条语句，未覆盖 859 条）。
-- **CI 门禁**：`--cov-fail-under=88`（略低于实测值，避免跨 Python 版本/环境的正常抖动导致误红）。
-- **提升目标：已达 85%**（当前 90%）。单模块仍未满 85% 者（均为非核心链路，主要由端到端脚本覆盖）：
+- **当前实测覆盖率：90%**（`core/` 未覆盖约 900 条语句；语句总数随并行开发小幅漂移，此处只锚定百分比）。
+- **CI 门禁**：`--cov-fail-under=88`（低于实测约 2 个点，避免跨 Python 版本/环境的正常抖动导致误红）。
+- **提升目标：已达 85%**（当前 90%）。单模块仍偏低者（均为非核心链路，主要由端到端脚本覆盖，数字为测量时点值）：
   `core/engine/scheduler.py` 55%、`core/engine/slave_session.py` 69%、
   `core/engine/master_protocol.py` 75%、`core/engine/master_session.py` 75%、
   `core/engine/slave_sim.py` 75%、`core/engine/multi_station.py` 82%、
