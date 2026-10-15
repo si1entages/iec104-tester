@@ -239,7 +239,7 @@ def format_value_display(type_id: TypeID, value: Any) -> str:
     elif isinstance(value, AckFileSection):
         return f"文件={value.file_name} 节={value.section_name} 限定词={value.qualifier_str}"
     elif isinstance(value, FileSegment):
-        return f"文件={value.file_name} 节={value.section_name} 段={value.segment_number} 数据长度={len(value.data)}"
+        return f"文件={value.file_name} 节={value.section_name} 数据长度={len(value.data)}"
     elif isinstance(value, DirectoryEntry):
         return f"文件={value.file_name} 长度={value.file_length} 状态={value.status} 时间={value.time_tag.to_datetime_str()}"
     elif isinstance(value, FileSelectCallGet):

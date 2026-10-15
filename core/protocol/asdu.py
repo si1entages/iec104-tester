@@ -422,16 +422,17 @@ class ASDU:
             TypeID.P_AC_NA_1: (1, lambda d: ParameterActivation.from_bytes(d)),
 
             # ── 文件传输 ──
-            TypeID.F_FR_NA_1: (7, lambda d: FileReady.from_bytes(d)),
-            TypeID.F_SR_NA_1: (8, lambda d: SectionReady.from_bytes(d)),
+            # 信息体长度（不含 IOA）：LOF 为 24 位 → F_FR=6、F_SR=7、F_DR=13
+            TypeID.F_FR_NA_1: (6, lambda d: FileReady.from_bytes(d)),
+            TypeID.F_SR_NA_1: (7, lambda d: SectionReady.from_bytes(d)),
             TypeID.F_SC_NA_1: (4, lambda d: CallDirectory.from_bytes(d)),
             TypeID.F_LS_NA_1: (5, lambda d: LastSection.from_bytes(d)),
             TypeID.F_AF_NA_1: (4, lambda d: AckFileSection.from_bytes(d)),
             TypeID.F_SG_NA_1: (-1, lambda d: FileSegment.from_bytes(d)),  # 可变长度
-            TypeID.F_DR_TA_1: (14, lambda d: DirectoryEntry.from_bytes(d)),
+            TypeID.F_DR_TA_1: (13, lambda d: DirectoryEntry.from_bytes(d)),
             TypeID.F_SC_NB_1: (4, lambda d: FileSelectCallGet.from_bytes(d)),
-            TypeID.F_FR_NB_1: (7, lambda d: FileReadyAck.from_bytes(d)),
-            TypeID.F_SR_NB_1: (8, lambda d: SectionReadyAck.from_bytes(d)),
+            TypeID.F_FR_NB_1: (6, lambda d: FileReadyAck.from_bytes(d)),
+            TypeID.F_SR_NB_1: (7, lambda d: SectionReadyAck.from_bytes(d)),
         }
         cls._TIMED_TYPES = {
             TypeID.M_SP_TA_1, TypeID.M_SP_TB_1,
@@ -1452,12 +1453,14 @@ class ASDUBuilder:
                           file_length: int, status: int = 0) -> bytes:
         """构造文件准备就绪 (F_FR_NA_1).
 
+        信息体 = NOF(2) + LOF(3) + FRQ(1) = 6 字节（LOF 为 24 位）。
+
         Args:
             common_addr: 公共地址
             ioa: 信息对象地址
-            file_name: 文件名 (16-bit)
-            file_length: 文件长度 (32-bit)
-            status: 状态 (0=缺省, 1=请求/读, 2=停止, 3=删除, 4=选择)
+            file_name: 文件名 (16-bit, NOF)
+            file_length: 文件长度 (24-bit, 3 字节, LOF)
+            status: FRQ 文件准备就绪限定词 (0=肯定, 0x80=否定)
         """
         asdu = ASDU(type_id=TypeID.F_FR_NA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
         fr = FileReady(ioa=ioa, file_name=file_name, file_length=file_length, status=status)
@@ -1469,13 +1472,15 @@ class ASDUBuilder:
                              section_name: int, section_length: int, status: int = 0) -> bytes:
         """构造节准备就绪 (F_SR_NA_1).
 
+        信息体 = NOF(2) + NOS(1) + LOF(3) + SRQ(1) = 7 字节（LOF 为 24 位）。
+
         Args:
             common_addr: 公共地址
             ioa: 信息对象地址
-            file_name: 文件名 (16-bit)
-            section_name: 节名 (8-bit)
-            section_length: 节长度 (32-bit)
-            status: 状态
+            file_name: 文件名 (16-bit, NOF)
+            section_name: 节名 (8-bit, NOS)
+            section_length: 节长度 (24-bit, 3 字节, LOF)
+            status: SRQ 节准备就绪限定词
         """
         asdu = ASDU(type_id=TypeID.F_SR_NA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
         sr = SectionReady(ioa=ioa, file_name=file_name, section_name=section_name,
@@ -1488,11 +1493,13 @@ class ASDUBuilder:
                               section_name: int = 0, qualifier: int = 5) -> bytes:
         """构造召唤目录/选择文件/召唤文件 (F_SC_NA_1).
 
+        信息体 = NOF(2) + NOS(1) + SCQ(1)。
+
         Args:
             common_addr: 公共地址
             ioa: 信息对象地址
-            file_name: 文件名 (16-bit)
-            section_name: 节名 (8-bit)
+            file_name: 文件名 (16-bit, NOF)
+            section_name: 节名 (8-bit, NOS)
             qualifier: 0=缺省, 1=选择文件, 2=请求文件, 3=停止, 4=删除, 5=目录
         """
         asdu = ASDU(type_id=TypeID.F_SC_NA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
@@ -1538,20 +1545,20 @@ class ASDUBuilder:
 
     @staticmethod
     def build_file_segment(common_addr: int, ioa: int, file_name: int,
-                            section_name: int, segment_number: int, data: bytes) -> bytes:
+                            section_name: int, data: bytes) -> bytes:
         """构造段 (F_SG_NA_1).
+
+        信息体 = NOF(2) + NOS(1) + LOS(1) + 数据；**没有段号字段**。
 
         Args:
             common_addr: 公共地址
             ioa: 信息对象地址
-            file_name: 文件名 (16-bit)
-            section_name: 节名 (8-bit)
-            segment_number: 段号 (8-bit)
-            data: 段数据 (最大233字节)
+            file_name: 文件名 (16-bit, NOF)
+            section_name: 节名 (8-bit, NOS)
+            data: 段数据 (LOS = 本段字节数，1 字节 → 最多 255 字节)
         """
         asdu = ASDU(type_id=TypeID.F_SG_NA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
-        sg = FileSegment(ioa=ioa, file_name=file_name, section_name=section_name,
-                         segment_number=segment_number, data=data)
+        sg = FileSegment(ioa=ioa, file_name=file_name, section_name=section_name, data=data)
         asdu.objects.append(InformationObject(ioa=ioa, data=sg))
         return asdu.encode()
 
@@ -1561,12 +1568,14 @@ class ASDUBuilder:
                                time_tag: CP56Time2a | None = None) -> bytes:
         """构造目录 (F_DR_TA_1).
 
+        信息体 = NOF(2) + LOF(3) + SOF(1) + CP56Time2a(7) = 13 字节（LOF 为 24 位）。
+
         Args:
             common_addr: 公共地址
             ioa: 信息对象地址
-            file_name: 文件名 (16-bit)
-            file_length: 文件长度 (32-bit)
-            status: 文件状态
+            file_name: 文件名 (16-bit, NOF)
+            file_length: 文件长度 (24-bit, 3 字节, LOF)
+            status: SOF 文件状态
             time_tag: 时标
         """
         asdu = ASDU(type_id=TypeID.F_DR_TA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
@@ -1582,11 +1591,13 @@ class ASDUBuilder:
                                     section_name: int = 0, qualifier: int = 0) -> bytes:
         """构造文件选择/召唤/获取 (F_SC_NB_1).
 
+        信息体 = NOF(2) + NOS(1) + SCQ(1)。
+
         Args:
             common_addr: 公共地址
             ioa: 信息对象地址
-            file_name: 文件名 (16-bit)
-            section_name: 节名 (8-bit)
+            file_name: 文件名 (16-bit, NOF)
+            section_name: 节名 (8-bit, NOS)
             qualifier: 0=缺省, 1=请求读, 2=停止, 3=删除, 4=选择, 5=请求目录
         """
         asdu = ASDU(type_id=TypeID.F_SC_NB_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
@@ -1599,12 +1610,14 @@ class ASDUBuilder:
                               file_length: int, status: int = 0) -> bytes:
         """构造文件准备就绪-确认 (F_FR_NB_1).
 
+        信息体 = NOF(2) + LOF(3) + FRQ(1)（LOF 为 24 位）。
+
         Args:
             common_addr: 公共地址
             ioa: 信息对象地址
-            file_name: 文件名 (16-bit)
-            file_length: 文件长度 (32-bit)
-            status: 状态
+            file_name: 文件名 (16-bit, NOF)
+            file_length: 文件长度 (24-bit, 3 字节, LOF)
+            status: FRQ
         """
         asdu = ASDU(type_id=TypeID.F_FR_NB_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
         fra = FileReadyAck(ioa=ioa, file_name=file_name, file_length=file_length, status=status)
@@ -1616,13 +1629,15 @@ class ASDUBuilder:
                                  section_name: int, section_length: int, status: int = 0) -> bytes:
         """构造节准备就绪-确认 (F_SR_NB_1).
 
+        信息体 = NOF(2) + NOS(1) + LOF(3) + SRQ(1)（LOF 为 24 位）。
+
         Args:
             common_addr: 公共地址
             ioa: 信息对象地址
-            file_name: 文件名 (16-bit)
-            section_name: 节名 (8-bit)
-            section_length: 节长度 (32-bit)
-            status: 状态
+            file_name: 文件名 (16-bit, NOF)
+            section_name: 节名 (8-bit, NOS)
+            section_length: 节长度 (24-bit, 3 字节, LOF)
+            status: SRQ
         """
         asdu = ASDU(type_id=TypeID.F_SR_NB_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
         sra = SectionReadyAck(ioa=ioa, file_name=file_name, section_name=section_name,

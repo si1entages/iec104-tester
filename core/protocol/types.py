@@ -1142,28 +1142,51 @@ class ParameterCommandNormalizedNoQuality:
 
 # ═══════════════════════════════════════════════════════════════════
 #  File Transfer Objects (文件传输)
+#
+#  信息体（不含 IOA）字段布局依据（见 docs/file_transfer_fls.md §2.2，多个互相
+#  独立的字节级参考实现 + 厂商公开手册共同印证）：
+#    F_FR_NA_1  = NOF(2,LE) + LOF(3,LE) + FRQ(1)
+#    F_SR_NA_1  = NOF(2) + NOS(1) + LOF(3) + SRQ(1)
+#    F_SC_NA_1  = NOF(2) + NOS(1) + SCQ(1)
+#    F_LS_NA_1  = NOF(2) + NOS(1) + LSQ(1) + CHS(1)
+#    F_AF_NA_1  = NOF(2) + NOS(1) + AFQ(1)
+#    F_SG_NA_1  = NOF(2) + NOS(1) + LOS(1) + 数据      （**无段号字段**）
+#    F_DR_TA_1  = NOF(2) + LOF(3) + SOF(1) + CP56Time2a(7)
+#  其中 **LOF（文件/节长度）为 24 位（3 字节）**；`FileSegment` 的 LOS 亦为 1 字节。
 # ═══════════════════════════════════════════════════════════════════
+
+def _encode_u24le(value: int) -> bytes:
+    """24 位无符号整数 → 3 字节小端（LOF 为 24 位）."""
+    return bytes([value & 0xFF, (value >> 8) & 0xFF, (value >> 16) & 0xFF])
+
+
+def _decode_u24le(data: bytes, offset: int) -> int:
+    """3 字节小端 → 24 位无符号整数（LOF 为 24 位）."""
+    return data[offset] | (data[offset + 1] << 8) | (data[offset + 2] << 16)
+
 
 @dataclass
 class FileReady:
-    """文件准备就绪 (F_FR_NA_1 = 120)."""
+    """文件准备就绪 (F_FR_NA_1 = 120).
+
+    信息体 = ``NOF(2) + LOF(3) + FRQ(1)`` = 6 字节。``status`` 即 FRQ
+    （0=肯定，最高位 0x80=否定）。
+    """
     ioa: int = 0
-    file_name: int = 0       # 文件名 (16-bit)
-    file_length: int = 0     # 文件长度 (32-bit)
-    status: int = 0          # 0=缺省, 1=请求/读, 2=停止, 3=删除, 4=选择
+    file_name: int = 0       # NOF: 文件名 (16-bit)
+    file_length: int = 0     # LOF: 文件长度 (24-bit, 3 字节)
+    status: int = 0          # FRQ: 文件准备就绪限定词
 
     @classmethod
     def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> FileReady:
-        import struct
         fn = data[offset] | (data[offset + 1] << 8)
-        fl = struct.unpack_from('<I', data, offset + 2)[0]
-        st = data[offset + 6]
+        fl = _decode_u24le(data, offset + 2)
+        st = data[offset + 5]
         return cls(ioa=ioa, file_name=fn, file_length=fl, status=st)
 
     def to_bytes(self) -> bytes:
-        import struct
         return (bytes([self.file_name & 0xFF, (self.file_name >> 8) & 0xFF])
-                + struct.pack('<I', self.file_length)
+                + _encode_u24le(self.file_length)
                 + bytes([self.status]))
 
     @property
@@ -1173,32 +1196,37 @@ class FileReady:
 
 @dataclass
 class SectionReady:
-    """节准备就绪 (F_SR_NA_1 = 121)."""
+    """节准备就绪 (F_SR_NA_1 = 121).
+
+    信息体 = ``NOF(2) + NOS(1) + LOF(3) + SRQ(1)`` = 7 字节。``status`` 即 SRQ
+    （0=肯定，最高位 0x80=否定）。
+    """
     ioa: int = 0
     file_name: int = 0
-    section_name: int = 0    # 节名 (8-bit)
-    section_length: int = 0  # 节长度 (32-bit)
-    status: int = 0
+    section_name: int = 0    # NOS: 节名 (8-bit)
+    section_length: int = 0  # LOF: 节长度 (24-bit, 3 字节)
+    status: int = 0          # SRQ: 节准备就绪限定词
 
     @classmethod
     def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> SectionReady:
-        import struct
         fn = data[offset] | (data[offset + 1] << 8)
         sn = data[offset + 2]
-        sl = struct.unpack_from('<I', data, offset + 3)[0]
-        st = data[offset + 7]
+        sl = _decode_u24le(data, offset + 3)
+        st = data[offset + 6]
         return cls(ioa=ioa, file_name=fn, section_name=sn, section_length=sl, status=st)
 
     def to_bytes(self) -> bytes:
-        import struct
         return (bytes([self.file_name & 0xFF, (self.file_name >> 8) & 0xFF, self.section_name])
-                + struct.pack('<I', self.section_length)
+                + _encode_u24le(self.section_length)
                 + bytes([self.status]))
 
 
 @dataclass
 class CallDirectory:
-    """召唤目录/选择文件/召唤文件 (F_SC_NA_1 = 122)."""
+    """召唤目录/选择文件/召唤文件 (F_SC_NA_1 = 122).
+
+    信息体 = ``NOF(2) + NOS(1) + SCQ(1)``。
+    """
     ioa: int = 0
     file_name: int = 0       # 文件名 (16-bit)
     section_name: int = 0    # 节名 (8-bit)
@@ -1270,57 +1298,63 @@ class AckFileSection:
 
 @dataclass
 class FileSegment:
-    """段 (F_SG_NA_1 = 125)."""
+    """段 (F_SG_NA_1 = 125).
+
+    信息体 = ``NOF(2) + NOS(1) + LOS(1) + 数据``，**没有段号字段**（标准即如此，
+    见 docs/file_transfer_fls.md §5.2）；``LOS`` = 本段数据长度 (1 字节)。
+    """
     ioa: int = 0
     file_name: int = 0
     section_name: int = 0
-    segment_number: int = 0  # 段号 (8-bit)
-    data: bytes = b''        # 段数据 (可变长度, 最多233字节)
+    data: bytes = b''        # 段数据 (可变长度；受 LOS 1 字节限制，最多 255 字节)
 
     @classmethod
     def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0, length: int = 0) -> FileSegment:
         fn = data[offset] | (data[offset + 1] << 8)
         sn = data[offset + 2]
-        seg_num = data[offset + 3]
-        seg_len = data[offset + 4]
-        seg_data = data[offset + 5:offset + 5 + seg_len]
-        return cls(ioa=ioa, file_name=fn, section_name=sn, segment_number=seg_num, data=seg_data)
+        los = data[offset + 3]
+        seg_data = data[offset + 4:offset + 4 + los]
+        return cls(ioa=ioa, file_name=fn, section_name=sn, data=seg_data)
 
     def to_bytes(self) -> bytes:
         return (bytes([self.file_name & 0xFF, (self.file_name >> 8) & 0xFF,
-                       self.section_name, self.segment_number, len(self.data)])
+                       self.section_name, len(self.data) & 0xFF])
                 + self.data)
 
 
 @dataclass
 class DirectoryEntry:
-    """目录 (F_DR_TA_1 = 126) — 带时标CP56Time2a."""
+    """目录 (F_DR_TA_1 = 126) — 带时标CP56Time2a.
+
+    信息体 = ``NOF(2) + LOF(3) + SOF(1) + CP56Time2a(7)`` = 13 字节。
+    """
     ioa: int = 0
     file_name: int = 0
-    file_length: int = 0     # 32-bit
-    status: int = 0          # 文件状态
+    file_length: int = 0     # LOF: 文件长度 (24-bit, 3 字节)
+    status: int = 0          # SOF: 文件状态
     time_tag: CP56Time2a = field(default_factory=CP56Time2a)
 
     @classmethod
     def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> DirectoryEntry:
-        import struct
         fn = data[offset] | (data[offset + 1] << 8)
-        fl = struct.unpack_from('<I', data, offset + 2)[0]
-        st = data[offset + 6]
-        tt = CP56Time2a.from_bytes(data, offset + 7) if len(data) >= offset + 14 else CP56Time2a()
+        fl = _decode_u24le(data, offset + 2)
+        st = data[offset + 5]
+        tt = CP56Time2a.from_bytes(data, offset + 6) if len(data) >= offset + 13 else CP56Time2a()
         return cls(ioa=ioa, file_name=fn, file_length=fl, status=st, time_tag=tt)
 
     def to_bytes(self) -> bytes:
-        import struct
         return (bytes([self.file_name & 0xFF, (self.file_name >> 8) & 0xFF])
-                + struct.pack('<I', self.file_length)
+                + _encode_u24le(self.file_length)
                 + bytes([self.status])
                 + self.time_tag.to_bytes())
 
 
 @dataclass
 class FileSelectCallGet:
-    """文件选择/召唤/获取 (F_SC_NB_1 = 127)."""
+    """文件选择/召唤/获取 (F_SC_NB_1 = 127).
+
+    信息体 = ``NOF(2) + NOS(1) + SCQ(1)``。
+    """
     ioa: int = 0
     file_name: int = 0
     section_name: int = 0
@@ -1343,49 +1377,51 @@ class FileSelectCallGet:
 
 @dataclass
 class FileReadyAck:
-    """文件准备就绪-确认 (F_FR_NB_1 = 128) — IEC 60870-5-101."""
+    """文件准备就绪-确认 (F_FR_NB_1 = 128) — IEC 60870-5-101.
+
+    信息体 = ``NOF(2) + LOF(3) + FRQ(1)``，LOF 为 24 位。
+    """
     ioa: int = 0
     file_name: int = 0
-    file_length: int = 0
-    status: int = 0
+    file_length: int = 0     # LOF: 24-bit
+    status: int = 0          # FRQ
 
     @classmethod
     def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> FileReadyAck:
-        import struct
         fn = data[offset] | (data[offset + 1] << 8)
-        fl = struct.unpack_from('<I', data, offset + 2)[0]
-        st = data[offset + 6]
+        fl = _decode_u24le(data, offset + 2)
+        st = data[offset + 5]
         return cls(ioa=ioa, file_name=fn, file_length=fl, status=st)
 
     def to_bytes(self) -> bytes:
-        import struct
         return (bytes([self.file_name & 0xFF, (self.file_name >> 8) & 0xFF])
-                + struct.pack('<I', self.file_length)
+                + _encode_u24le(self.file_length)
                 + bytes([self.status]))
 
 
 @dataclass
 class SectionReadyAck:
-    """节准备就绪-确认 (F_SR_NB_1 = 129) — IEC 60870-5-101."""
+    """节准备就绪-确认 (F_SR_NB_1 = 129) — IEC 60870-5-101.
+
+    信息体 = ``NOF(2) + NOS(1) + LOF(3) + SRQ(1)``，LOF 为 24 位。
+    """
     ioa: int = 0
     file_name: int = 0
-    section_name: int = 0
-    section_length: int = 0
-    status: int = 0
+    section_name: int = 0    # NOS
+    section_length: int = 0  # LOF: 24-bit
+    status: int = 0          # SRQ
 
     @classmethod
     def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> SectionReadyAck:
-        import struct
         fn = data[offset] | (data[offset + 1] << 8)
         sn = data[offset + 2]
-        sl = struct.unpack_from('<I', data, offset + 3)[0]
-        st = data[offset + 7]
+        sl = _decode_u24le(data, offset + 3)
+        st = data[offset + 6]
         return cls(ioa=ioa, file_name=fn, section_name=sn, section_length=sl, status=st)
 
     def to_bytes(self) -> bytes:
-        import struct
         return (bytes([self.file_name & 0xFF, (self.file_name >> 8) & 0xFF, self.section_name])
-                + struct.pack('<I', self.section_length)
+                + _encode_u24le(self.section_length)
                 + bytes([self.status]))
 
 

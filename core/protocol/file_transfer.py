@@ -80,7 +80,7 @@ class FileTransferContext:
     file_length: int = 0
     section_name: int = 0
     section_length: int = 0
-    segment_number: int = 0
+    segment_number: int = 0  # 已收/已发的段计数（F_SG 无段号字段，仅作计数）
     #: 最近一次 F_LS_NA_1 的 LSQ 值（0-4，见模块顶部 ``LSQ_*`` 常量）。
     #: 注意：标准中 F_LS_NA_1 的信息体为 ``NOF|NOS|LSQ|CHS``，**没有**"段号"字段。
     lsq: int = 0
@@ -163,8 +163,9 @@ class FileTransferManager:
 
     def handle_file_segment(self, data: FileSegment) -> None:
         """处理段 (F_SG_NA_1)."""
-        logger.debug(f"File Segment: name={data.file_name} section={data.section_name} seg={data.segment_number} len={len(data.data)}")
-        self._context.segment_number = data.segment_number
+        # F_SG_NA_1 信息体 = NOF(2)+NOS(1)+LOS(1)+数据，无段号字段 → 只做段计数
+        logger.debug(f"File Segment: name={data.file_name} section={data.section_name} len={len(data.data)}")
+        self._context.segment_number += 1
         self._context.data.extend(data.data)
         self._context.state = FileTransferState.TRANSFERRING
 
@@ -389,7 +390,7 @@ class FileTransferSlave(FileTransferManager):
 
             asdu_data = ASDUBuilder.build_file_segment(
                 self._common_addr, ioa, self._context.file_name,
-                self._context.section_name, segment_count, chunk
+                self._context.section_name, chunk
             )
             if self._on_send_asdu:
                 self._on_send_asdu(asdu_data)

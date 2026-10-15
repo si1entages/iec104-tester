@@ -198,11 +198,11 @@ def test_file_transfer_types():
     assert af2.qualifier == 1
     assert af2.qualifier_str == "肯定文件"
 
-    # 段
-    sg = FileSegment(ioa=0, file_name=1, section_name=1, segment_number=1, data=b'\x01\x02\x03')
+    # 段（F_SG_NA_1 信息体 = NOF(2)+NOS(1)+LOS(1)+数据，无段号字段）
+    sg = FileSegment(ioa=0, file_name=1, section_name=1, data=b'\x01\x02\x03')
     data = sg.to_bytes()
+    assert data == bytes([1, 0, 1, 3]) + b'\x01\x02\x03'   # LOS=3 在第 4 字节
     sg2 = FileSegment.from_bytes(data, ioa=0)
-    assert sg2.segment_number == 1
     assert sg2.data == b'\x01\x02\x03'
 
     print("  ✅ FileTransfer tests passed")

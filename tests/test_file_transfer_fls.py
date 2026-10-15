@@ -53,8 +53,7 @@ def _last_section(lsq: int, chs: int = 0) -> LastSection:
 
 
 def _segment(data: bytes) -> FileSegment:
-    return FileSegment(ioa=IOA, file_name=FILE_NAME, section_name=1,
-                       segment_number=1, data=data)
+    return FileSegment(ioa=IOA, file_name=FILE_NAME, section_name=1, data=data)
 
 
 def _receiver():
@@ -210,29 +209,27 @@ def test_directory_terminator_uses_lsq_not_used():
 
 # ── ③ 缺陷钉桩：当前与标准不符，修复后需同步改断言 ────────────────
 
-def test_fr_sr_io_body_is_octet_too_long_currently_known_defect():
-    """**已知缺陷（待修）**：F_FR/F_SR 信息体比标准各多 1 字节.
+def test_fr_sr_io_body_length_matches_standard():
+    """F_FR/F_SR 信息体长度与标准一致：LOF 为 24 位（3 字节）→ F_FR=6、F_SR=7.
 
     标准（lib60870 ``FileObjects.cs``）：F_FR = ``NOF(2)+LOF(3)+FRQ(1)`` = **6** 字节、
-    F_SR = ``NOF(2)+NOS(1)+LOF(3)+SRQ(1)`` = **7** 字节；**LOF 是 24 位**。
-    本实现把 LOF 当 32 位 → F_FR=7、F_SR=8。
-    修复点：``core/protocol/types.py`` + ``core/protocol/asdu.py``（不在 T24 授权落点）。
+    F_SR = ``NOF(2)+NOS(1)+LOF(3)+SRQ(1)`` = **7** 字节。
+    （原缺陷钉桩：本实现曾把 LOF 当 32 位 → F_FR=7、F_SR=8，已修。）
     """
-    assert len(ASDUBuilder.build_file_ready(1, IOA, FILE_NAME, 1024, 0)) - IO_BODY_OFFSET == 7
-    assert len(ASDUBuilder.build_section_ready(1, IOA, FILE_NAME, 1, 1024, 0)) - IO_BODY_OFFSET == 8
+    assert len(ASDUBuilder.build_file_ready(1, IOA, FILE_NAME, 1024, 0)) - IO_BODY_OFFSET == 6
+    assert len(ASDUBuilder.build_section_ready(1, IOA, FILE_NAME, 1, 1024, 0)) - IO_BODY_OFFSET == 7
 
 
-def test_sg_io_body_has_extra_segment_number_octet_currently_known_defect():
-    """**已知缺陷（待修）**：F_SG 信息体多出"段号"字节.
+def test_sg_io_body_matches_standard_layout():
+    """F_SG 信息体 = ``NOF(2)+NOS(1)+LOS(1)+数据``，无段号字段，LOS=本段长度.
 
     标准：F_SG = ``NOF(2)+NOS(1)+LOS(1)+数据``，**没有段号字段**（LOS 即本段长度）。
-    本实现额外插入 1 个"段号"字节，使信息体比标准多 1 字节。
-    修复点：``core/protocol/types.py`` + ``core/protocol/asdu.py``（不在 T24 授权落点）。
+    （原缺陷钉桩：本实现曾在第 4 字节插入"段号"，使信息体比标准多 1 字节，已修。）
     """
-    body = ASDUBuilder.build_file_segment(1, IOA, FILE_NAME, 1, 1, b"AB")[IO_BODY_OFFSET:]
+    body = ASDUBuilder.build_file_segment(1, IOA, FILE_NAME, 1, b"AB")[IO_BODY_OFFSET:]
 
-    assert body == bytes([FILE_NAME, 0, 1, 1, 2]) + b"AB"   # 标准应为 [5,0,1,2]+b"AB"
-    assert len(body) == 5 + len(b"AB")                      # 标准为 4 + len(data)
+    assert body == bytes([FILE_NAME, 0, 1, 2]) + b"AB"      # 标准布局：LOS=2 在第 4 字节
+    assert len(body) == 4 + len(b"AB")
 
 
 def test_last_section_field_names_disagree_with_standard_currently_known_defect():

@@ -221,4 +221,4 @@ def section_ready():
 @pytest.fixture
 def file_segment():
     """段 fixture."""
-    return FileSegment(ioa=0, file_name=1, section_name=1, segment_number=1, data=b'\x01\x02\x03')
+    return FileSegment(ioa=0, file_name=1, section_name=1, data=b'\x01\x02\x03')
