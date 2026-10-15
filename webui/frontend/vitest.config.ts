@@ -17,6 +17,10 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
     css: false,
+    // antd 重型组件（Card/Table/InputNumber/Collapse）在 jsdom 下渲染与
+    // 可访问名计算都明显更慢，默认 5s 对集成型用例过紧。
+    testTimeout: 20000,
+    hookTimeout: 20000,
     // 默认的 `forks` 池会把每个转换后的模块**落盘**到
     // `os.tmpdir()/<nanoid>/<web|ssr>/<sha1>`（见 vitest 内部
     // `createMethodsRPC(..., { cacheFs: true })`），而该临时目录不可配置

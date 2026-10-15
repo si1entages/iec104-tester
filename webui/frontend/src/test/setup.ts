@@ -1,5 +1,17 @@
 import '@testing-library/jest-dom/vitest'
 
+import { focusManager } from '@tanstack/react-query'
+
+/**
+ * 测试环境把窗口标记为「失焦」。
+ *
+ * React Query 的 `refetchIntervalInBackground` 默认为 false —— 窗口失焦时
+ * 会**暂停轮询**。jsdom 默认 `visibilityState === 'visible'`，于是
+ * 2~10s 的轮询会在测试里继续跑，既拖慢用例，又让状态更新落在 act() 之外
+ * 刷出一堆 act 警告。显式失焦即可让轮询停摆，用例只依赖初始查询。
+ */
+focusManager.setFocused(false)
+
 /**
  * antd v5 的响应式组件依赖 `matchMedia` / `ResizeObserver`，jsdom 未实现；
  * 这里补最小桩，避免组件测试因环境缺失而失败。
