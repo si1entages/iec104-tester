@@ -69,6 +69,8 @@ export function CommandPanel({ point, disabled = false }: Props) {
   const [ykState, setYkState] = useState<0 | 1>(1)
   const [ykDouble, setYkDouble] = useState(false)
   const [ykWithTime, setYkWithTime] = useState(false)
+  /** YK SBO 选择后的「已选择未执行」状态：此时可撤销（deactivate） */
+  const [ykSelected, setYkSelected] = useState(false)
 
   const [spKind, setSpKind] = useState<SetpointKind>('short_float')
   const [spValue, setSpValue] = useState<number>(0)
@@ -94,6 +96,11 @@ export function CommandPanel({ point, disabled = false }: Props) {
   useEffect(() => {
     if (point) setIoa(point.ioa)
   }, [point?.ioa, point?.type])
+
+  // 目标 IOA 变化 → 旧 IOA 上的 SBO 选择不再适用，撤销入口复位
+  useEffect(() => {
+    setYkSelected(false)
+  }, [ioa])
 
   const yk = useCommand(api.master.yk)
   const setpoint = useCommand(api.master.setpoint)
@@ -143,6 +150,7 @@ export function CommandPanel({ point, disabled = false }: Props) {
       with_time: ykWithTime,
     })
     if (!selected.ok) return run('YK 选择(SBO)', Promise.resolve(selected))
+    setYkSelected(true)
     const executed = await yk.mutateAsync({
       ioa,
       state: ykState,
@@ -150,7 +158,41 @@ export function CommandPanel({ point, disabled = false }: Props) {
       double: ykDouble,
       with_time: ykWithTime,
     })
+    if (executed.ok) setYkSelected(false)
     return run('YK 两段式(选择+执行)', Promise.resolve(executed))
+  }
+
+  /** SBO 选择成功 → 记录「已选择未执行」，解锁撤销按钮 */
+  const ykSelectSbo = (): void => {
+    void run(
+      'YK 选择(SBO)',
+      yk
+        .mutateAsync({ ioa, state: ykState, select: true, double: ykDouble, with_time: ykWithTime })
+        .then((r) => {
+          if (r.ok) setYkSelected(true)
+          return r
+        }),
+    )
+  }
+
+  /** 撤销 SBO 选择：发送 DEACT（COT=8），select 位与被撤销的选择帧一致 */
+  const ykDeactivate = (): void => {
+    void run(
+      'YK 撤销',
+      yk
+        .mutateAsync({
+          ioa,
+          state: ykState,
+          select: true,
+          double: ykDouble,
+          with_time: ykWithTime,
+          deactivate: true,
+        })
+        .then((r) => {
+          if (r.ok) setYkSelected(false)
+          return r
+        }),
+    )
   }
 
   const items = [
@@ -182,13 +224,23 @@ export function CommandPanel({ point, disabled = false }: Props) {
             />
             <Button
               disabled={noRun || noIoa || busy}
-              onClick={() => void run('YK 选择(SBO)', yk.mutateAsync({ ioa, state: ykState, select: true, double: ykDouble, with_time: ykWithTime }))}
+              onClick={ykSelectSbo}
             >
               选择 (SBO)
             </Button>
             <Button
               disabled={noRun || noIoa || busy}
-              onClick={() => void run('YK 执行', yk.mutateAsync({ ioa, state: ykState, select: false, double: ykDouble, with_time: ykWithTime }))}
+              onClick={() =>
+                void run(
+                  'YK 执行',
+                  yk
+                    .mutateAsync({ ioa, state: ykState, select: false, double: ykDouble, with_time: ykWithTime })
+                    .then((r) => {
+                      if (r.ok) setYkSelected(false)
+                      return r
+                    }),
+                )
+              }
             >
               执行
             </Button>
@@ -201,14 +253,32 @@ export function CommandPanel({ point, disabled = false }: Props) {
             </Button>
             <Button
               disabled={noRun || noIoa || busy}
-              onClick={() => void run('YK 单帧直发', yk.mutateAsync({ ioa, state: ykState, select: false, double: ykDouble, with_time: ykWithTime }))}
+              onClick={() =>
+                void run(
+                  'YK 单帧直发',
+                  yk
+                    .mutateAsync({ ioa, state: ykState, select: false, double: ykDouble, with_time: ykWithTime })
+                    .then((r) => {
+                      if (r.ok) setYkSelected(false)
+                      return r
+                    }),
+                )
+              }
             >
               单帧直发
+            </Button>
+            <Button
+              danger
+              disabled={noRun || noIoa || busy || !ykSelected}
+              onClick={ykDeactivate}
+            >
+              撤销选择
             </Button>
           </Space>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             两段式 = 选择(select=true) + 执行(select=false)；单帧直发只发执行帧，
-            若该点声明 SBO，由后端自动补选择。
+            若该点声明 SBO，由后端自动补选择。选择成功后可用「撤销选择」
+            发送 DEACT(COT=8) 停止激活。
           </Typography.Text>
         </Space>
       ),

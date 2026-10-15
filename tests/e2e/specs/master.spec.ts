@@ -86,6 +86,37 @@ test('选中行 → 命令面板下发（请求体断言）', async ({ page }) =
   expect(typeof body.state).toBe('number')
 })
 
+test('选中行 → SBO 选择 → 撤销选择（deactivate 请求体断言）', async ({ page }) => {
+  await gotoApp(page, MASTER, '主站工作台')
+  await page.getByPlaceholder('按名称 / IOA 过滤').fill('YK_SBO_TRUE')
+  const ykRow = page.locator(ROW).filter({ hasText: 'YK_SBO_TRUE' }).first()
+  await expect(ykRow).toBeVisible()
+  await ykRow.click()
+  await expect(page.getByText('已选 YK-201').first()).toBeVisible()
+  const posts = capturePosts(page)
+
+  // 未选择前「撤销选择」禁用
+  const undoBtn = page.getByRole('button', { name: /撤\s*销\s*选\s*择/ })
+  await expect(undoBtn).toBeDisabled()
+
+  // 选择（SBO）→ 第一帧 select=true 且无 deactivate；成功后撤销解锁
+  await page.getByRole('button', { name: /选\s*择\s*\(SBO\)/ }).click()
+  await expect
+    .poll(() => posts.filter((p) => p.path === '/api/master/yk'), { timeout: 10_000 })
+    .toHaveLength(1)
+  expect(posts[0].body!.select).toBe(true)
+  expect(posts[0].body!.deactivate).toBeFalsy()
+  await expect(undoBtn).toBeEnabled({ timeout: 10_000 })
+
+  // 撤销选择 → 第二帧 select=true（与选择帧一致）+ deactivate=true；成功后复位禁用
+  await undoBtn.click()
+  await expect
+    .poll(() => posts.filter((p) => p.path === '/api/master/yk'), { timeout: 10_000 })
+    .toHaveLength(2)
+  expect(posts[1].body!).toMatchObject({ ioa: 201, select: true, deactivate: true })
+  await expect(undoBtn).toBeDisabled({ timeout: 10_000 })
+})
+
 test('红线：双击点表行不产生任何 /api/master/* POST', async ({ page }) => {
   await gotoApp(page, MASTER, '主站工作台')
   await page.getByPlaceholder('按名称 / IOA 过滤').fill('YK_SBO_TRUE')

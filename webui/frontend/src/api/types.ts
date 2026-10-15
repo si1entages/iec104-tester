@@ -158,6 +158,8 @@ export interface YkRequest {
   double?: boolean
   /** true → C_SC_TA_1 / C_DC_TA_1（带时标） */
   with_time?: boolean
+  /** true → COT=8 DEACT 撤销帧（D1）；撤销 SBO 选择时与 select=true 同发 */
+  deactivate?: boolean
 }
 
 export type SetpointKind = 'short_float' | 'normalized' | 'scaled'
