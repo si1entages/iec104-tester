@@ -24,7 +24,6 @@ flow_control:
 master:
   auto_start: true       # 连接后自动 STARTDT
   auto_gi: true          # STARTDT 后自动总召唤
-  auto_clock_sync: false # 连接后自动时钟同步
 
 slave:
   spontaneous_enabled: true   # 变化数据自动上送

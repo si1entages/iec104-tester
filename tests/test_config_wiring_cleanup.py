@@ -158,3 +158,37 @@ def test_web_start_slave_spontaneous_explicit_overrides(monkeypatch):
     asyncio.run(s.start_slave("0.0.0.0", 24043, 1, _Points(), spontaneous=True))
 
     assert capture["kwargs"]["spontaneous_enabled"] is True
+
+
+# ── auto_clock_sync 死字段移除：旧配置文件兼容 ────────────────────
+
+
+def test_legacy_config_with_auto_clock_sync_still_loads(tmp_path):
+    """含已移除的 master.auto_clock_sync 键的旧配置文件仍能正常加载.
+
+    load_config 对未知键用 .get 模式逐项读取 → 多余键被忽略，不报错、
+    不影响其它字段；MasterConfig 亦不再有该属性（死字段已删）。
+    """
+    from core.config import load_config
+
+    legacy = tmp_path / "legacy_config.yaml"
+    legacy.write_text(
+        "mode: master\n"
+        "connection:\n"
+        "  host: 10.0.0.5\n"
+        "  port: 25000\n"
+        "master:\n"
+        "  auto_start: true\n"
+        "  auto_gi: false\n"
+        "  auto_clock_sync: true\n",   # 旧字段：必须被忽略而非报错
+        encoding="utf-8",
+    )
+
+    cfg = load_config(legacy)
+
+    assert cfg.mode == "master"
+    assert cfg.connection.host == "10.0.0.5"
+    assert cfg.connection.port == 25000
+    assert cfg.master.auto_start is True
+    assert cfg.master.auto_gi is False
+    assert not hasattr(cfg.master, "auto_clock_sync")

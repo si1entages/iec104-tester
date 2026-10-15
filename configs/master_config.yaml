@@ -21,7 +21,6 @@ flow_control:
 master:
   auto_start: true
   auto_gi: true
-  auto_clock_sync: false
 
 display:
   theme: dark

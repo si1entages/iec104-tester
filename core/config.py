@@ -36,7 +36,9 @@ class ConnectionConfig:
 class MasterConfig:
     auto_start: bool = True
     auto_gi: bool = True
-    auto_clock_sync: bool = False
+    # 注：历史上的 auto_clock_sync 字段已移除——引擎无「建链后自动时钟同步」
+    # 能力（时钟同步仅有手动 API），该字段为死配置。含该键的旧配置文件
+    # 仍能正常加载（未知键被 load_config 忽略）。
 
 
 @dataclass
@@ -182,7 +184,6 @@ class AppConfig:
             'master': {
                 'auto_start': self.master.auto_start,
                 'auto_gi': self.master.auto_gi,
-                'auto_clock_sync': self.master.auto_clock_sync,
             },
             'slave': {
                 'spontaneous_enabled': self.slave.spontaneous_enabled,
@@ -270,7 +271,7 @@ def load_config(path: str | Path) -> AppConfig:
     master = data.get('master', {})
     cfg.master.auto_start = master.get('auto_start', cfg.master.auto_start)
     cfg.master.auto_gi = master.get('auto_gi', cfg.master.auto_gi)
-    cfg.master.auto_clock_sync = master.get('auto_clock_sync', cfg.master.auto_clock_sync)
+    # master.auto_clock_sync 已移除（死字段）：旧配置文件里的该键被忽略
 
     slave = data.get('slave', {})
     cfg.slave.spontaneous_enabled = slave.get('spontaneous_enabled', cfg.slave.spontaneous_enabled)
