@@ -116,6 +116,38 @@ def setup_logging(level: str = "INFO"):
     )
 
 
+def install_signal_handlers(
+    loop: asyncio.AbstractEventLoop, stop_event: asyncio.Event
+) -> str:
+    """注册 SIGINT/SIGTERM → 优雅停止，返回实际使用的机制（"loop" / "signal"）.
+
+    - Unix：``loop.add_signal_handler``（asyncio 原生途径）；
+    - Windows：ProactorEventLoop **未实现**该方法（``NotImplementedError``），
+      回退到 ``signal.signal`` + ``loop.call_soon_threadsafe``——Ctrl+C 触发
+      自定义处理器，线程安全地置位 ``stop_event``，语义与 Unix 一致
+      （优雅停止；再按一次 Ctrl+C 走 Python 默认 KeyboardInterrupt 强退）。
+    """
+    def request_stop():
+        logger.info("Received stop signal")
+        stop_event.set()
+
+    used = "loop"
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, request_stop)
+        except NotImplementedError:
+            used = "signal"
+
+            def _win_handler(signum, _frame, _loop=loop, _request=request_stop):
+                try:
+                    _loop.call_soon_threadsafe(_request)
+                except RuntimeError:  # 事件循环已关闭，静默退出
+                    pass
+
+            signal.signal(sig, _win_handler)
+    return used
+
+
 async def run_multi_station(config: MultiStationConfig):
     """运行多站模拟."""
     manager = MultiStationManager(config)
@@ -127,16 +159,11 @@ async def run_multi_station(config: MultiStationConfig):
 
     manager.set_event_callback(on_event)
 
-    # 处理信号
+    # 处理信号（跨平台：Unix 用 loop API，Windows 回退 signal.signal）
     loop = asyncio.get_event_loop()
     stop_event = asyncio.Event()
-
-    def signal_handler():
-        logger.info("Received stop signal")
-        stop_event.set()
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, signal_handler)
+    used = install_signal_handlers(loop, stop_event)
+    logger.info(f"Stop signal handler installed via: {used}")
 
     try:
         # 启动所有站

@@ -643,9 +643,10 @@ stations:
 
 ### 平台与打包
 
-- `run_multi_station.py` 在 **Windows 上不可用**（使用了 Unix-only 的
-  `loop.add_signal_handler`）；多站能力本身（`MultiStationManager`）与 Web 多站页
-  不受影响，可经 Python API 或 Web UI 使用；
+- ~~`run_multi_station.py` 在 Windows 上不可用~~ **已修复**：信号处理按平台守卫
+  （Windows 上 `add_signal_handler` 未实现 → 回退 `signal.signal` +
+  `call_soon_threadsafe`），Ctrl+C 优雅停止、退出码 0、端口正常回收，
+  Windows 实测通过；多站能力本身（`MultiStationManager`）与 Web 多站页不受影响；
 - 打包形态下历史库落在 `dist/<角色>/_internal/data/`（见 §2「打包产物」）；
 - CLI 工具（run_multi_station/capture_tool/sim_tool）不在打包产物内，需源码环境运行。
 
