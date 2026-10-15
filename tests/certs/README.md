@@ -1,7 +1,15 @@
-# TLS 测试证书（仅供测试，非机密）
+# TLS 测试证书（测试专用自签 · 非机密 · 禁用于生产）
 
-这些是本仓库 TLS 测试（`tests/test_tls_transport.py`）使用的**自签测试证书**。
-它们**不是密钥材料**，仅供单元测试握手使用；请勿用于任何真实部署。
+这些是本仓库 TLS 测试（`tests/test_tls_transport.py`）使用的**测试专用自签证书**。
+
+> **性质声明（逐条）**
+> 1. 本目录下所有 `.pem` / `.key` 均为**测试专用自签证书**及配套私钥。
+> 2. 它们**不是机密**（not confidential）：私钥仅用于本地单元测试握手，
+>    在仓库中公开并无泄露风险。
+> 3. **不得用于任何真实环境或生产环境**（DO NOT USE IN PRODUCTION）——
+>    任何人不得将它们部署到真实服务、真实客户端或任何非测试用途。
+> 4. 私钥文件顶部均带 `#` 注释行作醒目警示；OpenSSL 3.x 与 Python `ssl`
+>    均可正常读取带注释的 PEM（已实测）。
 
 有效期 100 年（至 2126 年），避免测试因证书过期而失效。
 
@@ -64,3 +72,15 @@ openssl verify -CAfile ca2.pem badserver.pem
 ```
 
 同样的步骤（含**生产用**证书的生成方式）见 `docs/tls.md`。
+
+> **重新生成后**：请在每个 `.key` 文件**首行**补回警示注释
+> `# TEST-ONLY self-signed key for unit tests. NOT A SECRET. DO NOT USE IN PRODUCTION.`
+> （OpenSSL 3.x 的 `pkey`/`load_cert_chain` 均接受 PEM 中的 `#` 注释行，不影响解析）。
+
+## CI / secret scanner 注意
+
+本目录的 `.key` 是**公开的测试私钥**，非机密。若后续 CI 引入 secret scanner
+（如 gitleaks / trufflehog / GitHub secret scanning），**必须在本目录的 scanner
+配置中豁免**（例如 gitleaks 的 `allowlist.paths` 加入 `tests/certs/`），否则会被
+误报为泄露。注意：豁免范围应**严格限定在本目录**，不要放宽到 `tests/**` 或全仓库。
+
