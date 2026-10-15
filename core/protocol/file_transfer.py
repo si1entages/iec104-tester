@@ -57,6 +57,18 @@ SCQ_DEACTIVATE_SECTION = 7  # 去激活节
 #: 本实现暂沿用 5 触发目录上送——该组合保持开放，未按标准推断。
 SCQ_REQUEST_DIRECTORY = 5
 
+#: F_LS_NA_1 的 CHS = 本节所有段数据的**算术和 mod 256**。
+#: 依据（两个互相独立的字节级实现一致）：lib60870-C ``file_server.c::calculateChecksum``
+#: （``checksum += data[i]``，uint8 溢出即 mod 256）与 go-iecp5 ``docs/filetransfer.md``
+#: （「该节所有段八位组的算术和 mod 256」）。**非标准原文**，故接收侧校验不通过时
+#: 仅记告警、不丢弃数据（见 ``FileTransferManager.handle_last_section``）。
+CHECKSUM_MODULUS = 256
+
+
+def section_checksum(data: bytes) -> int:
+    """计算一节（或整个单节文件）的 CHS：所有段数据八位组的算术和 mod 256."""
+    return sum(data) % CHECKSUM_MODULUS
+
 #: LSQ 值 → 名称（唯一出处 `core.protocol.types.LSQ_NAMES`，供日志复用）
 _LSQ_NAMES = LSQ_NAMES
 #: 表示**整个文件传输结束**的 LSQ（此时才可判定接收完成）
@@ -201,6 +213,18 @@ class FileTransferManager:
         )
         self._context.lsq = lsq
         self._context.state = FileTransferState.LAST_SECTION
+
+        # CHS 接收侧校验：算法为「该节所有段八位组的算术和 mod 256」（非标准原文，
+        # 见模块顶部说明与 docs/file_transfer_fls.md §4.1）。LSQ=0（目录结束标记）
+        # 与超出定义域的取值不校验。校验不通过 → **记告警，不丢弃**已收数据。
+        if lsq in LSQ_FILE_COMPLETE or lsq in LSQ_SECTION_COMPLETE:
+            expected = section_checksum(bytes(self._context.data))
+            if data.chs != expected:
+                logger.warning(
+                    f"F_LS_NA_1 CHS mismatch: received={data.chs:#04x} "
+                    f"calculated={expected:#04x} (checksum=sum(section octets) mod 256; "
+                    "warning only, data NOT dropped)"
+                )
 
         if lsq in LSQ_FILE_COMPLETE:
             self._context.state = FileTransferState.COMPLETED
@@ -450,15 +474,14 @@ class FileTransferSlave(FileTransferManager):
         由主站据此判定接收完成（见 ``FileTransferManager.handle_last_section``）。
 
         ``ASDUBuilder.build_last_section`` 的第 5/6 个位置参数分别是 LSQ 八位组与
-        CHS 八位组。**CHS（本节校验和）算法待核实**，暂发 0 且接收侧不校验
-        （见 docs/file_transfer_fls.md §4.1）。
+        CHS 八位组；CHS = 本节所有段数据的算术和 mod 256（见 ``section_checksum``）。
         """
         from .asdu import ASDUBuilder
         asdu_data = ASDUBuilder.build_last_section(
             self._common_addr, ioa, self._context.file_name,
             self._context.section_name,
-            LSQ_FILE_TRANSFER_WITHOUT_DEACT,  # LSQ 八位组
-            0,                                # CHS 八位组（算法待核实，暂发 0）
+            LSQ_FILE_TRANSFER_WITHOUT_DEACT,                  # LSQ 八位组
+            section_checksum(bytes(self._context.data)),      # CHS 八位组
         )
         if self._on_send_asdu:
             self._on_send_asdu(asdu_data)

@@ -176,8 +176,8 @@ def test_last_section_always_sends_file_transfer_lsq(size, expected_segments):
     assert len(body) == 5
     assert body[3] == LSQ_FILE_TRANSFER_WITHOUT_DEACT
     assert mgr.context.segment_number == expected_segments
-    # CHS 校验和算法待核实（见 docs/file_transfer_fls.md），当前发送占位 0
-    assert body[4] == 0
+    # CHS = 本节所有段八位组的算术和 mod 256（b"\x5a" * size）
+    assert body[4] == (0x5A * size) % 256
 
 
 def test_upload_roundtrip_completes_on_master_side():
@@ -343,3 +343,68 @@ def test_raw_wire_chs_never_flips_completion():
         mgr.handle_last_section(ASDU.decode(_raw_fls_frame(3, chs)).objects[0].data)
         assert mgr.state is FileTransferState.LAST_SECTION, f"CHS={chs} 误判为完成"
         assert received == []
+
+
+# ── ⑤ CHS 校验和：发送侧按算术和 mod 256 计算，接收侧校验不通过仅告警 ──
+
+def test_section_checksum_known_vectors():
+    """CHS 算法锚定：算术和 mod 256（溢出回绕、空节为 0）."""
+    from core.protocol.file_transfer import CHECKSUM_MODULUS, section_checksum
+
+    assert CHECKSUM_MODULUS == 256
+    assert section_checksum(b"") == 0
+    assert section_checksum(b"\x01\x02\x03") == 6
+    assert section_checksum(b"\xff\x02") == 0x01    # 0x101 → mod 256 回绕
+    assert section_checksum(b"\x5a" * 700) == (0x5A * 700) % 256
+
+
+def test_send_side_writes_computed_chs_octet():
+    """发送侧 F_LS 的第 5 字节 = 已发段数据的算术和 mod 256（不再是占位 0）."""
+    payload = bytes(range(50))                       # sum=1225 → 1225 % 256 = 201
+    mgr, sent = _slave_with_file(payload)
+
+    _upload_whole_file(mgr)
+
+    body = sent[-1][IO_BODY_OFFSET:]
+    assert body[3] == LSQ_FILE_TRANSFER_WITHOUT_DEACT
+    assert body[4] == 201
+    from core.protocol.file_transfer import section_checksum
+    assert body[4] == section_checksum(payload)
+
+
+def test_receive_side_chs_mismatch_warns_but_still_delivers(caplog):
+    """接收侧校验不通过 → 记告警，**不丢弃**数据、不阻止完成判定（非标准原文，见 docs §4.1）."""
+    mgr, received = _receiver()
+    mgr.handle_file_segment(_segment(b"AB"))         # 期望 CHS = 0x41+0x42 = 0x83
+
+    with caplog.at_level("WARNING", logger="iec104.file_transfer"):
+        mgr.handle_last_section(_last_section(lsq=1, chs=0x00))   # 错误校验和
+
+    assert mgr.state is FileTransferState.COMPLETED  # 完成判定只看 LSQ
+    assert received == [b"AB"]                       # 数据未丢弃
+    assert any("CHS mismatch" in r.getMessage() for r in caplog.records)
+
+
+def test_receive_side_chs_match_no_warning(caplog):
+    """接收侧校验通过 → 不产生 CHS 告警."""
+    mgr, received = _receiver()
+    mgr.handle_file_segment(_segment(b"AB"))
+
+    with caplog.at_level("WARNING", logger="iec104.file_transfer"):
+        mgr.handle_last_section(_last_section(lsq=1, chs=0x83))   # 正确校验和
+
+    assert mgr.state is FileTransferState.COMPLETED
+    assert received == [b"AB"]
+    assert not any("CHS mismatch" in r.getMessage() for r in caplog.records)
+
+
+def test_receive_side_lsq0_and_undefined_lsq_skip_chs_validation(caplog):
+    """LSQ=0（目录结束标记）与超定义域取值不做 CHS 校验."""
+    mgr, received = _receiver()
+
+    with caplog.at_level("WARNING", logger="iec104.file_transfer"):
+        mgr.handle_last_section(_last_section(lsq=0, chs=0xFF))   # 必然不匹配
+        mgr.handle_last_section(_last_section(lsq=9, chs=0xFF))
+
+    assert not any("CHS mismatch" in r.getMessage() for r in caplog.records)
+    assert received == []
