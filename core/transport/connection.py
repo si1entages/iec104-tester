@@ -5,15 +5,22 @@
 - TCP Client (主站)
 - 连接管理
 - 报文收发
+- TLS 传输层加密（IEC 62351 的传输层部分，见 §TLS）
+
+⚠ TLS 覆盖边界（诚实声明，详见 ``docs/tls.md``）:
+本模块**只实现 TLS 传输层加密**（SSLContext + 证书/密钥配置）。IEC 62351
+的其他部分（应用层认证、会话密钥协商、安全关联等）**未实现**。
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import ssl
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from ..protocol.constants import START_BYTE
 
@@ -240,6 +247,7 @@ class TCPServer:
         on_connection: Callable[[TCPConnection], None] | None = None,
         on_frame: Callable[[TCPConnection, bytes], None] | None = None,
         on_disconnected: Callable[[TCPConnection], None] | None = None,
+        ssl_context: ssl.SSLContext | None = None,
     ):
         self._host = host
         self._port = port
@@ -247,10 +255,19 @@ class TCPServer:
         self._on_connection = on_connection
         self._on_frame = on_frame
         self._on_disconnected = on_disconnected
+        self._ssl_context = ssl_context
 
         self._server: asyncio.Server | None = None
         self._connections: dict[str, TCPConnection] = {}
         self._running = False
+
+    def set_ssl_context(self, ssl_context: ssl.SSLContext | None) -> None:
+        """注入 TLS 上下文（须在 ``start()`` 之前调用；None 表示明文）."""
+        self._ssl_context = ssl_context
+
+    @property
+    def tls_enabled(self) -> bool:
+        return self._ssl_context is not None
 
     @property
     def is_running(self) -> bool:
@@ -265,17 +282,25 @@ class TCPServer:
         return dict(self._connections)
 
     async def start(self) -> None:
-        """启动服务端."""
+        """启动服务端（``set_ssl_context`` 注入时启用 TLS）."""
         if self._running:
             return
+
+        kwargs: dict = {}
+        if self._ssl_context is not None:
+            kwargs["ssl"] = self._ssl_context
 
         self._server = await asyncio.start_server(
             self._handle_client,
             self._host,
             self._port,
+            **kwargs,
         )
         self._running = True
-        logger.info(f"Server started on {self._host}:{self._port}")
+        logger.info(
+            f"Server started on {self._host}:{self._port}"
+            f"{' (TLS)' if self._ssl_context is not None else ''}"
+        )
 
     async def stop(self) -> None:
         """停止服务端."""
@@ -370,6 +395,8 @@ class TCPClient:
         on_frame: Callable[[bytes], None] | None = None,
         on_connected: Callable[[], None] | None = None,
         on_disconnected: Callable[[], None] | None = None,
+        ssl_context: ssl.SSLContext | None = None,
+        server_hostname: str | None = None,
     ):
         self._host = host
         self._port = port
@@ -378,11 +405,25 @@ class TCPClient:
         self._on_frame = on_frame
         self._on_connected = on_connected
         self._on_disconnected = on_disconnected
+        self._ssl_context = ssl_context
+        # TLS 主机名校验用名；None 时 asyncio 回落到 host。
+        # 按 IP 连接而证书只签了域名时，在此显式给出证书中的域名。
+        self._server_hostname = server_hostname or None
 
         self._connection: TCPConnection | None = None
         self._running = False
         self._reconnect_task: asyncio.Task | None = None
         self._reconnect_count = 0
+
+    def set_ssl_context(self, ssl_context: ssl.SSLContext | None,
+                        server_hostname: str | None = None) -> None:
+        """注入 TLS 上下文（须在 ``start()`` 之前调用；None 表示明文）."""
+        self._ssl_context = ssl_context
+        self._server_hostname = server_hostname or None
+
+    @property
+    def tls_enabled(self) -> bool:
+        return self._ssl_context is not None
 
     @property
     def is_connected(self) -> bool:
@@ -443,8 +484,14 @@ class TCPClient:
         while self._running:
             established = False
             try:
+                kwargs: dict = {}
+                if self._ssl_context is not None:
+                    kwargs["ssl"] = self._ssl_context
+                    if self._server_hostname:
+                        kwargs["server_hostname"] = self._server_hostname
+
                 reader, writer = await asyncio.open_connection(
-                    self._host, self._port
+                    self._host, self._port, **kwargs
                 )
 
                 def on_frame(frame: bytes):
@@ -469,7 +516,10 @@ class TCPClient:
                 if self._on_connected:
                     self._on_connected()
 
-                logger.info(f"Connected to {self._host}:{self._port}")
+                logger.info(
+                    f"Connected to {self._host}:{self._port}"
+                    f"{' (TLS)' if self._ssl_context is not None else ''}"
+                )
 
                 # 等待连接断开（stop() 取消本任务时同样在此抛 CancelledError）
                 while self._running and self._connection.is_connected:
@@ -506,3 +556,154 @@ class TCPClient:
                 f"(attempt {self._reconnect_count})..."
             )
             await asyncio.sleep(self._reconnect_interval)
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  TLS / IEC 62351 传输层加密
+# ═══════════════════════════════════════════════════════════════════
+#
+# 覆盖边界（**请勿宣传为"支持 IEC 62351"**）:
+#   已实现 —— TLS 1.2+ 传输层加密、服务端/客户端证书与私钥、受信 CA、
+#             客户端可选校验、双向认证（mTLS）。
+#   未实现 —— IEC 62351 的应用层认证（62351-4/-6）、会话密钥协商、
+#             安全关联与访问控制、证书吊销（CRL/OCSP）、重放防护等。
+# 详见 docs/tls.md §覆盖边界。
+
+
+class TlsConfigError(ValueError):
+    """TLS 配置错误（文件缺失、参数矛盾等）."""
+
+
+def _require_file(path: str, what: str) -> str:
+    """校验文件存在，返回其字符串路径."""
+    if not path:
+        raise TlsConfigError(f"{what} 未配置")
+    if not Path(path).is_file():
+        raise TlsConfigError(f"{what} 不存在: {path!r}")
+    return str(path)
+
+
+def build_server_context(
+    *, certfile: str, keyfile: str = "", cafile: str = "",
+    verify_client: bool = False,
+) -> ssl.SSLContext:
+    """构造服务端（子站）``SSLContext``.
+
+    Args:
+        certfile: 服务端证书（PEM）。
+        keyfile: 私钥（PEM）；为空时假定私钥与证书同文件。
+        cafile: 受信 CA（PEM）；``verify_client=True`` 时必填。
+        verify_client: 是否要求并校验客户端证书（双向认证 / mTLS）。
+
+    Returns:
+        配置好的 ``SSLContext``（最低 TLS 1.2）。
+
+    Raises:
+        TlsConfigError: 证书/密钥/CA 缺失或路径不存在。
+    """
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    ctx.load_cert_chain(
+        certfile=_require_file(certfile, "certfile"),
+        keyfile=keyfile or None,
+    )
+    if verify_client:
+        ctx.load_verify_locations(cafile=_require_file(cafile, "cafile"))
+        ctx.verify_mode = ssl.CERT_REQUIRED
+    else:
+        ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
+def build_client_context(
+    *, cafile: str = "", certfile: str = "", keyfile: str = "",
+    verify: bool = True,
+) -> ssl.SSLContext:
+    """构造客户端（主站）``SSLContext``.
+
+    Args:
+        cafile: 受信 CA；``verify=True`` 且为空时退回系统信任库。
+        certfile: 客户端证书（双向认证时提供）。
+        keyfile: 客户端私钥。
+        verify: 是否校验服务端证书；``False`` 时同时关闭主机名校验
+            （**仅供自签证书联调，生产禁用**）。
+
+    Returns:
+        配置好的 ``SSLContext``（最低 TLS 1.2）。
+
+    Raises:
+        TlsConfigError: 提供的证书/密钥/CA 路径不存在。
+    """
+    if verify:
+        ctx = ssl.create_default_context(
+            ssl.Purpose.SERVER_AUTH,
+            cafile=_require_file(cafile, "cafile") if cafile else None,
+        )
+    else:
+        # 注意顺序：必须先关 check_hostname 再置 CERT_NONE，否则 ValueError
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+
+    if certfile:
+        ctx.load_cert_chain(
+            certfile=_require_file(certfile, "certfile"),
+            keyfile=keyfile or None,
+        )
+    return ctx
+
+
+def build_context_from_config(tls_cfg, role: str) -> ssl.SSLContext:
+    """按 ``core.config.TlsConfig`` 与角色构造 ``SSLContext``."""
+    if role == "slave":
+        return build_server_context(
+            certfile=tls_cfg.certfile,
+            keyfile=tls_cfg.keyfile,
+            cafile=tls_cfg.cafile,
+            verify_client=tls_cfg.verify_client,
+        )
+    return build_client_context(
+        cafile=tls_cfg.cafile,
+        certfile=tls_cfg.certfile,
+        keyfile=tls_cfg.keyfile,
+        verify=tls_cfg.verify,
+    )
+
+
+def configure_engine_tls(engine, role: str, tls_cfg) -> bool:
+    """把 TLS 注入引擎内部的传输对象；返回是否已启用.
+
+    ⚠ 已知接缝：``MasterEngine`` / ``SlaveEngine`` 在构造时**自行**创建
+    ``TCPClient`` / ``TCPServer``，且其源码不在 T20 可改范围，故这里按私有
+    属性（``_client`` / ``_server``）注入上下文。若将来把 ``ssl`` 参数贯穿到
+    引擎构造函数，本函数可整体删除。**必须在引擎 ``start()`` 之前调用。**
+
+    Args:
+        engine: ``MasterEngine`` 或 ``SlaveEngine`` 实例。
+        role: "master" / "slave"。
+        tls_cfg: ``core.config.TlsConfig``。
+
+    Returns:
+        True 表示已注入；``tls_cfg.enabled`` 为 False 时返回 False（不注入）。
+
+    Raises:
+        TlsConfigError: 上下文构造失败，或引擎未暴露预期的传输对象。
+    """
+    if not getattr(tls_cfg, "enabled", False):
+        return False
+
+    ctx = build_context_from_config(tls_cfg, role)
+    if role == "slave":
+        transport = getattr(engine, "_server", None)
+        if transport is None or not hasattr(transport, "set_ssl_context"):
+            raise TlsConfigError("SlaveEngine 未暴露可注入 TLS 的 TCPServer")
+        transport.set_ssl_context(ctx)
+        logger.info("TLS enabled on slave (server side)")
+    else:
+        transport = getattr(engine, "_client", None)
+        if transport is None or not hasattr(transport, "set_ssl_context"):
+            raise TlsConfigError("MasterEngine 未暴露可注入 TLS 的 TCPClient")
+        transport.set_ssl_context(ctx, getattr(tls_cfg, "server_hostname", "") or None)
+        logger.info("TLS enabled on master (client side)")
+    return True

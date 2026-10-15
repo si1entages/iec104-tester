@@ -90,3 +90,44 @@ def close(self) -> None:
 - 传输层实现一律写在 `core/transport/connection.py`。
 - **不要**新增对 `client` / `server` shim 的 import（除非修改 shim 自身）。
 - 上层若需连接统计，使用 `ConnectionStats`（从 `connection` 导入）。
+
+## 5. TLS / IEC 62351 传输层加密（T20）
+
+### 5.1 接入方式
+
+`TCPClient` / `TCPServer` 各新增一个**可选** `ssl_context` 参数（默认 `None`
+= 明文，行为与改动前完全一致），并提供 `set_ssl_context()` 用于构造后注入、
+`tls_enabled` 只读属性用于观测：
+
+```python
+server = TCPServer(host, port, ssl_context=ctx)      # 构造时
+client = TCPClient(host, port)
+client.set_ssl_context(ctx, "iec104.local")          # 或构造后、start() 之前
+```
+
+- `TCPServer.start()` → `asyncio.start_server(..., ssl=ctx)`。
+- `TCPClient._connect_loop()` → `asyncio.open_connection(..., ssl=ctx,
+  server_hostname=...)`。注意 `ssl is None` 时**不得**传 `server_hostname`
+  （asyncio 会抛错），实现中已按此分支处理。
+- 上下文构造与配置映射集中在 `build_server_context()` /
+  `build_client_context()` / `build_context_from_config()` /
+  `configure_engine_tls()`，校验失败抛 `TlsConfigError`。
+
+### 5.2 关闭语义契约不变
+
+TLS **不改变** §2 的契约：`TCPConnection.close()` 依旧幂等非阻塞、读循环
+`finally` 依旧无条件调用 `close()`、`stop()` 的 `wait_closed` 依旧 1.0s 有界。
+SSL transport 的 `wait_closed()` 同样受该超时保护；`tests/test_tls_transport.py`
+中有专门用例断言 TLS 下 `close()` 可重复调用且 `stop()` 在 3s 内返回。
+
+### 5.3 已知接缝
+
+`MasterEngine` / `SlaveEngine` 自行创建传输对象，`configure_engine_tls()` 目前
+**按私有属性注入**（`engine._client` / `engine._server`）。这是为避免改动引擎
+源码而做的妥协，**属技术债**：正解是把 `ssl_context` 参数贯穿到引擎构造函数。
+详见 `docs/tls.md` §5。
+
+### 5.4 覆盖边界
+
+**只做 TLS 传输层加密**，IEC 62351 的应用层认证、安全关联、访问控制等
+**未实现**——完整清单见 `docs/tls.md` §覆盖边界。请勿表述为"支持 IEC 62351"。

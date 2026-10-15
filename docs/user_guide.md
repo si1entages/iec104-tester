@@ -421,7 +421,36 @@ history:              # 历史库，默认开启
   max_size_mb: 512    # 容量上限(MB)，超出按最旧优先淘汰
   flush_interval: 5.0 # 后台批量落盘间隔(秒)
 custom_types: []      # 非标准厂商私有 TypeID，见 configs/custom_types_example.yaml
+tls:                  # TLS 传输层加密，默认关闭
+  enabled: false
+  certfile: ""        # 本端证书 (PEM)
+  keyfile: ""         # 私钥；空 = 与证书同文件
+  cafile: ""          # 受信 CA；空 = 系统信任库
+  verify: true        # 主站是否校验服务端证书
+  verify_client: false  # 子站是否要求客户端证书（双向认证）
+  server_hostname: "" # 主站主机名校验用域名
 ```
+
+### TLS 加密
+
+子站启用 TLS：
+
+```bash
+python app.py --mode slave \
+  --tls --tls-cert certs/server.pem --tls-key certs/server.key
+```
+
+主站严格校验服务端证书：
+
+```bash
+python app.py --mode master --tls --tls-ca certs/ca.pem --tls-hostname iec104.local
+```
+
+自签证书联调可加 `--no-verify` 跳过校验（**生产禁用**）。
+
+> ⚠ **覆盖边界**：本功能**只做 TLS 传输层加密**，**不是"IEC 62351 合规"**。
+> IEC 62351 的应用层认证、安全关联、访问控制、证书吊销等**均未实现**。
+> 证书生成、常见错误排查与完整边界清单见 [`docs/tls.md`](tls.md)。
 
 ### 历史库
 

@@ -45,6 +45,14 @@ stations:
     flow_control:
       k: 12
       w: 8
+    # TLS 传输层加密(T20, 逐站独立开关)。默认关闭。
+    # 完整说明(证书生成/常见错误/覆盖边界)见 docs/tls.md
+    tls:
+      enabled: false
+      certfile: ""          # 本端证书 (PEM)
+      keyfile: ""           # 私钥；空 = 与证书同文件
+      cafile: ""            # 受信 CA；verify_client=true 时必填
+      verify_client: false  # true = 要求客户端证书(双向认证 / mTLS)
 
   # 站2: 35kV变电站B
   - station_id: "substation_b"

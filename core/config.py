@@ -88,6 +88,33 @@ class HistoryConfig:
 
 
 @dataclass
+class TlsConfig:
+    """TLS 传输层加密配置（T20 / IEC 62351 的传输层部分）.
+
+    ⚠ 只覆盖 TLS 传输层加密；IEC 62351 的应用层认证等**未实现**，
+    详见 ``docs/tls.md`` §覆盖边界。
+
+    Attributes:
+        enabled: 是否启用 TLS。
+        certfile: 本端证书（PEM）。子站必填；主站在双向认证时填。
+        keyfile: 本端私钥（PEM）；为空时假定与证书同文件。
+        cafile: 受信 CA（PEM）。主站校验服务端、子站校验客户端时使用；
+            主站为空时退回系统信任库。
+        verify: 主站是否校验服务端证书（``False`` = 自签联调用，生产禁用）。
+        verify_client: 子站是否要求并校验客户端证书（双向认证 / mTLS）。
+        server_hostname: 主站 TLS 主机名校验用域名。按 IP 连接而证书只签了
+            域名时必填；空 = 用连接地址。
+    """
+    enabled: bool = False
+    certfile: str = ""
+    keyfile: str = ""
+    cafile: str = ""
+    verify: bool = True
+    verify_client: bool = False
+    server_hostname: str = ""
+
+
+@dataclass
 class AppConfig:
     """应用总配置."""
     mode: str = "master"            # "master" / "slave"
@@ -99,6 +126,7 @@ class AppConfig:
     display: DisplayConfig = field(default_factory=DisplayConfig)
     point_table: PointTableConfig = field(default_factory=PointTableConfig)
     history: HistoryConfig = field(default_factory=HistoryConfig)
+    tls: TlsConfig = field(default_factory=TlsConfig)
     # 自定义（非标准厂商私有）TypeID 结构定义（T22）：元素形如
     # ``{type_id: 128, name: VendorAlarm, fields: [{name: v, type: u8}]}``。
     custom_types: list = field(default_factory=list)
@@ -160,6 +188,15 @@ class AppConfig:
                 'retention_days': self.history.retention_days,
                 'max_size_mb': self.history.max_size_mb,
                 'flush_interval': self.history.flush_interval,
+            },
+            'tls': {
+                'enabled': self.tls.enabled,
+                'certfile': self.tls.certfile,
+                'keyfile': self.tls.keyfile,
+                'cafile': self.tls.cafile,
+                'verify': self.tls.verify,
+                'verify_client': self.tls.verify_client,
+                'server_hostname': self.tls.server_hostname,
             },
             'custom_types': list(self.custom_types),
         }
@@ -232,6 +269,15 @@ def load_config(path: str | Path) -> AppConfig:
     cfg.history.retention_days = hist.get('retention_days', cfg.history.retention_days)
     cfg.history.max_size_mb = hist.get('max_size_mb', cfg.history.max_size_mb)
     cfg.history.flush_interval = hist.get('flush_interval', cfg.history.flush_interval)
+
+    tls = data.get('tls', {}) or {}
+    cfg.tls.enabled = tls.get('enabled', cfg.tls.enabled)
+    cfg.tls.certfile = tls.get('certfile', cfg.tls.certfile)
+    cfg.tls.keyfile = tls.get('keyfile', cfg.tls.keyfile)
+    cfg.tls.cafile = tls.get('cafile', cfg.tls.cafile)
+    cfg.tls.verify = tls.get('verify', cfg.tls.verify)
+    cfg.tls.verify_client = tls.get('verify_client', cfg.tls.verify_client)
+    cfg.tls.server_hostname = tls.get('server_hostname', cfg.tls.server_hostname)
 
     custom_types = data.get('custom_types', None)
     if isinstance(custom_types, list):

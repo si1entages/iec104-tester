@@ -12,7 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..config import FlowControlConfig, TimerConfig
+from ..config import FlowControlConfig, TimerConfig, TlsConfig
 from ..data.point_table import PointTable
 from .slave import SlaveEngine, SlaveEvent
 
@@ -42,6 +42,24 @@ class StationConfig:
     yc_change_range: float = 0.05          # 遥测波动范围
     timers: TimerConfig = field(default_factory=TimerConfig)
     flow_control: FlowControlConfig = field(default_factory=FlowControlConfig)
+    # TLS 传输层加密（T20）。可为 TlsConfig，也可为 dict（Web UI 多站请求
+    # 直接透传 ``{"tls": {...}}`` 时即为此形态，在 _start_station 中归一化）。
+    tls: TlsConfig | dict | None = None
+
+
+_TLS_FIELDS = ("enabled", "certfile", "keyfile", "cafile", "verify",
+               "verify_client", "server_hostname")
+
+
+def _coerce_tls_config(raw) -> TlsConfig | None:
+    """把 ``StationConfig.tls`` 归一化为 ``TlsConfig``（None/dict/实例均可）."""
+    if raw is None:
+        return None
+    if isinstance(raw, TlsConfig):
+        return raw
+    if isinstance(raw, dict):
+        return TlsConfig(**{k: v for k, v in raw.items() if k in _TLS_FIELDS})
+    raise TypeError(f"不支持的 tls 配置形态: {type(raw).__name__}")
 
 
 @dataclass
@@ -210,6 +228,19 @@ class MultiStationManager:
         engine.set_event_callback(
             lambda event, data, sid=config.station_id: self._on_station_event(sid, event, data)
         )
+
+        # TLS（T20）：dict 形态先归一化为 TlsConfig；无效配置降级为明文并记错误
+        tls_cfg = _coerce_tls_config(config.tls)
+        if tls_cfg is not None and tls_cfg.enabled:
+            from ..transport.connection import TlsConfigError, configure_engine_tls
+
+            try:
+                configure_engine_tls(engine, "slave", tls_cfg)
+                logger.info(f"TLS enabled for station {config.station_id}")
+            except TlsConfigError as e:
+                logger.error(
+                    f"Station {config.station_id} TLS 配置无效，已回退为明文: {e}"
+                )
 
         # 启动引擎
         await engine.start()

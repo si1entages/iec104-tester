@@ -43,12 +43,21 @@ history:
   max_size_mb: 512        # 容量上限(MB)，超出按最旧优先淘汰；<=0 不限制
   flush_interval: 5.0     # 批量落盘间隔(秒)
 
+# TLS 传输层加密（T20 / IEC 62351 的传输层部分）。默认关闭。
+# 完整说明与证书生成步骤见 docs/tls.md
+tls:
+  enabled: false
+  certfile: ""          # 双向认证(mTLS)时填客户端证书
+  keyfile: ""           # 客户端私钥；空 = 与证书同文件
+  cafile: ""            # 受信 CA；空 = 用系统信任库
+  verify: true          # true = 严格校验服务端证书（生产）；false = 自签联调
+  verify_client: false  # 主站此字段不生效（仅供子站）
+  server_hostname: ""   # 按 IP 连接而证书只签域名时必填，如 "iec104.local"
+
 # 自定义（非标准厂商私有）TypeID —— 使私有类型可编解码往返（默认空）
 # custom_types:
-#   - type_id: 128
+#   - type_id: 130
 #     name: VendorAlarm
 #     fields:
 #       - {name: level, type: u8}
 #       - {name: value, type: i16}
-#       - {name: qds,   type: qds}     # 品质描述词(1B)
-#       - {name: ts,    type: cp56}    # CP56Time2a 时标(7B)

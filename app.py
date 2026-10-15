@@ -206,6 +206,34 @@ def cli(default_role: str | None = None) -> int:
         "--no-browser", action="store_true",
         help="启动 Web 服务时不自动打开浏览器"
     )
+    parser.add_argument(
+        "--tls", action="store_true",
+        help="启用 TLS 传输层加密（IEC 62351 的传输层部分）"
+    )
+    parser.add_argument(
+        "--tls-cert", type=str, default=None,
+        help="TLS 本端证书 (PEM)；子站必填"
+    )
+    parser.add_argument(
+        "--tls-key", type=str, default=None,
+        help="TLS 本端私钥 (PEM)；缺省时假定与证书同文件"
+    )
+    parser.add_argument(
+        "--tls-ca", type=str, default=None,
+        help="TLS 受信 CA (PEM)；主站校验服务端、子站校验客户端时使用"
+    )
+    parser.add_argument(
+        "--no-verify", action="store_true",
+        help="主站跳过服务端证书校验（仅自签联调用，生产禁用）"
+    )
+    parser.add_argument(
+        "--verify-client", action="store_true",
+        help="子站要求并校验客户端证书（双向认证 / mTLS）"
+    )
+    parser.add_argument(
+        "--tls-hostname", type=str, default=None,
+        help="主站 TLS 主机名校验用域名（按 IP 连接而证书只签域名时必填）"
+    )
 
     args = parser.parse_args()
 
@@ -238,6 +266,22 @@ def cli(default_role: str | None = None) -> int:
         config.connection.port = args.port
     if args.point_table:
         config.point_table.file = args.point_table
+
+    # TLS 命令行覆盖（T20）。优先级：命令行 > 配置文件。
+    if args.tls:
+        config.tls.enabled = True
+    if args.tls_cert:
+        config.tls.certfile = args.tls_cert
+    if args.tls_key:
+        config.tls.keyfile = args.tls_key
+    if args.tls_ca:
+        config.tls.cafile = args.tls_ca
+    if args.no_verify:
+        config.tls.verify = False
+    if args.verify_client:
+        config.tls.verify_client = True
+    if args.tls_hostname:
+        config.tls.server_hostname = args.tls_hostname
 
     # 自定义（非标准厂商私有）TypeID 注册（T22）。
     # 未配置时注册表为空 → 未知 TypeID 行为与既有一致（仍回 COT=42）。
@@ -375,6 +419,26 @@ def _run_tests(script_path: str, logger) -> int:
     return asyncio.run(run())
 
 
+def _enable_tls(engine, role: str, config, logger) -> None:
+    """按配置为引擎注入 TLS 上下文（T20）；未启用或失败时保持明文.
+
+    TLS 失败（证书缺失/路径错误）降级为 ERROR 日志并继续明文启动——
+    避免因为一个配置笔误导致整个连接彻底不可用，同时错误必须显式可见。
+    """
+    if not config.tls.enabled:
+        return
+    from core.transport.connection import TlsConfigError, configure_engine_tls
+
+    try:
+        configure_engine_tls(engine, role, config.tls)
+        logger.info(
+            f"TLS enabled ({role}, verify={config.tls.verify}, "
+            f"verify_client={config.tls.verify_client})"
+        )
+    except TlsConfigError as e:
+        logger.error(f"TLS 配置无效，已回退为明文传输: {e}")
+
+
 def _run_cli(config, point_table, history_db, logger):
     """CLI 无GUI模式 — 纯日志输出."""
     import asyncio
@@ -410,6 +474,7 @@ def _run_cli(config, point_table, history_db, logger):
             )
             engine.set_event_callback(on_event)
             engine.set_raw_frame_callback(on_frame)
+            _enable_tls(engine, "master", config, logger)
 
             await engine.start()
             logger.info("Master engine started. Press Ctrl+C to stop.")
@@ -446,6 +511,7 @@ def _run_cli(config, point_table, history_db, logger):
 
             # 初始化数据
             engine.data_store.init_from_point_table(point_table)
+            _enable_tls(engine, "slave", config, logger)
 
             await engine.start()
             logger.info("Slave engine started. Press Ctrl+C to stop.")
