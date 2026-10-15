@@ -47,6 +47,7 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 .pytest-tmp/
+.pytest_tmp/
 test_reports/
 
 # Translations
