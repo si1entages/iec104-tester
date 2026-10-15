@@ -112,4 +112,5 @@ jobs:
         with:
           name: playwright-artifacts
           path: tests/e2e/.playwright-artifacts/
-          if-no-files-found: ignore
+          include-hidden-files: true
+          if-no-files-found: error
