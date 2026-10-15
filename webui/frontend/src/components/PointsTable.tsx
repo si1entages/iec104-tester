@@ -8,6 +8,7 @@ import { usePointsQuery } from '../api/queries'
 import type { Point } from '../api/types'
 import { formatValue } from '../lib/format'
 import { pointKey } from '../lib/pointValue'
+import { PointsTools } from './PointsTools'
 
 const TYPE_OPTIONS = ['YX', 'YC', 'YK', 'YM', 'STEP'].map((v) => ({ value: v, label: v }))
 
@@ -115,6 +116,7 @@ export function PointsTable({
       }
       extra={
         <Space wrap>
+          <PointsTools />
           <Button
             size="small"
             icon={<LineChartOutlined />}
