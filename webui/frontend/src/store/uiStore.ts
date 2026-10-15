@@ -2,7 +2,7 @@ import { create } from 'zustand'
 
 import type { WsStatus } from '../ws/client'
 
-export type PageKey = 'status' | 'master' | 'logs'
+export type PageKey = 'status' | 'master' | 'slave' | 'logs'
 
 /**
  * 纯 UI 状态（T11）。

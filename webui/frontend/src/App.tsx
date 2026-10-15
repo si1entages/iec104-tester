@@ -8,9 +8,10 @@ import { useSchemaHandshake } from './hooks/useSchemaHandshake'
 import { useUiStore } from './store/uiStore'
 import { useWsBridge } from './ws/useWsBridge'
 
-// 路由级 code-split：主站工作台（含 ECharts）与其它页面各自成 chunk，
+// 路由级 code-split：主站/子站工作台（含 ECharts）与其它页面各自成 chunk，
 // 首屏只加载外壳 + 当前页。
 const MasterPage = lazy(() => import('./pages/master/MasterPage'))
+const SlavePage = lazy(() => import('./pages/slave/SlavePage'))
 const StatusPage = lazy(() => import('./pages/StatusPage').then((m) => ({ default: m.StatusPage })))
 const LogsPage = lazy(() => import('./pages/LogsPage').then((m) => ({ default: m.LogsPage })))
 
@@ -34,17 +35,25 @@ export default function App() {
   const { data: status } = useStatusQuery()
   const initialized = useRef(false)
 
-  // 角色决定默认页：主站部署直接进工作台，子站部署先看状态总览
+  // 角色决定默认页：主站部署直接进主站工作台，子站部署直接进子站工作台
   useEffect(() => {
     if (!status?.role || initialized.current) return
     initialized.current = true
-    setPage(status.role === 'master' ? 'master' : 'status')
+    setPage(status.role === 'master' ? 'master' : 'slave')
   }, [status?.role, setPage])
 
   return (
     <AppLayout>
       <Suspense fallback={<PageFallback />}>
-        {page === 'master' ? <MasterPage /> : page === 'logs' ? <LogsPage /> : <StatusPage />}
+        {page === 'master' ? (
+          <MasterPage />
+        ) : page === 'slave' ? (
+          <SlavePage />
+        ) : page === 'logs' ? (
+          <LogsPage />
+        ) : (
+          <StatusPage />
+        )}
       </Suspense>
     </AppLayout>
   )

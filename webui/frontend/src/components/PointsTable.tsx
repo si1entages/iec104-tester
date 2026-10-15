@@ -9,7 +9,7 @@ import type { Point } from '../api/types'
 import { formatValue } from '../lib/format'
 import { pointKey } from '../lib/pointValue'
 
-const TYPE_OPTIONS = ['YX', 'YC', 'YK', 'YM'].map((v) => ({ value: v, label: v }))
+const TYPE_OPTIONS = ['YX', 'YC', 'YK', 'YM', 'STEP'].map((v) => ({ value: v, label: v }))
 
 const COLUMNS: TableColumnsType<Point> = [
   { title: 'IOA', dataIndex: 'ioa', width: 100, className: 'mono' },

@@ -241,6 +241,51 @@ export interface PsRequest {
 /** 响应行为配置（延迟 / 错误注入 / 品质 / 连接行为），键由后端定义 */
 export type ResponseBehavior = Record<string, unknown>
 
+// ── 子站应答行为（契约 §2.3 `POST /api/slave/response`）────────────────
+// 与 `core/engine/slave_response.py::ResponseBehavior.from_dict` 一一对应；
+// 缺失的分组/键一律取后端默认值。
+
+/** 延迟（秒） */
+export interface SlaveDelays {
+  gi?: number
+  command?: number
+  data?: number
+}
+
+export interface SlaveErrors {
+  drop_frames?: boolean
+  /** 丢帧比例 0..1 */
+  drop_rate?: number
+  /** 损坏帧 */
+  corrupt?: boolean
+  /** 不响应 */
+  no_response?: boolean
+  /** 应答 COT 整体错位（+1），验证主站对 COT 的严格校验 */
+  wrong_cot?: boolean
+}
+
+/** 品质描述词注入 */
+export interface SlaveQuality {
+  invalid?: boolean
+  blocked?: boolean
+  not_topical?: boolean
+  overflow?: boolean
+}
+
+export interface SlaveConnectionBehavior {
+  reject_startdt?: boolean
+  auto_stopdt?: boolean
+  send_testfr?: boolean
+  testfr_interval?: number
+}
+
+export interface SlaveResponseBehavior {
+  delays?: SlaveDelays
+  errors?: SlaveErrors
+  quality?: SlaveQuality
+  connection?: SlaveConnectionBehavior
+}
+
 export interface SimRequest {
   enabled: boolean
   yx_interval?: number

@@ -58,7 +58,7 @@ export default function MasterPage() {
         type="info"
         showIcon
         message="当前部署为子站角色"
-        description="主站工作台仅在主站（--mode master）下可用；子站工作台见后续 T13。"
+        description="主站工作台仅在主站（--mode master）下可用；子站工作台见左侧「子站工作台」页。"
       />
     )
   }
