@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { ApiOutlined, LinkOutlined, PauseCircleOutlined } from '@ant-design/icons'
-import { Alert, App as AntdApp, Button, Card, Descriptions, Input, InputNumber, Space, Switch, Tag, Tooltip } from 'antd'
+import { Alert, App as AntdApp, Button, Card, Descriptions, Form, Input, InputNumber, Space, Switch, Tag } from 'antd'
 
 import { api } from '../../api/endpoints'
 import { useCommand, useCommandNoArgs, useStatusQuery } from '../../api/queries'
@@ -107,35 +107,36 @@ export function ConnectionPanel() {
         />
       ) : null}
 
-      <Space wrap style={{ marginBottom: 12 }}>
-        <Input
-          prefix="主机"
-          style={{ width: 200 }}
-          value={host}
-          onChange={(e) => setHost(e.target.value)}
-        />
-        <InputNumber
-          prefix="端口"
-          min={0}
-          max={65535}
-          value={port}
-          onChange={(v) => setPort(Number(v ?? 2404))}
-        />
-        <InputNumber
-          prefix="公共地址"
-          min={0}
-          value={addr}
-          onChange={(v) => setAddr(Number(v ?? 1))}
-        />
-        <Tooltip title="对只在总召时才回遥测的装置，可设周期自动召唤（秒，0=关闭）">
+      <Form layout="inline" style={{ marginBottom: 12 }} component="div">
+        <Form.Item label="主机">
+          <Input style={{ width: 160 }} value={host} onChange={(e) => setHost(e.target.value)} />
+        </Form.Item>
+        <Form.Item label="端口">
           <InputNumber
-            prefix="周期总召(秒)"
+            min={0}
+            max={65535}
+            value={port}
+            style={{ width: 110 }}
+            onChange={(v) => setPort(Number(v ?? 2404))}
+          />
+        </Form.Item>
+        <Form.Item label="公共地址">
+          <InputNumber
+            min={0}
+            value={addr}
+            style={{ width: 110 }}
+            onChange={(v) => setAddr(Number(v ?? 1))}
+          />
+        </Form.Item>
+        <Form.Item label="周期总召(秒)" tooltip="对只在总召时才回遥测的装置，可设周期自动召唤（秒，0=关闭）">
+          <InputNumber
             min={0}
             value={giInterval}
+            style={{ width: 110 }}
             onChange={(v) => setGiInterval(Number(v ?? 0))}
           />
-        </Tooltip>
-      </Space>
+        </Form.Item>
+      </Form>
 
       <Space wrap style={{ marginBottom: 12 }}>
         <span style={{ color: '#8c8c8c' }}>TLS</span>
@@ -184,7 +185,7 @@ export function ConnectionPanel() {
               <span style={{ color: dropped > 0 ? '#faad14' : undefined }}>{dropped}</span>
             ),
           },
-          { key: 'clients', label: '客户端数', children: status?.clients ?? '-' },
+          // 客户端数是子站属性（主站恒为 "-"），不展示
           {
             key: 'schema',
             label: 'schemaVersion',

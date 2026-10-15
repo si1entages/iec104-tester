@@ -47,9 +47,10 @@ describe('ConnectionPanel（连接参数）', () => {
     )
     setup()
 
+    // label 与输入框分离后：周期总召在 Form.Item 内，label 不再挤占输入框宽度
     const giInput = screen
       .getAllByRole('spinbutton')
-      .find((el) => el.closest('.ant-input-number-affix-wrapper')?.textContent?.includes('周期总召(秒)'))
+      .find((el) => el.closest('.ant-form-item')?.textContent?.includes('周期总召(秒)'))
     expect(giInput).toBeTruthy()
     // 默认 0 = 关闭；填 30 后点「连接」，请求体应携带 gi_interval: 30
     fireEvent.change(giInput!, { target: { value: '30' } })
