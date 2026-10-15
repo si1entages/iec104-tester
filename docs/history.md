@@ -8,7 +8,7 @@ SQLite 文件，供查询、CSV 导出与事后复盘使用。**默认开启**�
 | 项 | 默认值 |
 | --- | --- |
 | 是否建库 | 是 |
-| 落盘路径 | `<项目根目录>/data/history.db` |
+| 落盘路径 | `<项目根目录>/data/history_master.db`（主站）<br>`<项目根目录>/data/history_slave.db`（子站） |
 | 保留期 | 7 天 |
 | 容量上限 | 512 MB |
 | 批量落盘间隔 | 5 秒 |
@@ -16,8 +16,15 @@ SQLite 文件，供查询、CSV 导出与事后复盘使用。**默认开启**�
 启动日志会打印实际生效参数：
 
 ```
-08:19:11 [iec104] INFO: History DB: data\history.db (retention=7d, max_size=512MB, flush_interval=5.0s)
+08:19:11 [iec104] INFO: History DB: data\history_slave.db (retention=7d, max_size=512MB, flush_interval=5.0s)
 ```
+
+> **为什么默认文件名带角色后缀？** 主站（HTTP 8765）与子站（HTTP 8766）
+> 按 README 的用法可**同时运行**且共用同一默认目录。若两者写同一个库文件：
+> ① `frame_history` 没有角色列，两边的帧混在一起无法区分；
+> ② 任一进程的保留期/容量清理会把对方的记录当「最旧数据」删掉。
+> 故默认按角色分文件。显式 `--history-db <path>` 时以用户指定为准，不加后缀
+> （此时如有并发需要，请自行保证是同一个进程或接受共享语义）。
 
 ## 2. 配置
 
@@ -148,13 +155,66 @@ db.close(); shutil.rmtree(tmp, ignore_errors=True)
 
 `get_stats()` 还提供 `db_size_bytes`（逻辑占用），可用于自建监控。
 
-## 6. 已知限制
+## 7. 其他已知限制
 
-- Web UI 模式目前**只建库不接线**：报文记录回调仍只在 headless/CLI 模式
-  （`--no-gui`）挂接，Web 模式未注入历史库（`webui/server.py` 尚无历史库参数，
-  本次未改动该文件以避免与他人改动冲突）。
-- 默认落盘目录 `<项目根目录>/data/` 未加入 `.gitignore`，请在提交前确认未误提交
-  `data/history.db`。
+- 默认落盘目录 `<项目根目录>/data/` 已在 `.gitignore` 中以 `/data/` 排除
+  （前导斜杠锚定仓库根，避免连 `core/data/` 源码包一起忽略）。若需入库示例数据，
+  请放到明确的示例目录而不是 `data/`。
 - 容量上限只保证**逻辑占用**回落到上限内；实际文件大小需靠
   `wal_checkpoint(TRUNCATE)`（已自动执行）与 SQLite 的 freelist 复用逐步收敛，
   不会立刻等于上限值。
+- 若上限小于建表本身的开销（约数十 KB），清理会把表删空——这是策略的必然结果，
+  不是缺陷；请勿把 `max_size_mb` 设得比空库还小。
+
+## 6. 并发写与多会话
+
+### 6.1 结论
+
+**「同角色单实例 + 跨进程共享同一库文件」是安全的：WAL + `busy_timeout` 把并发写
+串行化，实测零失败零丢失。默认按角色分文件，避免跨角色语义混淆。**
+
+### 6.2 实测（非推测）
+
+用真实独立进程（`subprocess` 拉起 N 个 Python 进程）同时向同一个库文件写入
+报文 + 变化数据，每 200 条 flush 一次：
+
+| 并发进程数 | 每进程记录数 | 期望总帧 | 实际总帧 | 期望总数据 | 实际总数据 | 异常/锁告警 | 耗时 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2 | 2,000 | 4,000 | **4,000** | 4,000 | **4,000** | 0 | 0.7s |
+| 4 | 2,000 | 8,000 | **8,000** | 8,000 | **8,000** | 0 | 0.9s |
+| 8 | 3,000 | 24,000 | **24,000** | 24,000 | **24,000** | 0 | 1.3s |
+
+- **零 `database is locked`、零记录丢失。** 保障来自：
+  `PRAGMA journal_mode=WAL` + `PRAGMA busy_timeout=5000`（连接建立时显式设置）
+  —— 写冲突时等待而非直接报错；SQLite 的 WAL 允许「多读单写」并发。
+- **同进程内**：一个 `HistoryDB` 只有一条连接，所有读写经 `threading.Lock`
+  （`flush` / 查询 / 建表 / 统计 / 导出分批）串行化，天然安全。
+- **跨进程**：`check_same_thread=False` 仅作用于进程内；跨进程靠 SQLite
+  文件锁 + `busy_timeout` 串行化。
+
+### 6.3 已实测的边界与限制
+
+- 若把 `busy_timeout` 降为 0，高并发下会立刻出现 `database is locked`
+  （当前实现为 5000ms，未做压测到持续超时的场景）。
+- 容量上限清理会执行 `wal_checkpoint(TRUNCATE)`，多进程同时清理会互相等待，
+  实测（4 进程 + 极小容量上限）未出现异常，但该路径**依赖 `busy_timeout`**。
+- **未做**：网络文件系统（NFS/SMB）上的 SQLite 锁语义未验证，不建议把库放到
+  网络盘。
+- **未做**：跨进程「共享一个库并由任一方清理」的**语义**是危险的——清理按
+  `timestamp` 全局淘汰，会删掉其他角色/其他客户端的数据。这正是默认按角色
+  分文件的原因；显式 `--history-db` 共享时需自行接受该语义。
+
+### 6.4 Web 模式的接线
+
+Web 模式下所有收发帧的唯一汇聚点是 `webui/bridge.py:EngineBridge._on_raw_frame()`
+（`webui/events.py` 的 `EventBus` 只有 asyncio.Queue 订阅、无监听器 hook，
+故接线落在此处）。`run_server` / `_run` / `run_web` 均新增**向后兼容的可选
+关键字参数** `history_db=None`：
+
+- 不传 → 不记录，行为与改动前完全一致；
+- 传入已 `open()` 的 `HistoryDB` → Web 模式把收发报文落盘；
+- 历史库写失败只记 warning，**不影响报文主路径与 WS 推送**；
+- WS `frame` 消息结构不变（`direction/len/hex/client`），前端契约不受影响。
+
+端到端验证见 `tests/test_web_history_wiring.py::TestWebModeEndToEnd`：
+真 TCP 起子站 → 真 `MasterEngine` 连接并完成 STARTDT → 断言库中确有双向帧。

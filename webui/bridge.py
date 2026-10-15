@@ -21,11 +21,14 @@ class EngineBridge:
     """在独立 asyncio 循环上运行主站或子站引擎，并向 UI 推送事件."""
 
     def __init__(self, role: str = "master", point_table: PointTable | None = None,
-                 connection: dict | None = None):
+                 connection: dict | None = None, history_db=None):
         assert role in ("master", "slave")
         self.role = role
         self.config = AppConfig()
         self.config.mode = role
+        # 历史库（T17 决策 1）：Web 模式下把收发报文落盘。
+        # 为 None 时不记录，行为与改动前一致。
+        self._history = history_db
         # CLI --host/--port/--addr 透传：否则 Web 层用默认 2404，
         # UI 上点「启动监听/连接」会忽略命令行给出的真实端口
         conn = self.config.connection
@@ -108,6 +111,12 @@ class EngineBridge:
             "hex": data.hex(),
             "client": client_id,
         })
+        if self._history is not None:
+            # HistoryDB.record_frame 只入内存缓冲（批量落盘），异常不外抛
+            try:
+                self._history.record_frame(direction, data, client_id=client_id)
+            except Exception as e:  # noqa: BLE001 — 历史库不得影响报文主路径
+                logger.warning(f"history record_frame failed: {e}")
 
     def ensure_demo_points(self) -> None:
         """点表为空时生成演示点表.

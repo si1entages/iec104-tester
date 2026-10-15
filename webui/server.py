@@ -674,8 +674,10 @@ def create_app(bridge: EngineBridge) -> web.Application:
 
 
 async def _run(role: str, host: str = "127.0.0.1", port: int = 8765,
-               point_table=None, connection: dict | None = None) -> None:
-    bridge = EngineBridge(role, point_table=point_table, connection=connection)
+               point_table=None, connection: dict | None = None,
+               history_db=None) -> None:
+    bridge = EngineBridge(role, point_table=point_table, connection=connection,
+                          history_db=history_db)
     bridge.ensure_demo_points()
     app = create_app(bridge)
     runner = web.AppRunner(app)
@@ -691,9 +693,21 @@ async def _run(role: str, host: str = "127.0.0.1", port: int = 8765,
 
 
 def run_server(role: str, host: str = "127.0.0.1", port: int = 8765,
-               point_table=None, connection: dict | None = None) -> None:
+               point_table=None, connection: dict | None = None,
+               history_db=None) -> None:
+    """启动 Web 服务（阻塞）.
+
+    Args:
+        role: "master" / "slave"。
+        point_table: 预加载点表；None 时用演示点表。
+        connection: CLI 连接参数透传。
+        history_db: 可选的 ``HistoryDB``（已 open）；提供时 Web 模式会把
+            收发报文落盘（见 ``EngineBridge._on_raw_frame``）。None 则不记录，
+            与改动前行为一致。
+    """
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     try:
-        asyncio.run(_run(role, host, port, point_table=point_table, connection=connection))
+        asyncio.run(_run(role, host, port, point_table=point_table,
+                         connection=connection, history_db=history_db))
     except KeyboardInterrupt:
         pass

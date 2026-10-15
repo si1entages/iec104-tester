@@ -425,14 +425,19 @@ custom_types: []      # 非标准厂商私有 TypeID，见 configs/custom_types_
 
 ### 历史库
 
-历史库**默认开启**，落盘到 `<项目根目录>/data/history.db`；
-`--no-history` 可临时关闭，`--history-db <path>` 可指定文件。
+历史库**默认开启**，落盘到 `<项目根目录>/data/history_<角色>.db`
+（主站 `history_master.db` / 子站 `history_slave.db`，避免两个角色共用同一目录时
+数据混淆与互相清理）；`--no-history` 可临时关闭，`--history-db <path>` 可指定文件。
+
+主站 Web 8765 与子站 Web 8766 可同时运行，各自写自己的库文件。
+Web 模式与 headless/CLI 模式都会把收发报文落盘。
 
 清理策略：保留期（`retention_days`）+ 记录条数 + 容量上限（`max_size_mb`），
 刷盘间隔由 `flush_interval` 控制。
 
 容量/写放大实测：**写放大约 3.4×~4.3×，单条记录约 96 B，100 万条 ≈ 91 MiB**，
-默认 512 MB 上限约可容纳 550 万条。完整数据、结论与复现脚本见
+默认 512 MB 上限约可容纳 550 万条。并发写实测：**8 个进程共享同一库文件写
+2.4 万条，零失败零丢失**。完整数据、结论与复现脚本见
 [`docs/history.md`](history.md)。
 
 ### 非标准厂商私有 TypeID

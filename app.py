@@ -27,20 +27,31 @@ _PROBE_TIMEOUT_S = 5.0
 _HISTORY_DB_NAME = "history.db"
 
 
-def resolve_history_path(cfg_dir: str, override: str | None = None) -> Path:
+def resolve_history_path(cfg_dir: str, override: str | None = None,
+                         role: str | None = None) -> Path:
     """解析历史库文件路径.
 
     Args:
         cfg_dir: ``HistoryConfig.dir``；空字符串表示项目根目录下的 ``data/``。
         override: ``--history-db`` 显式路径；非空时直接采用（目录自动创建）。
+        role: 运行角色（"master"/"slave"）；给出时默认文件名带角色后缀
+            （``history_master.db`` / ``history_slave.db``）。
 
     Returns:
         历史库的绝对/相对路径（不保证文件已存在）。
+
+    Notes:
+        主站（HTTP 8765）与子站（HTTP 8766）按本 README 的用法可**同时运行**
+        且共用同一默认目录。若两者写同一个库文件，报文记录表没有角色列，
+        两边的帧会混在一起无法区分；且任一进程的保留期/容量清理会把
+        对方的记录当"最旧数据"删掉。故默认按角色分文件
+        （显式 ``--history-db`` 时以用户指定为准，不做后缀）。
     """
     if override:
         return Path(override)
     base = Path(cfg_dir) if cfg_dir else Path(__file__).parent / "data"
-    return base / _HISTORY_DB_NAME
+    name = f"history_{role}.db" if role in ("master", "slave") else _HISTORY_DB_NAME
+    return base / name
 
 
 def setup_logging(level: str = "INFO", log_file: str = None) -> None:
@@ -96,7 +107,8 @@ def _open_browser_when_ready(
 
 
 def run_web(role: str, http_port: int | None = None, open_browser: bool = True,
-            point_table=None, connection: dict | None = None) -> None:
+            point_table=None, connection: dict | None = None,
+            history_db=None) -> None:
     """启动 Web 服务（阻塞）并在就绪后打开浏览器.
 
     Args:
@@ -106,6 +118,8 @@ def run_web(role: str, http_port: int | None = None, open_browser: bool = True,
         point_table: 已加载的 ``PointTable``；为 None 时 Web 层自行生成演示点表.
         connection: CLI 连接参数（host/port/addr）透传给 Web 层——
             否则 UI 的输入框回落到默认 2404，「启动监听/连接」会忽略 --port。
+        history_db: 已打开的 ``HistoryDB``；非 None 时 Web 模式会把收发报文
+            落盘（此前 Web 模式只建库、不记录）。为 None 则 Web 层不记录。
     """
     from webui.server import run_server
 
@@ -123,7 +137,7 @@ def run_web(role: str, http_port: int | None = None, open_browser: bool = True,
 
     try:
         run_server(role, "127.0.0.1", port, point_table=point_table,
-                   connection=connection)
+                   connection=connection, history_db=history_db)
     except KeyboardInterrupt:
         pass
 
@@ -256,15 +270,16 @@ def cli(default_role: str | None = None) -> int:
         point_table.station_name = "Demo Station"
         point_table.common_addr = config.connection.common_addr
 
-    # 历史数据库（T17：默认开启，落盘到 <数据目录>/history.db）
+    # 历史数据库（T17：默认开启，落盘到 <数据目录>/history_<role>.db）
     # 优先级：--no-history > --history-db > config.history.enabled
+    role = "slave" if config.mode == "slave" else "master"
     history_db = None
     if args.no_history:
         logger.info("History DB disabled by --no-history")
     elif config.history.enabled or args.history_db:
         from core.data.history import HistoryDB
 
-        db_path = resolve_history_path(config.history.dir, args.history_db)
+        db_path = resolve_history_path(config.history.dir, args.history_db, role)
         try:
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
             history_db = HistoryDB(
@@ -296,15 +311,15 @@ def cli(default_role: str | None = None) -> int:
             _run_cli(config, point_table, history_db, logger)
             return 0
 
-        # Web UI 模式（主站/子站）
-        role = "slave" if config.mode == "slave" else "master"
+        # Web UI 模式（主站/子站）—— role 已在上方历史库接线处解析
         connection = {
             "host": config.connection.host,
             "port": config.connection.port,
             "addr": config.connection.common_addr,
         }
         run_web(role, args.http_port, open_browser=not args.no_browser,
-                point_table=point_table, connection=connection)
+                point_table=point_table, connection=connection,
+                history_db=history_db)
         return 0
     finally:
         # 保证异常路径也会关闭历史数据库
