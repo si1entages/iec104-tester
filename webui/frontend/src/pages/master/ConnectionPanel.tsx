@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { ApiOutlined, LinkOutlined, PauseCircleOutlined } from '@ant-design/icons'
-import { Alert, App as AntdApp, Button, Card, Descriptions, Input, InputNumber, Space, Switch, Tag } from 'antd'
+import { Alert, App as AntdApp, Button, Card, Descriptions, Input, InputNumber, Space, Switch, Tag, Tooltip } from 'antd'
 
 import { api } from '../../api/endpoints'
 import { useCommand, useCommandNoArgs, useStatusQuery } from '../../api/queries'
@@ -18,6 +18,8 @@ export function ConnectionPanel() {
   const [port, setPort] = useState(2404)
   const [addr, setAddr] = useState(1)
   const [reconnect, setReconnect] = useState(true)
+  // 周期总召（T19 补齐旧页能力）：对只在总召时才回遥测的装置，设周期自动召唤（秒，0=关闭）
+  const [giInterval, setGiInterval] = useState(0)
   // TLS 传输加密（T20）：最小增量——启用开关 + CA/证书/私钥路径三项
   const [tlsEnabled, setTlsEnabled] = useState(false)
   const [tlsCa, setTlsCa] = useState('')
@@ -67,6 +69,7 @@ export function ConnectionPanel() {
                   port,
                   addr,
                   reconnect,
+                  gi_interval: giInterval,
                   ...(tlsEnabled
                     ? {
                         tls: {
@@ -124,6 +127,14 @@ export function ConnectionPanel() {
           value={addr}
           onChange={(v) => setAddr(Number(v ?? 1))}
         />
+        <Tooltip title="对只在总召时才回遥测的装置，可设周期自动召唤（秒，0=关闭）">
+          <InputNumber
+            prefix="周期总召(秒)"
+            min={0}
+            value={giInterval}
+            onChange={(v) => setGiInterval(Number(v ?? 0))}
+          />
+        </Tooltip>
       </Space>
 
       <Space wrap style={{ marginBottom: 12 }}>

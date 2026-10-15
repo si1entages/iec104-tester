@@ -44,7 +44,7 @@ const GI_OPTIONS = [
   { value: 20, label: '站召唤 (QOI=20)' },
   ...Array.from({ length: 16 }, (_, i) => ({
     value: i + 1,
-    label: `组召唤 第${i + 1}组 (QOI=${21 + i})`,
+    label: `组召唤 第${i + 1}组 (QOI=${i + 1})`,
   })),
 ]
 
