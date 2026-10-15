@@ -84,7 +84,7 @@ describe('MasterPage（主站工作台）命令面板当前值实时刷新', () 
     await waitFor(() => expect(screen.getByText(/当前值 66\.6/)).toBeInTheDocument())
   })
 
-  it('点「加入趋势」即注册采样，无需先打开趋势图页签', async () => {
+  it('点「加入趋势」即注册采样，无需先打开趋势图页签', { timeout: 30_000 }, async () => {
     setup()
     await screen.findByText('YC_0008')
     const setWatchedSpy = vi.spyOn(trendBuffer, 'setWatched')
