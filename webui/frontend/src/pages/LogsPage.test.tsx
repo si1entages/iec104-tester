@@ -225,4 +225,25 @@ describe('LogsPage（日志面板）', () => {
     // 全部落地（缓冲 100）
     expect(screen.getByText('缓冲 100')).toBeInTheDocument()
   })
+
+  it('性能红线：卸载（面板不可见）后查询订阅归零，不再有渲染与轮询', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse({ ok: true, logs: [], stats: {} })),
+    )
+    const { client, unmount } = setup()
+    await waitFor(() => {
+      const logsQuery = client.getQueryCache().getAll().find((q) => q.queryKey[0] === 'logs')
+      expect(logsQuery?.getObserversCount()).toBeGreaterThan(0)
+    })
+    // 页面切换 = 组件卸载：轮询（refetchInterval）与渲染随订阅一起停止；
+    // WS 侧日志仍进缓存（批量、上限 500），但无订阅者即无重渲染
+    unmount()
+    const observers = client
+      .getQueryCache()
+      .getAll()
+      .filter((q) => q.queryKey[0] === 'logs')
+      .reduce((acc, q) => acc + q.getObserversCount(), 0)
+    expect(observers).toBe(0)
+  })
 })
