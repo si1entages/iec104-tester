@@ -2,7 +2,7 @@ import { Suspense, lazy, useCallback, useMemo, useState } from 'react'
 
 import { Alert, Col, Row, Spin, Tabs } from 'antd'
 
-import { useStatusQuery } from '../../api/queries'
+import { usePointsQuery, useStatusQuery } from '../../api/queries'
 import type { Point } from '../../api/types'
 import { PointsTable } from '../../components/PointsTable'
 import { pointKey } from '../../lib/pointValue'
@@ -35,8 +35,19 @@ const MAX_TREND = 8
  */
 export default function MasterPage() {
   const { data: status } = useStatusQuery()
-  const [selected, setSelected] = useState<Point | null>(null)
+  const { data: points = [] } = usePointsQuery()
+  // 只记选中行的键（`类别-IOA`），实时 Point 从点表缓存派生——
+  // WS 增量补丁只更新缓存，若缓存选中行快照则「当前值」永远停在选中瞬间（bug 修复）
+  const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [watched, setWatched] = useState<Point[]>([])
+
+  const selected = useMemo(
+    () => (selectedKey ? points.find((p) => pointKey(p) === selectedKey) ?? null : null),
+    [points, selectedKey],
+  )
+  const onSelect = useCallback((point: Point | null) => {
+    setSelectedKey(point ? pointKey(point) : null)
+  }, [])
 
   const watchedKeys = useMemo(() => watched.map(pointKey), [watched])
 
@@ -71,7 +82,7 @@ export default function MasterPage() {
         <Col flex="auto" style={{ minWidth: 0 }}>
           <PointsTable
             selected={selected}
-            onSelect={setSelected}
+            onSelect={onSelect}
             watchedKeys={watchedKeys}
             onAddTrend={addTrend}
           />
