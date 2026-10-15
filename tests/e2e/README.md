@@ -36,6 +36,32 @@ NODE_PATH="$PWD/webui/frontend/node_modules" \
 > 浏览器默认用系统 Edge（`channel: 'msedge'`，无需额外下载）；CI 上设
 > `E2E_CHANNEL=chromium` 并先执行 `npx playwright install --with-deps chromium`。
 
+### CI 运行（`.github/workflows/ci.yml` 的 `frontend-e2e` job）
+
+CI（ubuntu runner）上每次 push/PR 自动运行，与既有 lint/test/frontend job **并行**：
+
+1. 建**仓库根 venv** 并 `pip install -r requirements.txt` —— e2e 的 webServer
+   用 `venv/bin/python`（Linux 分支）拉起 `app.py --mode master|slave --no-browser`，
+   没有这步 webServer 起不来；
+2. `npm ci` + `npm run build`（保证 e2e 所见 SPA 与源码一致）+ `npx vitest run`；
+3. `npx playwright install --with-deps chromium`（runner 无系统 Edge，必须用
+   chromium 通道：`E2E_CHANNEL=chromium`）；
+4. `NODE_PATH="$PWD/webui/frontend/node_modules" webui/frontend/node_modules/.bin/playwright
+   test --config tests/e2e/playwright.config.ts`；
+5. 失败时上传 `tests/e2e/.playwright-artifacts/` 为 artifact 辅助排查。
+
+**Windows 本地两坑在 CI（Linux）上的对应处理**：
+
+| 本地坑 | CI 上的情况 |
+|--------|------------|
+| 系统代理导致 Playwright 可用性探测误判 200、webServer 不被拉起 | `playwright.config.ts` 顶部**无条件删除**全部 `*_proxy` 环境变量（CI 同样生效；GitHub runner 默认无代理，双保险） |
+| webServer 命令经 cmd.exe 执行，程序路径必须用反斜杠 | 配置里按 `process.platform === 'win32'` 分支选择 `venv\Scripts\python.exe` / `venv/bin/python`，CI（Linux）自动走正斜杠分支，无需处理 |
+| 默认浏览器为系统 Edge（msedge） | CI 显式 `E2E_CHANNEL=chromium` + `playwright install --with-deps chromium` |
+
+另注意：e2e 串行（`workers: 1`，主/子站共用 IEC 2404）、CI 上
+`reuseExistingServer` 自动关闭（`process.env.CI` 判断）——不会复用也不会
+误撞 runner 上不存在的服务。
+
 用例清单（15 个，见 `specs/*.spec.ts`）：
 
 - 主站：UI 连接建立 → 点表虚拟滚动（**DOM 行数远小于总行数**，T12 验收）→ 选中行 →

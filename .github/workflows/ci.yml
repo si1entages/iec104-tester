@@ -64,3 +64,52 @@ jobs:
           name: webui-spa
           path: webui/static/app
           if-no-files-found: error
+
+  # T15 收尾：前端交互 e2e（Playwright）纳入 CI。
+  # - 浏览器用 chromium 通道（runner 无系统 Edge，本地默认 msedge 不可用）；
+  # - e2e 的 webServer 经仓库根 venv/bin/python 拉起主站(8765)/子站(8766)，
+  #   因此本 job 必须先建 venv 并装后端运行时依赖（requirements.txt）；
+  # - specs/*.ts 经 NODE_PATH 解析前端 node_modules 里的 @playwright/test；
+  # - 串行（workers=1，配置内定）：主/子站引擎共用 IEC 2404，不可并行；
+  # - 失败时上传 Playwright 产物（trace/报告输出目录）辅助排查。
+  frontend-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Create backend venv (e2e webServer 启动 app.py 所需)
+        run: |
+          python -m venv venv
+          venv/bin/pip install -r requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: webui/frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: webui/frontend
+      - name: Type-check & build (e2e 服务 SPA 与源码一致)
+        run: npm run build
+        working-directory: webui/frontend
+      - name: Unit tests (vitest)
+        run: npx vitest run
+        working-directory: webui/frontend
+      - name: Install Playwright chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: webui/frontend
+      - name: Run e2e (chromium channel)
+        env:
+          E2E_CHANNEL: chromium
+        run: |
+          NODE_PATH="$PWD/webui/frontend/node_modules" \
+            webui/frontend/node_modules/.bin/playwright test --config tests/e2e/playwright.config.ts
+      - name: Upload e2e artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts
+          path: tests/e2e/.playwright-artifacts/
+          if-no-files-found: ignore
