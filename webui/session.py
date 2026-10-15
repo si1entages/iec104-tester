@@ -592,14 +592,45 @@ class EngineSession:
             rb = ResponseBehavior.from_dict(self.pending_response)
         return {"ok": True, "response": response_behavior_to_dict(rb)}
 
-    async def set_simulation(self, enabled: bool, **kwargs: float) -> dict:
+    async def set_simulation(self, enabled: bool, **kwargs) -> dict:
         eng = self.require_slave()
         if enabled:
+            # 第二批改造⑤：范围模式 scope（YX/YC 独立）——"all" 全部点 / "selected" 仅指定 IOA
+            def _scope(key: str) -> str | None:
+                v = kwargs.get(key, "all")
+                return v if v in ("selected", "all") else None
+
+            yx_scope = _scope("yx_scope")
+            yc_scope = _scope("yc_scope")
+            if yx_scope is None or yc_scope is None:
+                return {"ok": False, "error": "scope 须为 selected|all"}
+
+            def _ioas(key: str) -> list[int] | None:
+                v = kwargs.get(key)
+                if v is None:
+                    return None
+                if isinstance(v, list) and v and all(
+                    isinstance(x, int) and not isinstance(x, bool) and x >= 0 for x in v
+                ):
+                    return [int(x) for x in v]
+                return None
+
+            yx_ioas = _ioas("yx_ioas")
+            yc_ioas = _ioas("yc_ioas")
+            if (yx_scope == "selected" and not yx_ioas) or (
+                yc_scope == "selected" and not yc_ioas
+            ):
+                return {"ok": False, "error": "scope=selected 须提供非空 ioas 列表"}
+
             await eng.start_simulation(
                 yx_interval=float(kwargs.get("yx_interval", 5.0)),
                 yc_interval=float(kwargs.get("yc_interval", 2.0)),
                 yx_change_rate=float(kwargs.get("yx_change_rate", 0.1)),
                 yc_change_range=float(kwargs.get("yc_change_range", 0.05)),
+                yx_scope=yx_scope,
+                yc_scope=yc_scope,
+                yx_ioas=yx_ioas,
+                yc_ioas=yc_ioas,
             )
         else:
             await eng.stop_simulation()

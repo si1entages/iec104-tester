@@ -322,8 +322,18 @@ export interface SimRequest {
   enabled: boolean
   yx_interval?: number
   yc_interval?: number
+  /** YX 每周期翻转概率（0~1，每周期对范围内每点独立判定） */
   yx_change_rate?: number
+  /** 仅对点表未声明量程的 YC 点生效：当前值 ± 比例浮动；声明量程的点直接在 [min,max] 内随机 */
   yc_change_range?: number
+  /** YX 模拟范围：selected=仅 yx_ioas 列出的点；all=全部 YX 点（默认） */
+  yx_scope?: 'selected' | 'all'
+  /** YC 模拟范围：selected=仅 yc_ioas；all=全部 YC 点（默认） */
+  yc_scope?: 'selected' | 'all'
+  /** scope=selected 时的 YX 点集（点表外 IOA 被跳过） */
+  yx_ioas?: number[]
+  /** scope=selected 时的 YC 点集 */
+  yc_ioas?: number[]
 }
 
 export type BatchAction = 'enable' | 'disable' | 'group'

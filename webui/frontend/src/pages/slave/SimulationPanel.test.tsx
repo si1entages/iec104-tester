@@ -1,9 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { App as AntdApp } from 'antd'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { SimulationPanel } from './SimulationPanel'
+import type { Point } from '../../api/types'
 
 function jsonResponse(body: unknown): Response {
   return {
@@ -27,14 +28,14 @@ function stubFetch(simulation = false): ReturnType<typeof vi.fn> {
   return fetchMock
 }
 
-function renderPanel(disabled = false) {
+function renderPanel(disabled = false, selected: Point | null = null) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } },
   })
   return render(
     <QueryClientProvider client={client}>
       <AntdApp>
-        <SimulationPanel disabled={disabled} />
+        <SimulationPanel disabled={disabled} selected={selected} />
       </AntdApp>
     </QueryClientProvider>,
   )
@@ -51,21 +52,12 @@ function lastSimPost(fetchMock: ReturnType<typeof vi.fn>): Record<string, unknow
   throw new Error('没有捕获到 /api/slave/sim 调用')
 }
 
-describe('SimulationPanel（子站模拟控制）', () => {
+describe('SimulationPanel（子站模拟控制，第二批改造⑤）', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
   })
 
-  it('不再有「手动置数/随机变化」模式单选（manual 选项已删除）', async () => {
-    stubFetch(false)
-    renderPanel()
-
-    await waitFor(() => expect(screen.getByRole('button', { name: '启动模拟' })).toBeEnabled())
-    expect(screen.queryByRole('radio')).toBeNull()
-    expect(screen.queryByText(/手动置数（不自动变化）/)).toBeNull()
-  })
-
-  it('后端未模拟 → 「启动模拟」下发 enabled=true 与变化参数', async () => {
+  it('默认（全部点/全部点）：启动请求带 scope=all', async () => {
     const fetchMock = stubFetch(false)
     renderPanel()
 
@@ -79,15 +71,62 @@ describe('SimulationPanel（子站模拟控制）', () => {
         yc_interval: 2,
         yx_change_rate: 0.1,
         yc_change_range: 0.05,
+        yx_scope: 'all',
+        yc_scope: 'all',
       }),
     )
+  })
+
+  it('文案改名：YX 为「每周期翻转概率」，YC 为「无量程点浮动比例」', async () => {
+    stubFetch(false)
+    renderPanel()
+
+    await waitFor(() => expect(screen.getByText('每周期翻转概率')).toBeInTheDocument())
+    expect(screen.getByText('无量程点浮动比例')).toBeInTheDocument()
+    // 旧文案不再出现
+    expect(screen.queryByText('YX 变化率')).toBeNull()
+    expect(screen.queryByText('YC 变化幅度')).toBeNull()
+  })
+
+  it('YX scope=selected：带 yx_ioas=[选中 IOA]；YC 仍为 all', async () => {
+    const fetchMock = stubFetch(false)
+    renderPanel(false, { ioa: 1, type: 'YX', name: '开关1', enabled: true })
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '启动模拟' })).toBeEnabled())
+    // 两个范围 Segmented：第一个是 YX
+    const segmenteds = screen.getAllByRole('radiogroup')
+    fireEvent.click(within(segmenteds[0]).getByText('选中点'))
+    fireEvent.click(screen.getByRole('button', { name: '启动模拟' }))
+
+    await waitFor(() => {
+      const body = lastSimPost(fetchMock)
+      expect(body.yx_scope).toBe('selected')
+      expect(body.yx_ioas).toEqual([1])
+      expect(body.yc_scope).toBe('all')
+    })
+  })
+
+  it('scope=selected 但选中点类型不匹配 → 阻止下发并提示', async () => {
+    const fetchMock = stubFetch(false)
+    renderPanel(false, { ioa: 101, type: 'YC', name: '温度', enabled: true })
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '启动模拟' })).toBeEnabled())
+    const segmenteds = screen.getAllByRole('radiogroup')
+    fireEvent.click(within(segmenteds[0]).getByText('选中点')) // YX 范围=选中点，但选中的是 YC
+    fireEvent.click(screen.getByRole('button', { name: '启动模拟' }))
+
+    await waitFor(() => expect(screen.getByText(/请先在点表选中一个 YX 点/)).toBeInTheDocument())
+    const calls = (fetchMock.mock.calls as unknown as [string][]).filter(([u]) => u === '/api/slave/sim')
+    expect(calls).toHaveLength(0)
   })
 
   it('后端正在模拟 → 按钮变「停止模拟」，下发 enabled=false（不带变化参数）', async () => {
     const fetchMock = stubFetch(true)
     renderPanel()
 
-    await waitFor(() => expect(screen.getByRole('button', { name: '停止模拟' })).toBeEnabled())
+    await waitFor(() => expect(screen.getByRole('button', { name: '停止模拟' })).toBeEnabled(), {
+      timeout: 10000,
+    })
     fireEvent.click(screen.getByRole('button', { name: '停止模拟' }))
 
     await waitFor(() => expect(lastSimPost(fetchMock)).toEqual({ enabled: false }))

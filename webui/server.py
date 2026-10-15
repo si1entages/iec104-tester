@@ -470,7 +470,15 @@ def create_app(bridge: EngineBridge) -> web.Application:
             return web.json_response({"ok": False, "error": "invalid body"}, status=400)
         return web.json_response(await bridge.set_simulation(
             bool(body.get("enabled")),
-            **{k: body[k] for k in ("yx_interval", "yc_interval", "yx_change_rate", "yc_change_range") if k in body},
+            **{
+                k: body[k]
+                for k in (
+                    "yx_interval", "yc_interval", "yx_change_rate", "yc_change_range",
+                    # 第二批改造⑤：范围模式（YX/YC 独立）——scope + 选中点集
+                    "yx_scope", "yc_scope", "yx_ioas", "yc_ioas",
+                )
+                if k in body
+            },
         ))
 
     async def api_slave_start(request: web.Request) -> web.Response:

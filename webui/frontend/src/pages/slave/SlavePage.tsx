@@ -81,7 +81,7 @@ export default function SlavePage() {
               {
                 key: 'sim',
                 label: '模拟控制',
-                children: <SimulationPanel disabled={!running} />,
+                children: <SimulationPanel disabled={!running} selected={selected} />,
               },
               {
                 key: 'inject',

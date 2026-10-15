@@ -34,6 +34,27 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("iec104.slave")
 
+#: YcPointDef 的缺省量程（点表未声明 min/max 的标记；见 core/data/point_table.py）
+DEFAULT_YC_MIN = -99999.0
+DEFAULT_YC_MAX = 99999.0
+
+
+def _next_yc_value(point, current: float, yc_change_range: float) -> float:
+    """计算 YC 模拟新值（第二批改造⑤：量程内随机）.
+
+    - 点表声明了真实量程（[min, max] ≠ 缺省 ±99999 且 min < max）：
+      在 [min, max] 内**均匀随机**；
+    - 未声明量程 / 量程非法：回落「当前值 ± ``yc_change_range`` 比例浮动」，
+      并夹紧到点表声明的上下限（缺省 ±99999 等于不夹）。
+    """
+    has_range = point.min_value < point.max_value and not (
+        point.min_value == DEFAULT_YC_MIN and point.max_value == DEFAULT_YC_MAX
+    )
+    if has_range:
+        return random.uniform(point.min_value, point.max_value)
+    delta = current * yc_change_range * (random.random() * 2 - 1)
+    return max(point.min_value, min(point.max_value, current + delta))
+
 
 class SlaveSimulator:
     """子站数据模拟 / 自发上送（由 ``SlaveEngine`` 组合持有）."""
@@ -63,15 +84,46 @@ class SlaveSimulator:
         yc_interval: float = 2.0,
         yx_change_rate: float = 0.1,
         yc_change_range: float = 0.05,
+        yx_scope: str = "all",
+        yc_scope: str = "all",
+        yx_ioas: list[int] | None = None,
+        yc_ioas: list[int] | None = None,
     ) -> None:
-        """启动自动数据模拟."""
+        """启动自动数据模拟.
+
+        Args:
+            yx_interval / yc_interval: YX / YC 变化周期（秒）。
+            yx_change_rate: **每周期翻转概率**（0~1，每周期对每个在范围内的 YX 点
+                独立掷一次）。
+            yc_change_range: 仅对**未声明量程**的 YC 点生效（当前值 ± 比例浮动）；
+                声明了量程的点直接在 [min, max] 内均匀随机。
+            yx_scope / yc_scope: 模拟范围 ``"all"``（全部点）或 ``"selected"``
+                （仅 ``yx_ioas`` / ``yc_ioas`` 列出的点；不在点表内的 IOA 跳过）。
+            yx_ioas / yc_ioas: scope=selected 时的点集。
+        """
         e = self._engine
         if e._simulation_running:
             return
 
+        # 选中范围里不在点表内的 IOA 记一条 info（这些点会被跳过）
+        if yx_scope == "selected" and yx_ioas:
+            known = {p.ioa for p in e._point_table.get_all_yx()}
+            missing = [ioa for ioa in yx_ioas if ioa not in known]
+            if missing:
+                logger.info(f"YX 模拟范围含点表外的 IOA（将跳过）: {missing}")
+        if yc_scope == "selected" and yc_ioas:
+            known = {p.ioa for p in e._point_table.get_all_yc()}
+            missing = [ioa for ioa in yc_ioas if ioa not in known]
+            if missing:
+                logger.info(f"YC 模拟范围含点表外的 IOA（将跳过）: {missing}")
+
         e._simulation_running = True
         e._simulation_task = e._spawn(
-            self.simulation_loop(yx_interval, yc_interval, yx_change_rate, yc_change_range)
+            self.simulation_loop(
+                yx_interval, yc_interval, yx_change_rate, yc_change_range,
+                yx_scope=yx_scope, yc_scope=yc_scope,
+                yx_ioas=yx_ioas, yc_ioas=yc_ioas,
+            )
         )
         logger.info("Simulation started")
 
@@ -93,36 +145,48 @@ class SlaveSimulator:
         yc_interval: float,
         yx_change_rate: float,
         yc_change_range: float,
+        yx_scope: str = "all",
+        yc_scope: str = "all",
+        yx_ioas: list[int] | None = None,
+        yc_ioas: list[int] | None = None,
     ) -> None:
-        """模拟数据变化循环（随机变化）."""
+        """模拟数据变化循环（随机变化）.
+
+        YX/YC 各自支持 ``"all"``（全部点）与 ``"selected"``（仅指定 IOA，
+        点表外的 IOA 自动跳过）两种范围模式。
+        """
         e = self._engine
         yx_tick = 0.0
         yc_tick = 0.0
+        yx_selected = {int(x) for x in (yx_ioas or [])}
+        yc_selected = {int(x) for x in (yc_ioas or [])}
 
         while e._simulation_running:
             await asyncio.sleep(0.1)
             now = time.monotonic()
 
-            # 遥信随机变化
+            # 遥信随机变化（每周期对范围内每点按概率翻转）
             if now - yx_tick >= yx_interval:
                 yx_tick = now
                 yx_points = e._point_table.get_all_yx()
                 for p in yx_points:
+                    if yx_scope == "selected" and p.ioa not in yx_selected:
+                        continue
                     if random.random() < yx_change_rate:
                         current = e._data_store.get_yx(p.ioa)
                         new_value = not current.value if current else True
                         await self.send_spontaneous_yx(p.ioa, new_value)
 
-            # 遥测随机波动
+            # 遥测随机波动（声明量程 → 量程内随机；未声明 → 当前值 ± 比例回落）
             if now - yc_tick >= yc_interval:
                 yc_tick = now
                 yc_points = e._point_table.get_all_yc()
                 for p in yc_points:
+                    if yc_scope == "selected" and p.ioa not in yc_selected:
+                        continue
                     current = e._data_store.get_yc(p.ioa)
                     if current:
-                        delta = current.value * yc_change_range * (random.random() * 2 - 1)
-                        new_value = current.value + delta
-                        new_value = max(p.min_value, min(p.max_value, new_value))
+                        new_value = _next_yc_value(p, float(current.value), yc_change_range)
                         await self.send_spontaneous_yc(p.ioa, new_value)
 
     async def auto_change_loop(self) -> None:

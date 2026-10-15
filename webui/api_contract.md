@@ -115,7 +115,16 @@
 | POST | `/api/slave/ps` | `ioa: int (≥0)`, `states: int[]`（长度 1–8，元素 0/1） | `{ok, error?}` |
 | POST | `/api/slave/response` | `ResponseBehavior` 字典（任意键，未启动时可暂存） | `{ok, error?}` |
 | GET | `/api/slave/response` | — | `{ok, response: ResponseBehavior}`（见 §4.8；未启动时返回暂存/默认值） |
-| POST | `/api/slave/sim` | `enabled: bool`, `yx_interval?`, `yc_interval?`, `yx_change_rate?`, `yc_change_range?` | `{ok, error?}` |
+| POST | `/api/slave/sim` | `enabled: bool`, `yx_interval?`, `yc_interval?`, `yx_change_rate?`, `yc_change_range?`, `yx_scope?: "selected"\|"all"`, `yc_scope?: "selected"\|"all"`, `yx_ioas?: int[]`, `yc_ioas?: int[]` | `{ok, error?}` |
+
+> 模拟改造（第二批 ⑤）：
+> - `yx_change_rate` 语义为**每周期翻转概率**（0~1，每周期对范围内每个 YX 点独立判定）；
+> - YC 取值为**点表量程内随机**：声明了量程（`[min,max]` ≠ 缺省 ±99999）的点在
+>   `[min, max]` 内均匀随机；未声明量程/量程非法的点回落「当前值 ± `yc_change_range`
+>   比例浮动」（`yc_change_range` 仅对这些点生效）；
+> - `yx_scope`/`yc_scope`（YX/YC 独立，默认 `"all"`）：`"all"`=全部点；
+>   `"selected"`=仅 `yx_ioas`/`yc_ioas` 列出的点，**scope=selected 时对应 ioas
+>   须为非空 int 数组（≥0），否则 `{ok:false}`**；点表外的 IOA 被跳过（上送 info 日志）。
 
 ### 2.4 点表批量与导入导出
 
