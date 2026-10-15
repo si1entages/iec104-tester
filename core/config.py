@@ -70,6 +70,24 @@ class PointTableConfig:
 
 
 @dataclass
+class HistoryConfig:
+    """历史库配置（T17：默认开启）.
+
+    Attributes:
+        enabled: 启动时是否自动建库；``--no-history`` 可临时关闭。
+        dir: 历史库所在目录；空字符串表示项目根目录下的 ``data/``。
+        retention_days: 保留天数，按时间清理早于该天数的记录；``<=0`` 不按时间清理。
+        max_size_mb: 库文件容量上限（MB）；超出后按最旧优先淘汰；``<=0`` 不限制。
+        flush_interval: 批量落盘间隔（秒）；``<=0`` 表示仅手动/退出时刷盘。
+    """
+    enabled: bool = True
+    dir: str = ""
+    retention_days: int = 7
+    max_size_mb: int = 512
+    flush_interval: float = 5.0
+
+
+@dataclass
 class AppConfig:
     """应用总配置."""
     mode: str = "master"            # "master" / "slave"
@@ -80,6 +98,7 @@ class AppConfig:
     slave: SlaveConfig = field(default_factory=SlaveConfig)
     display: DisplayConfig = field(default_factory=DisplayConfig)
     point_table: PointTableConfig = field(default_factory=PointTableConfig)
+    history: HistoryConfig = field(default_factory=HistoryConfig)
     # 自定义（非标准厂商私有）TypeID 结构定义（T22）：元素形如
     # ``{type_id: 128, name: VendorAlarm, fields: [{name: v, type: u8}]}``。
     custom_types: list = field(default_factory=list)
@@ -134,6 +153,13 @@ class AppConfig:
                 'yc_count': self.point_table.yc_count,
                 'yk_count': self.point_table.yk_count,
                 'ym_count': self.point_table.ym_count,
+            },
+            'history': {
+                'enabled': self.history.enabled,
+                'dir': self.history.dir,
+                'retention_days': self.history.retention_days,
+                'max_size_mb': self.history.max_size_mb,
+                'flush_interval': self.history.flush_interval,
             },
             'custom_types': list(self.custom_types),
         }
@@ -199,6 +225,13 @@ def load_config(path: str | Path) -> AppConfig:
     cfg.point_table.yc_count = pt.get('yc_count', cfg.point_table.yc_count)
     cfg.point_table.yk_count = pt.get('yk_count', cfg.point_table.yk_count)
     cfg.point_table.ym_count = pt.get('ym_count', cfg.point_table.ym_count)
+
+    hist = data.get('history', {}) or {}
+    cfg.history.enabled = hist.get('enabled', cfg.history.enabled)
+    cfg.history.dir = hist.get('dir', cfg.history.dir)
+    cfg.history.retention_days = hist.get('retention_days', cfg.history.retention_days)
+    cfg.history.max_size_mb = hist.get('max_size_mb', cfg.history.max_size_mb)
+    cfg.history.flush_interval = hist.get('flush_interval', cfg.history.flush_interval)
 
     custom_types = data.get('custom_types', None)
     if isinstance(custom_types, list):

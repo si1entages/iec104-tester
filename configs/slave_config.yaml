@@ -37,6 +37,14 @@ point_table:
   yk_count: 20
   ym_count: 10
 
+# 历史库（默认开启；命令行 --no-history 可关闭）
+history:
+  enabled: true
+  dir: ""                 # 空 = 项目根目录下的 data/
+  retention_days: 7       # 保留天数，<=0 不按时间清理
+  max_size_mb: 512        # 容量上限(MB)，超出按最旧优先淘汰；<=0 不限制
+  flush_interval: 5.0     # 批量落盘间隔(秒)
+
 # 自定义（非标准厂商私有）TypeID —— 使私有类型可编解码往返（默认空）
 # custom_types:
 #   - type_id: 128

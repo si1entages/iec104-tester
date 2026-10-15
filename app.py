@@ -23,6 +23,25 @@ _DEFAULT_HTTP_PORT = {"slave": 8766, "master": 8765}
 _PROBE_INTERVAL_S = 0.05
 _PROBE_TIMEOUT_S = 5.0
 
+# 历史库默认文件名（目录见 HistoryConfig.dir / --history-db）
+_HISTORY_DB_NAME = "history.db"
+
+
+def resolve_history_path(cfg_dir: str, override: str | None = None) -> Path:
+    """解析历史库文件路径.
+
+    Args:
+        cfg_dir: ``HistoryConfig.dir``；空字符串表示项目根目录下的 ``data/``。
+        override: ``--history-db`` 显式路径；非空时直接采用（目录自动创建）。
+
+    Returns:
+        历史库的绝对/相对路径（不保证文件已存在）。
+    """
+    if override:
+        return Path(override)
+    base = Path(cfg_dir) if cfg_dir else Path(__file__).parent / "data"
+    return base / _HISTORY_DB_NAME
+
 
 def setup_logging(level: str = "INFO", log_file: str = None) -> None:
     """配置日志."""
@@ -158,6 +177,10 @@ def cli(default_role: str | None = None) -> int:
         help="历史数据库路径 (SQLite)"
     )
     parser.add_argument(
+        "--no-history", action="store_true",
+        help="关闭历史库（默认开启，落盘到 <数据目录>/history.db）"
+    )
+    parser.add_argument(
         "--test", type=str, default=None,
         help="运行自动化测试脚本 (YAML 文件或目录)"
     )
@@ -233,13 +256,33 @@ def cli(default_role: str | None = None) -> int:
         point_table.station_name = "Demo Station"
         point_table.common_addr = config.connection.common_addr
 
-    # 历史数据库
+    # 历史数据库（T17：默认开启，落盘到 <数据目录>/history.db）
+    # 优先级：--no-history > --history-db > config.history.enabled
     history_db = None
-    if args.history_db:
+    if args.no_history:
+        logger.info("History DB disabled by --no-history")
+    elif config.history.enabled or args.history_db:
         from core.data.history import HistoryDB
-        history_db = HistoryDB(args.history_db)
-        history_db.open()
-        logger.info(f"History DB: {args.history_db}")
+
+        db_path = resolve_history_path(config.history.dir, args.history_db)
+        try:
+            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+            history_db = HistoryDB(
+                db_path,
+                retention_days=config.history.retention_days,
+                max_size_mb=config.history.max_size_mb,
+                flush_interval=config.history.flush_interval,
+                auto_flush=True,
+            )
+            history_db.open()
+            logger.info(
+                f"History DB: {db_path} (retention={config.history.retention_days}d, "
+                f"max_size={config.history.max_size_mb}MB, "
+                f"flush_interval={config.history.flush_interval}s)"
+            )
+        except Exception as e:
+            logger.error(f"Failed to open history DB: {e}")
+            history_db = None
 
     try:
         # 自动化测试脚本模式
