@@ -11,18 +11,20 @@ import {
 import { Alert, Badge, Layout, Menu, Tag, Typography, theme as antdTheme } from 'antd'
 
 import { useStatusQuery } from '../api/queries'
+import type { Role } from '../api/types'
 import { useUiStore } from '../store/uiStore'
 import type { PageKey } from '../store/uiStore'
 import type { WsStatus } from '../ws/client'
 
 const { Header, Sider, Content } = Layout
 
-const MENU_ITEMS = [
-  { key: 'master', icon: <ThunderboltOutlined />, label: '主站工作台' },
-  { key: 'slave', icon: <DeploymentUnitOutlined />, label: '子站工作台' },
-  { key: 'multi', icon: <CloudServerOutlined />, label: '多站' },
-  { key: 'status', icon: <DashboardOutlined />, label: '状态总览' },
-  { key: 'logs', icon: <FileTextOutlined />, label: '日志' },
+/** 导航项按部署角色过滤：主站会话不出现子站页面入口（反之亦然） */
+const MENU_ITEMS: { key: PageKey; icon: ReactNode; label: string; roles: Role[] }[] = [
+  { key: 'master', icon: <ThunderboltOutlined />, label: '主站工作台', roles: ['master'] },
+  { key: 'slave', icon: <DeploymentUnitOutlined />, label: '子站工作台', roles: ['slave'] },
+  { key: 'multi', icon: <CloudServerOutlined />, label: '多站', roles: ['master', 'slave'] },
+  { key: 'status', icon: <DashboardOutlined />, label: '状态总览', roles: ['master', 'slave'] },
+  { key: 'logs', icon: <FileTextOutlined />, label: '日志', roles: ['master', 'slave'] },
 ]
 
 const WS_BADGE: Record<WsStatus, { status: 'processing' | 'warning' | 'error' | 'default'; text: string }> = {
@@ -47,6 +49,12 @@ export function AppLayout({ children }: Props) {
   const setSendBackpressure = useUiStore((s) => s.setSendBackpressure)
 
   const { data: status } = useStatusQuery()
+  const role = status?.role
+  // 角色未知（状态未返回）时不过滤，避免导航闪空；角色就绪后按 role 过滤。
+  // 只把 key/icon/label 传给 Menu：roles 是自定义过滤字段，透传会漏成 DOM 属性
+  const menuItems = (
+    role ? MENU_ITEMS.filter((item) => item.roles.includes(role)) : MENU_ITEMS
+  ).map(({ key, icon, label }) => ({ key, icon, label }))
   const badge = WS_BADGE[wsStatus]
   // 颜色一律取自主题 token，禁止硬编码（亮暗一致）
   const { token } = antdTheme.useToken()
@@ -71,7 +79,7 @@ export function AppLayout({ children }: Props) {
           theme="dark"
           mode="inline"
           selectedKeys={[page]}
-          items={MENU_ITEMS}
+          items={menuItems}
           onClick={({ key }) => setPage(key as PageKey)}
         />
       </Sider>
