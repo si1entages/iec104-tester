@@ -111,13 +111,15 @@ def create_app(bridge: EngineBridge) -> web.Application:
             body = await request.json()
         except Exception:
             return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
-        host = body.get("host", "127.0.0.1")
+        # 同 api_slave_start：缺省回落 config.connection（body 显式优先）
+        conn = bridge.config.connection
+        host = body.get("host", conn.host)
         if not isinstance(host, str):
             return web.json_response({"ok": False, "error": "invalid host"}, status=400)
-        port = body.get("port", 2404)
+        port = body.get("port", conn.port)
         if not isinstance(port, int) or port < 0 or port > 65535:
             return web.json_response({"ok": False, "error": "invalid port"}, status=400)
-        addr = body.get("addr", 1)
+        addr = body.get("addr", conn.common_addr)
         if not isinstance(addr, int) or addr < 0:
             return web.json_response({"ok": False, "error": "invalid addr"}, status=400)
         gi_interval = body.get("gi_interval", 0)
@@ -466,13 +468,16 @@ def create_app(bridge: EngineBridge) -> web.Application:
             body = await request.json()
         except Exception:
             return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        # 端口/地址缺省回落 CLI --port 与 --config（接线审计补漏，同 D3 类）：
+        # body 显式传入 > config.connection（app.py 已把 --port/--host 写入）
+        conn = bridge.config.connection
         host = body.get("host", "0.0.0.0")
         if not isinstance(host, str):
             return web.json_response({"ok": False, "error": "invalid host"}, status=400)
-        port = body.get("port", 2404)
+        port = body.get("port", conn.port)
         if not isinstance(port, int) or port < 0 or port > 65535:
             return web.json_response({"ok": False, "error": "invalid port"}, status=400)
-        addr = body.get("addr", 1)
+        addr = body.get("addr", conn.common_addr)
         if not isinstance(addr, int) or addr < 0:
             return web.json_response({"ok": False, "error": "invalid addr"}, status=400)
         tls = body.get("tls")
