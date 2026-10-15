@@ -5,14 +5,14 @@ import { useQueryClient } from '@tanstack/react-query'
 import {
   appendEvent,
   appendFrame,
-  appendLiveLog,
+  appendLiveLogs,
   queryKeys,
   replaceEvents,
   replaceFrames,
   replaceLiveLogs,
 } from '../api/queries'
 import { describeSchemaMismatch } from '../api/schema'
-import type { Point, WsMessage } from '../api/types'
+import type { LogRow, Point, WsMessage } from '../api/types'
 import { isLogRow, isPointsResponse, isStatus, isWsMessage, readSchemaVersion } from '../api/validate'
 import { applyPatches, extractPatches, mergePointValues, pointKey } from '../lib/pointValue'
 import { normalizeEvent, normalizeEvents, normalizeFrame, normalizeFrames } from '../lib/records'
@@ -22,6 +22,9 @@ import { WsClient, resolveWsUrl } from './client'
 
 /** 快照到达前最多缓冲的增量条数（防极端乱序导致内存膨胀） */
 const MAX_PENDING = 2000
+
+/** 高频日志批量合并窗口（ms）：窗口内的 log 消息整批一次写入缓存，不逐条渲染 */
+const LOG_FLUSH_MS = 250
 
 /**
  * 全局 WS 桥（T11/T12）：
@@ -45,6 +48,16 @@ export function useWsBridge(): void {
     let awaitingSnapshot = true
     let pending: WsMessage[] = []
     let refreshTimer: ReturnType<typeof setTimeout> | null = null
+    let pendingLogs: LogRow[] = []
+    let logFlushTimer: ReturnType<typeof setTimeout> | null = null
+
+    const flushLogs = (): void => {
+      logFlushTimer = null
+      if (pendingLogs.length === 0) return
+      const rows = pendingLogs
+      pendingLogs = []
+      appendLiveLogs(queryClient, rows)
+    }
 
     const recordTrend = (rows: Point[]): void => {
       if (rows.length === 0) return
@@ -125,7 +138,11 @@ export function useWsBridge(): void {
           break
         }
         case 'log':
-          if (isLogRow(msg.data)) appendLiveLog(queryClient, msg.data)
+          // 批量合并：窗口内的日志先入缓冲，统一一次写入（避免高频日志逐条触发渲染）
+          if (isLogRow(msg.data)) {
+            pendingLogs.push(msg.data)
+            if (!logFlushTimer) logFlushTimer = setTimeout(flushLogs, LOG_FLUSH_MS)
+          }
           break
         default:
           break
@@ -173,6 +190,7 @@ export function useWsBridge(): void {
     return () => {
       unsubscribe()
       if (refreshTimer) clearTimeout(refreshTimer)
+      if (logFlushTimer) clearTimeout(logFlushTimer)
       client.close()
     }
   }, [

@@ -140,9 +140,19 @@ function appendCapped<T>(list: T[] | undefined, row: T, cap: number): T[] {
 }
 
 export function appendLiveLog(client: QueryClient, row: LogRow): void {
-  client.setQueryData<LogRow[]>(queryKeys.liveLogs, (prev) =>
-    appendCapped(prev, row, MAX_LIVE_LOGS),
-  )
+  appendLiveLogs(client, [row])
+}
+
+/**
+ * 批量写入实时日志（WS 桥高频日志的节流合并入口）：
+ * 整批一次 setQueryData，避免逐条触发渲染。
+ */
+export function appendLiveLogs(client: QueryClient, rows: LogRow[]): void {
+  if (rows.length === 0) return
+  client.setQueryData<LogRow[]>(queryKeys.liveLogs, (prev) => {
+    const next = prev ? prev.concat(rows) : rows.slice()
+    return next.length > MAX_LIVE_LOGS ? next.slice(next.length - MAX_LIVE_LOGS) : next
+  })
 }
 
 export function replaceLiveLogs(client: QueryClient, rows: LogRow[]): void {
