@@ -647,10 +647,24 @@ stations:
 - 打包形态下历史库落在 `dist/<角色>/_internal/data/`（见 §2「打包产物」）；
 - CLI 工具（run_multi_station/capture_tool/sim_tool）不在打包产物内，需源码环境运行。
 
-### 冗余双通道（T21，开发中）
+### 冗余双通道（主站）
 
-传输层冗余双通道（主备链路自动切换）**正在开发**，本节为占位；落定后此处将补充
-配置项、切换行为与验证矩阵。
+主站支持**冗余双通道**（T21）：主/备两条独立 TCP 连接指向两个冗余前置机，同一时刻
+仅一条活动收发；主用断链自动切换到已预连接（TCP+STARTDT）的备用通道，进入 Running
+后自动补发总召唤；原主用恢复后自动降为新备用（不抢占）。应用层按 ASDU 摘要在切换
+窗口内去重（传输层 I 帧序列号照常）。
+
+```yaml
+redundancy:
+  enabled: true
+  standby_host: "192.168.1.101"   # 备用前置机
+  standby_port: 2404
+  switch_timeout: 10.0            # 切换后等待 Running 的超时（秒）
+  dedup_window: 5.0               # 切换窗口去重时长（秒）
+```
+
+配置无效（备用地址空/端口非法/备用=主用）构造即抛 `ValueError`，不做静默降级。
+模型与未覆盖部分详见 [`redundancy.md`](redundancy.md)。
 
 ---
 
