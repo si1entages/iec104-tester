@@ -49,7 +49,7 @@ IOA = 100
 def _last_section(lsq: int, chs: int = 0) -> LastSection:
     """构造 F_LS_NA_1 信息对象：第 4 字节 = LSQ，第 5 字节 = CHS."""
     return LastSection(ioa=IOA, file_name=FILE_NAME, section_name=1,
-                       last_segment=lsq, status=chs)
+                       lsq=lsq, chs=chs)
 
 
 def _segment(data: bytes) -> FileSegment:
@@ -232,17 +232,18 @@ def test_sg_io_body_matches_standard_layout():
     assert len(body) == 4 + len(b"AB")
 
 
-def test_last_section_field_names_disagree_with_standard_currently_known_defect():
-    """**已知缺陷（待修）**：``LastSection`` 字段命名与标准语义不符.
+def test_last_section_field_names_match_standard():
+    """``LastSection`` 字段名与标准语义一致：lsq（限定词）/ chs（校验和）.
 
-    标准字段名是 LSQ（限定词）与 CHS（校验和）；本实现命名为 ``last_segment``（段号）
-    与 ``status``（状态），且 ``types.py`` 与 ``file_transfer.py`` 的旧注释各自给出
-    互相矛盾的解释。本用例钉住 **字节位置** 映射，供修复时改名为 ``lsq``/``chs``。
+    （原缺陷钉桩：字段名为 ``last_segment``/``status``，与标准命名相悖且旧注释
+    互相矛盾，已按字节位置映射更名为 ``lsq``/``chs``。）
     """
     ls = _last_section(lsq=1, chs=0)
 
-    assert ls.to_bytes() == bytes([FILE_NAME, 0, 1, 1, 0])   # 末字节对 = (LSQ, CHS)
-    assert ls.status_str == "缺省"                            # 旧标注按"状态"解释，语义有误
+    assert ls.to_bytes() == bytes([FILE_NAME, 0, 1, 1, 0])   # 末两字节 = (LSQ, CHS)
+    assert ls.lsq_str == "FILE_TRANSFER_WITHOUT_DEACT"
+    assert LastSection(lsq=4).lsq_str == "SECTION_TRANSFER_WITH_DEACT"
+    assert LastSection(lsq=9).lsq_str == "未定义(9)"         # 超出 0-4 定义域
 
 
 def test_scq_qualifier_table_matches_standard():

@@ -1262,30 +1262,48 @@ class CallDirectory:
         return SCQ_NAMES.get(self.qualifier, f"未知({self.qualifier})")
 
 
+#: F_LS_NA_1 的 LSQ（最后的节/段限定词）取值 → 名称。
+#: 依据：lib60870.NET ``enum LastSectionOrSegmentQualifier``。
+LSQ_NAMES: dict[int, str] = {
+    0: "NOT_USED",
+    1: "FILE_TRANSFER_WITHOUT_DEACT",
+    2: "FILE_TRANSFER_WITH_DEACT",
+    3: "SECTION_TRANSFER_WITHOUT_DEACT",
+    4: "SECTION_TRANSFER_WITH_DEACT",
+}
+
+
 @dataclass
 class LastSection:
-    """最后的节/最后的段 (F_LS_NA_1 = 123)."""
+    """最后的节/最后的段 (F_LS_NA_1 = 123).
+
+    信息体 = ``NOF(2) + NOS(1) + LSQ(1) + CHS(1)`` = 5 字节。
+
+    - ``lsq``：最后的节/段限定词（0-4），取值/语义见 ``LSQ_NAMES``；
+      **仅 LSQ=1/2 表示"整个文件传输结束"**（见 ``core.protocol.file_transfer``）；
+    - ``chs``：本节校验和（CHS），算法见 ``core.protocol.file_transfer``。
+    """
     ioa: int = 0
     file_name: int = 0
     section_name: int = 0
-    last_segment: int = 0    # 最后段号 (8-bit)
-    status: int = 0          # 0=缺省, 1=不带停止, 2=带停止, 3=不带停止(段丢失), 4=带停止(段丢失)
+    lsq: int = 0             # LSQ: 最后的节/段限定词 (8-bit, 0-4)
+    chs: int = 0             # CHS: 本节校验和 (8-bit)
 
     @classmethod
     def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> LastSection:
         fn = data[offset] | (data[offset + 1] << 8)
         sn = data[offset + 2]
-        ls = data[offset + 3]
-        st = data[offset + 4]
-        return cls(ioa=ioa, file_name=fn, section_name=sn, last_segment=ls, status=st)
+        lsq = data[offset + 3]
+        chs = data[offset + 4]
+        return cls(ioa=ioa, file_name=fn, section_name=sn, lsq=lsq, chs=chs)
 
     def to_bytes(self) -> bytes:
         return bytes([self.file_name & 0xFF, (self.file_name >> 8) & 0xFF,
-                      self.section_name, self.last_segment, self.status])
+                      self.section_name, self.lsq, self.chs])
 
     @property
-    def status_str(self) -> str:
-        return {0: "缺省", 1: "不带停止", 2: "带停止", 3: "不带停止(段丢失)", 4: "带停止(段丢失)"}.get(self.status, f"未知({self.status})")
+    def lsq_str(self) -> str:
+        return LSQ_NAMES.get(self.lsq, f"未定义({self.lsq})")
 
 
 @dataclass

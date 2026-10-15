@@ -185,11 +185,13 @@ def test_file_transfer_types():
     assert cd2.qualifier == 5
     assert cd2.qualifier_str == "选择节"   # 标准 SCQ=5 = SELECT_SECTION
 
-    # 最后的节
-    ls = LastSection(ioa=0, file_name=1, section_name=1, last_segment=10, status=0)
+    # 最后的节（信息体 = NOF(2)+NOS(1)+LSQ(1)+CHS(1)，无"段号/状态"字段）
+    ls = LastSection(ioa=0, file_name=1, section_name=1, lsq=2, chs=0)
     data = ls.to_bytes()
+    assert data == bytes([1, 0, 1, 2, 0])
     ls2 = LastSection.from_bytes(data, ioa=0)
-    assert ls2.last_segment == 10
+    assert ls2.lsq == 2
+    assert ls2.lsq_str == "FILE_TRANSFER_WITH_DEACT"
 
     # 确认文件/节
     af = AckFileSection(ioa=0, file_name=1, section_name=1, qualifier=1)

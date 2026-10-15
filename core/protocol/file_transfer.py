@@ -17,6 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .types import (
+    LSQ_NAMES,
     AckFileSection,
     DirectoryEntry,
     FileReady,
@@ -56,13 +57,8 @@ SCQ_DEACTIVATE_SECTION = 7  # 去激活节
 #: 本实现暂沿用 5 触发目录上送——该组合保持开放，未按标准推断。
 SCQ_REQUEST_DIRECTORY = 5
 
-_LSQ_NAMES = {
-    LSQ_NOT_USED: "NOT_USED",
-    LSQ_FILE_TRANSFER_WITHOUT_DEACT: "FILE_TRANSFER_WITHOUT_DEACT",
-    LSQ_FILE_TRANSFER_WITH_DEACT: "FILE_TRANSFER_WITH_DEACT",
-    LSQ_SECTION_TRANSFER_WITHOUT_DEACT: "SECTION_TRANSFER_WITHOUT_DEACT",
-    LSQ_SECTION_TRANSFER_WITH_DEACT: "SECTION_TRANSFER_WITH_DEACT",
-}
+#: LSQ 值 → 名称（唯一出处 `core.protocol.types.LSQ_NAMES`，供日志复用）
+_LSQ_NAMES = LSQ_NAMES
 #: 表示**整个文件传输结束**的 LSQ（此时才可判定接收完成）
 LSQ_FILE_COMPLETE = (LSQ_FILE_TRANSFER_WITHOUT_DEACT, LSQ_FILE_TRANSFER_WITH_DEACT)
 #: 表示**仅当前节结束**的 LSQ（文件未结束，可能还有后续节）
@@ -189,9 +185,8 @@ class FileTransferManager:
     def handle_last_section(self, data: LastSection) -> None:
         """处理最后的节/段 (F_LS_NA_1).
 
-        信息体为 ``NOF(2, LE) | NOS(1) | LSQ(1) | CHS(1)``（不含 IOA）。
-        ``LastSection`` 的字段名与标准不符（见 docs/file_transfer_fls.md「待修」），
-        故此处**按字节位置**解释：``last_segment`` 槽 = LSQ，``status`` 槽 = CHS。
+        信息体为 ``NOF(2, LE) | NOS(1) | LSQ(1) | CHS(1)``（不含 IOA）；
+        ``LastSection.lsq``/``.chs`` 与标准八位组一一对应。
 
         - LSQ = 1/2（``FILE_TRANSFER_*``）→ **整个文件传输结束** → COMPLETED 并回调；
         - LSQ = 3/4（``SECTION_TRANSFER_*``）→ 仅本节结束、文件未结束。
@@ -199,10 +194,10 @@ class FileTransferManager:
         - LSQ = 0（``NOT_USED``）→ 不判定结束（目录传输的结束标记即用此值）；
         - 其它取值 → 超出 0-4 定义域，记告警（真机对端非标 / 字段错位）。
         """
-        lsq = data.last_segment   # 槽位名有误：实为 LSQ
+        lsq = data.lsq
         logger.info(
             f"Last Section: name={data.file_name} section={data.section_name} "
-            f"LSQ={lsq}({_LSQ_NAMES.get(lsq, '未定义')}) CHS={data.status}"
+            f"LSQ={lsq}({_LSQ_NAMES.get(lsq, '未定义')}) CHS={data.chs}"
         )
         self._context.lsq = lsq
         self._context.state = FileTransferState.LAST_SECTION
@@ -455,21 +450,20 @@ class FileTransferSlave(FileTransferManager):
         由主站据此判定接收完成（见 ``FileTransferManager.handle_last_section``）。
 
         ``ASDUBuilder.build_last_section`` 的第 5/6 个位置参数分别是 LSQ 八位组与
-        CHS 八位组（形参名 ``last_segment``/``status`` 与标准不符，见
-        docs/file_transfer_fls.md「待修」）。**CHS（本节校验和）算法待核实**，
-        暂发 0 且接收侧不校验；字段错位问题亦见同一清单。
+        CHS 八位组。**CHS（本节校验和）算法待核实**，暂发 0 且接收侧不校验
+        （见 docs/file_transfer_fls.md §4.1）。
         """
         from .asdu import ASDUBuilder
         asdu_data = ASDUBuilder.build_last_section(
             self._common_addr, ioa, self._context.file_name,
             self._context.section_name,
-            LSQ_FILE_TRANSFER_WITHOUT_DEACT,  # LSQ 八位组（形参名 last_segment）
-            0,                                # CHS 八位组（形参名 status，待核实）
+            LSQ_FILE_TRANSFER_WITHOUT_DEACT,  # LSQ 八位组
+            0,                                # CHS 八位组（算法待核实，暂发 0）
         )
         if self._on_send_asdu:
             self._on_send_asdu(asdu_data)
         self._context.state = FileTransferState.LAST_SECTION
-        logger.info(f"Last Section sent: last_segment={self._context.segment_number}")
+        logger.info(f"Last Section sent: lsq={LSQ_FILE_TRANSFER_WITHOUT_DEACT} segments={self._context.segment_number}")
 
     def handle_ack(self, ioa: int, data: AckFileSection) -> None:
         """处理确认."""
@@ -495,7 +489,7 @@ class FileTransferSlave(FileTransferManager):
         # 发送目录结束标记 (F_LS_NA_1)：LSQ = 0（NOT_USED），不表示任何传输结束
         asdu_data = ASDUBuilder.build_last_section(
             self._common_addr, ioa, file_name=0,
-            section_name=0, last_segment=LSQ_NOT_USED, status=0
+            section_name=0, lsq=LSQ_NOT_USED, chs=0
         )
         if self._on_send_asdu:
             self._on_send_asdu(asdu_data)

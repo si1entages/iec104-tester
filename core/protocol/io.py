@@ -235,7 +235,7 @@ def format_value_display(type_id: TypeID, value: Any) -> str:
     elif isinstance(value, CallDirectory):
         return f"文件={value.file_name} 节={value.section_name} 限定词={value.qualifier_str}"
     elif isinstance(value, LastSection):
-        return f"文件={value.file_name} 节={value.section_name} 最后段={value.last_segment} 状态={value.status_str}"
+        return f"文件={value.file_name} 节={value.section_name} LSQ={value.lsq}({value.lsq_str}) CHS={value.chs}"
     elif isinstance(value, AckFileSection):
         return f"文件={value.file_name} 节={value.section_name} 限定词={value.qualifier_str}"
     elif isinstance(value, FileSegment):

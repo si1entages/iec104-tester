@@ -1510,20 +1510,22 @@ class ASDUBuilder:
 
     @staticmethod
     def build_last_section(common_addr: int, ioa: int, file_name: int,
-                            section_name: int, last_segment: int, status: int = 0) -> bytes:
+                            section_name: int, lsq: int, chs: int = 0) -> bytes:
         """构造最后的节/最后的段 (F_LS_NA_1).
+
+        信息体 = NOF(2) + NOS(1) + LSQ(1) + CHS(1) = 5 字节。
 
         Args:
             common_addr: 公共地址
             ioa: 信息对象地址
-            file_name: 文件名 (16-bit)
-            section_name: 节名 (8-bit)
-            last_segment: 最后段号 (8-bit)
-            status: 状态
+            file_name: 文件名 (16-bit, NOF)
+            section_name: 节名 (8-bit, NOS)
+            lsq: LSQ 最后的节/段限定词 (0-4；仅 1/2 表示整个文件传输结束)
+            chs: CHS 本节校验和（算法见 ``file_transfer.section_checksum``）
         """
         asdu = ASDU(type_id=TypeID.F_LS_NA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
         ls = LastSection(ioa=ioa, file_name=file_name, section_name=section_name,
-                         last_segment=last_segment, status=status)
+                         lsq=lsq, chs=chs)
         asdu.objects.append(InformationObject(ioa=ioa, data=ls))
         return asdu.encode()
 
