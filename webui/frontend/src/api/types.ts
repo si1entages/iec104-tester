@@ -54,6 +54,8 @@ export interface PointsResponse {
 }
 
 export interface Frame {
+  /** 由信封携带（裸帧缺省） */
+  ts?: number
   direction: string
   len: number
   hex: string
@@ -61,13 +63,15 @@ export interface Frame {
 }
 
 export interface EngineEvent {
+  ts?: number
   type: string
   data: Record<string, unknown>
 }
 
 export interface RecentResponse {
-  frames: Frame[]
-  events: EngineEvent[]
+  /** 信封形态 `{kind, ts, data}`，见 normalizer */
+  frames: unknown[]
+  events: unknown[]
 }
 
 /** `GET /api/schema` */
@@ -199,6 +203,13 @@ export interface SlaveStartRequest {
   addr?: number
 }
 
+/** `POST /api/slave/step`：置数并自发上送步位置（`M_ST_TB_1`, COT=3）（T09） */
+export interface SlaveStepRequest {
+  ioa: number
+  /** -64..63 */
+  value: number
+}
+
 export interface YxRequest {
   ioa: number
   value: boolean
@@ -249,6 +260,113 @@ export interface BatchPointsRequest {
 
 export type ImportFormat = 'csv' | 'yaml' | 'json' | 'auto'
 
+// ── 主站参数状态（T08，契约 §2.6 / §4.6）───────────────────────────────
+
+export type ParameterResult =
+  | 'unknown'
+  | 'pending'
+  | 'ok'
+  | 'terminated'
+  | 'rejected'
+  | 'timeout'
+
+/** 参数命令在目标 IOA 上的装载/激活推进快照 */
+export interface ParameterStateEntry {
+  ioa: number
+  loadResult: ParameterResult
+  /** 装载应答的传送原因 */
+  loadCot: number | null
+  /** monotonic 秒值（用于算时长，非绝对时间） */
+  loadUpdatedAt: number | null
+  activationResult: ParameterResult
+  activationCot: number | null
+  activationUpdatedAt: number | null
+}
+
+/** `GET /api/master/param_state?ioa=<int>` */
+export interface ParamStateResponse {
+  ok: boolean
+  ioa: number
+  /** 从未下发过参数命令时为 null */
+  state: ParameterStateEntry | null
+}
+
+/** `GET /api/master/params` */
+export interface ParamsResponse {
+  ok: boolean
+  params: ParameterStateEntry[]
+}
+
+// ── 多站（T16，契约 §2.8 / §4.7）───────────────────────────────────────
+
+/** 多站单站配置（字段均有默认值，仅 `station_id` 必填） */
+export interface StationConfig {
+  station_id: string
+  station_name?: string
+  host?: string
+  port?: number
+  common_addr?: number
+  max_connections?: number
+  point_table_file?: string
+  auto_generate?: boolean
+  yx_count?: number
+  yc_count?: number
+  yk_count?: number
+  ym_count?: number
+  spontaneous_enabled?: boolean
+  simulation_enabled?: boolean
+  yx_interval?: number
+  yc_interval?: number
+  yx_change_rate?: number
+  yc_change_range?: number
+}
+
+export interface StationStatus {
+  station_id: string
+  station_name: string
+  port: number
+  common_addr: number
+  running: boolean
+  client_count: number
+  yx_count: number
+  yc_count: number
+  yk_count: number
+  ym_count: number
+  simulation_active: boolean
+}
+
+export interface StationSummary {
+  id: string
+  name: string
+  port: number
+  clients: number
+}
+
+export interface MultiStartRequest {
+  stations: StationConfig[]
+}
+
+export interface MultiStartResponse {
+  ok: boolean
+  stations?: StationStatus[]
+  error?: string
+}
+
+export interface MultiStatusResponse {
+  ok: boolean
+  running: boolean
+  stations: StationStatus[]
+}
+
+export interface MultiSummaryResponse {
+  ok: boolean
+  running: boolean
+  station_count: number
+  total_clients: number
+  uptime: number
+  stations: StationSummary[]
+}
+
 // ── WebSocket ──────────────────────────────────────────────────────────
 
 /** WS 信封：`{kind, schemaVersion, ts, data}` */
@@ -263,9 +381,10 @@ export interface WsSnapshotData {
   schemaVersion?: number
   points: Point[]
   status: Status
-  frames?: Frame[]
-  events?: EngineEvent[]
-  logs?: LogRow[]
+  /** 注意：`bridge.recent()` 返回的是**信封形态** `{kind, ts, data}`，用 normalizer 归一化 */
+  frames?: unknown[]
+  events?: unknown[]
+  logs?: unknown[]
 }
 
 export type WsMessage =
