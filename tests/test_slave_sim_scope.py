@@ -123,22 +123,36 @@ def _engine_with_points() -> SlaveEngine:
                        point_table=pt, spontaneous_enabled=True)
 
 
-async def _run_loop(engine: SlaveEngine, seconds: float, **kwargs) -> None:
-    """跑 simulation_loop 若干秒后停掉（直接驱动，不经 start_simulation）."""
+async def _run_loop(engine: SlaveEngine, passes: int, **kwargs) -> None:
+    """确定性地驱动 simulation_loop 跑满 ``passes`` 个周期后自然退出.
+
+    通过对 asyncio.sleep 计数在固定周期数后置停（而不是按墙钟取消），
+    避免取消落在 YX/YC 两段之间造成偶发失败。
+    """
     # 实时库按点表初始化（模拟 YC 需要当前值存在）
     engine.data_store.init_from_point_table(engine._point_table)
-    # 记录上送调用
     engine._sim.send_spontaneous_yx = AsyncMock(side_effect=engine._sim.send_spontaneous_yx)
     engine._sim.send_spontaneous_yc = AsyncMock(side_effect=engine._sim.send_spontaneous_yc)
-    engine._simulation_running = True
-    task = asyncio.create_task(engine._sim.simulation_loop(0.05, 0.05, 1.0, 0.1, **kwargs))
-    await asyncio.sleep(seconds)
-    engine._simulation_running = False
-    task.cancel()
+
+    real_sleep = asyncio.sleep
+    state = {"n": 0}
+
+    async def counted_sleep(_seconds: float) -> None:
+        state["n"] += 1
+        if state["n"] >= passes:
+            engine._simulation_running = False
+        await real_sleep(0)
+
+    import core.engine.slave_sim as sim_mod
+
+    orig_sleep = sim_mod.asyncio.sleep
+    sim_mod.asyncio.sleep = counted_sleep
     try:
-        await task
-    except asyncio.CancelledError:
-        pass
+        engine._simulation_running = True
+        await engine._sim.simulation_loop(0.05, 0.05, 1.0, 0.1, **kwargs)
+    finally:
+        sim_mod.asyncio.sleep = orig_sleep
+        engine._simulation_running = False
 
 
 @pytest.mark.asyncio
@@ -146,7 +160,7 @@ async def test_scope_selected_only_selected_points():
     """scope=selected：YX 只翻 IOA 1；YC 只动 IOA 101（9999 不在点表 → 跳过）."""
     engine = _engine_with_points()
     await _run_loop(
-        engine, 0.3,
+        engine, 3,
         yx_scope="selected", yx_ioas=[1],
         yc_scope="selected", yc_ioas=[101, 9999],
     )
@@ -163,7 +177,7 @@ async def test_scope_selected_only_selected_points():
 async def test_scope_all_covers_all_table_points():
     """scope=all（默认）：全部 YX/YC 点都在范围内变化."""
     engine = _engine_with_points()
-    await _run_loop(engine, 0.3)
+    await _run_loop(engine, 3)
     yx_ioas = {c.args[0] for c in engine._sim.send_spontaneous_yx.await_args_list}
     yc_ioas = {c.args[0] for c in engine._sim.send_spontaneous_yc.await_args_list}
     assert yx_ioas == {1, 2}  # rate=1.0，0.3s 内至少 3 个周期，全翻
