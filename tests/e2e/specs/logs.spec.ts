@@ -26,8 +26,18 @@ test('级别过滤生效（拦截 /api/logs 注入确定性数据）', async ({ 
   await expect(page.getByText('e2e-debug-row')).toBeVisible()
 
   // 取消勾选 INFO → INFO 行消失，其余保留
-  await page.locator('.ant-select .ant-select-selector').first().click()
-  await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option[title="INFO"]').click()
+  // ⚠️ 不能点击 selector 的几何中心：5 个已选 tag 的删除叉（×）位置取决于环境
+  // 字体度量（CI Linux runner 无中文字体，与本地 Windows Edge 不同），中心点可能
+  // 恰好落在某个 × 上——点击会变成「移除该级别」而非「展开下拉」（CI 首跑实测踩坑）。
+  // 改为点击 selector 右侧空白：那里只有无删除叉的 +N 计数 tag，任何字体下都安全。
+  const levelSelector = page.locator('.ant-select .ant-select-selector').first()
+  const box = await levelSelector.boundingBox()
+  await levelSelector.click({ position: { x: (box?.width ?? 260) - 8, y: (box?.height ?? 32) / 2 } })
+  const infoOption = page
+    .locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option[title="INFO"]')
+    .first()
+  await expect(infoOption).toBeVisible()
+  await infoOption.click()
   await expect(page.getByText('e2e-info-row')).toHaveCount(0)
   await expect(page.getByText('e2e-error-row')).toBeVisible()
   await expect(page.getByText('e2e-debug-row')).toBeVisible()
