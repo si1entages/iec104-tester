@@ -19,6 +19,29 @@
 > `Encode()`/`Parse()` 逐字节写出/读入字段，可直接作为八位组布局依据；但由于
 > 未取得标准正文，凡涉及「标准是否允许其它变体」的问题一律列入**待核实**。
 
+## 1.1 独立交叉印证（提交前追加，来源与本文件原依据相互独立）
+
+为避免「只信单一实现」，以下结论另经**三个互相独立**的渠道复核，结论一致：
+
+| 独立来源 | 佐证的具体结论 |
+|---|---|
+| Schneider Electric《Telecontrol — Engineering User's Guide》Figure 33/34（公开手册） | F_FR_NA_1 = 文件名 + **文件长度「Range 0..16777215」**（= 2^24−1 → **24 位/3 字节**）+ 文件准备就绪限定词（0=肯定 / 1=否定）。**独立印证 §5.1 的 LOF=3 字节** |
+| PMC 期刊论文（IoT/遥测系统）Table 6（F_DR_TA_1 目录 ASDU 定义） | 目录 ASDU = IOA(3) + NOF(**2**) + LOF(**3**) + SOF(1) + CP56Time2a(7)。**独立印证 LOF=3 字节** |
+| go-iecp5 `docs/filetransfer.md` + `asdu/asdu.go`（独立 Go 实现） | ① F_SG_NA_1 = `IOA + NOF(2) + NOS(1) + LOS(1) + 数据`，注释明确「**没有段号字段**」→ **独立印证 §5.2**；② F_LS_NA_1 携带 **CHS 校验和**，LSQ=3 表示最后的段、LSQ=1 表示最后的节；③ 每节校验和 = 「该节所有段八位组的**算术和 mod 256**」→ 为 §4.1 的 CHS 定义提供了**候选答案**（仍列待核实，见下） |
+| lib60870.NET `CS101/FileServices.cs`（本次另行直读源码） | ① `new FileLastSegmentOrSection(ioa, nof, sectionNumber, LSQ, checksum)` → 字段顺序 `NOF,NOS,LSQ,CHS`；② 状态机以 `lastSection.LSQ` 判定 `SECTION_TRANSFER_WITHOUT_DEACT`/`FILE_TRANSFER_WITHOUT_DEACT`/`FILE_TRANSFER_WITH_DEACT`，并以 `lastSection.CHS == sectionChecksum` 做**节校验**；③ `new FileSegment(ioa, nof, sectionNumber, segmentData)` → 无段号字段 |
+
+**标准正文状态**：IEC 60870-5-101/104 正文（含 §7.4.11 文件传输）仍**未取得**——
+付费标准，本环境无法访问权威原文；检索到的公开片段仅能确认**类型标识语义表**
+（`<120>:=file ready F_FR_NA_1` … `<123>:=last section, last segment F_LS_NA_1`），
+**不含八位组级布局**。故：
+
+- 「字段顺序/长度」以**多个互相独立的字节级参考实现 + 厂商公开手册**为依据（可信度高，但严格说不是标准原文）；
+- 「标准是否允许其它变体」「CHS 是否就是算术和 mod 256」等**仍留在第 4 节待核实**，未因新增渠道而擅自升级为"已核实"。
+
+> **4.1（CHS 算法）的进展**：go-iecp5 与 lib60870 **两者都用「该节所有段八位组的算术和 mod 256」**
+> 且在收端以 `CHS == 计算值` 判定节的肯定/否定确认。这是两个独立实现的一致做法，
+> 但因未取得标准正文，仍**列为待核实**，本次不实现校验逻辑（保持发 0、不校验）。
+
 ## 2. 已核实（含依据）
 
 ### 2.1 类型标识

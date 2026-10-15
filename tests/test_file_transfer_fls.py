@@ -269,3 +269,53 @@ def test_handle_file_request_branching_follows_nonstandard_scq_table():
 
     # 修正后 SCQ=4 应走删除分支（不得上送文件）；当前实现发出了 F_FR_NA_1(=120)
     assert sent and sent[0][0] == 120
+
+
+# ── ④ 裸字节钉桩：直接解一条手工构造的 F_LS 线缆帧 ─────────────────
+
+def _raw_fls_frame(lsq: int, chs: int) -> bytes:
+    """手工构造一条 F_LS_NA_1 线缆帧（不经过本仓库编码器）.
+
+    布局（已核实，见 docs/file_transfer_fls.md §2.2）：
+      [0]=TypeID 123, [1]=VSQ, [2..3]=COT, [4..5]=CA,
+      [6..8]=IOA(3), [9..10]=NOF(2, LE), [11]=NOS, [12]=LSQ, [13]=CHS
+    """
+    return bytes([
+        123, 1, 13, 0, 1, 0,
+        IOA & 0xFF, (IOA >> 8) & 0xFF, (IOA >> 16) & 0xFF,
+        FILE_NAME & 0xFF, (FILE_NAME >> 8) & 0xFF,
+        1, lsq, chs,
+    ])
+
+
+def test_raw_wire_fls_lsq_is_octet_4_and_chs_is_octet_5():
+    """裸字节钉桩：LSQ 在第 4 个信息体八位组、CHS 在第 5 个（两者不得颠倒）."""
+    for lsq in (0, 1, 2, 3, 4):
+        for chs in (0, 1, 255):
+            frame = _raw_fls_frame(lsq, chs)
+            body = frame[IO_BODY_OFFSET:]
+            assert len(body) == 5
+            assert body[:3] == bytes([FILE_NAME & 0xFF, FILE_NAME >> 8, 1])
+            assert body[3] == lsq           # 第 4 字节 = LSQ
+            assert body[4] == chs           # 第 5 字节 = CHS
+
+            # 解码后经管理器判定：结论只由第 4 字节决定
+            decoded = ASDU.decode(frame).objects[0].data
+            mgr, received = _receiver()
+            mgr.handle_last_section(decoded)
+
+            if lsq in (1, 2):
+                assert mgr.state is FileTransferState.COMPLETED
+                assert received == [b""]     # 无段数据 → 交付空文件
+            else:
+                assert mgr.state is FileTransferState.LAST_SECTION
+                assert received == []
+
+
+def test_raw_wire_chs_never_flips_completion():
+    """裸字节回归：第 5 字节（CHS）取任意值都不得改变完成判定."""
+    for chs in (0, 1, 2, 3, 255):
+        mgr, received = _receiver()
+        mgr.handle_last_section(ASDU.decode(_raw_fls_frame(3, chs)).objects[0].data)
+        assert mgr.state is FileTransferState.LAST_SECTION, f"CHS={chs} 误判为完成"
+        assert received == []
