@@ -56,15 +56,20 @@ describe('SimulationPanel（子站模拟控制）', () => {
     vi.unstubAllGlobals()
   })
 
-  it('选择随机变化并应用 → 下发 enabled=true 与变化参数', async () => {
+  it('不再有「手动置数/随机变化」模式单选（manual 选项已删除）', async () => {
+    stubFetch(false)
+    renderPanel()
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '启动模拟' })).toBeEnabled())
+    expect(screen.queryByRole('radio')).toBeNull()
+    expect(screen.queryByText(/手动置数（不自动变化）/)).toBeNull()
+  })
+
+  it('后端未模拟 → 「启动模拟」下发 enabled=true 与变化参数', async () => {
     const fetchMock = stubFetch(false)
     renderPanel()
 
-    // 后端未模拟 → 默认跟随后端为「手动」；切到随机变化后才需要下发
-    await waitFor(() =>
-      expect(screen.getByRole('radio', { name: '手动置数（不自动变化）' })).toBeChecked(),
-    )
-    fireEvent.click(screen.getByRole('radio', { name: '随机变化（自动模拟）' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '启动模拟' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: '启动模拟' }))
 
     await waitFor(() =>
@@ -78,14 +83,11 @@ describe('SimulationPanel（子站模拟控制）', () => {
     )
   })
 
-  it('后端正在模拟时切回手动 → 下发 enabled=false（不带变化参数）', async () => {
+  it('后端正在模拟 → 按钮变「停止模拟」，下发 enabled=false（不带变化参数）', async () => {
     const fetchMock = stubFetch(true)
     renderPanel()
 
-    await waitFor(() =>
-      expect(screen.getByRole('radio', { name: '随机变化（自动模拟）' })).toBeChecked(),
-    )
-    fireEvent.click(screen.getByRole('radio', { name: '手动置数（不自动变化）' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '停止模拟' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: '停止模拟' }))
 
     await waitFor(() => expect(lastSimPost(fetchMock)).toEqual({ enabled: false }))
