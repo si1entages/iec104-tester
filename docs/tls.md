@@ -155,13 +155,21 @@ openssl verify -CAfile ca.pem server.pem client.pem
 | `Hostname mismatch, certificate is not valid for '127.0.0.1'` | 用 IP 连接但证书 SAN 只有域名（或反之） | 证书 SAN 加上该 IP；或用 `--tls-hostname` 指定证书里的域名 |
 | `SSLCertVerificationError` 之后再无日志 | 主站未重连（`reconnect: false`） | 预期行为：严格校验失败不重试；修好证书后重启 |
 | 子站起了 TLS，主站明文连 | 一端 TLS 一端明文 | 两端都启用；子站日志会打印 `Server started on ... (TLS)` |
-| `TLS 配置无效，已回退为明文传输` | 证书/密钥路径不存在 | 检查 `--tls-cert` / `--tls-key` 路径；**注意这是降级而非报错退出** |
+| `TLS 配置无效，已回退为明文传输`（仅 CLI） | 证书/密钥路径不存在 | **Web 单站/多站已改为拒绝启动**（见下方策略）；CLI 路径仍为降级 + ERROR 日志，检查 `--tls-cert` / `--tls-key` 路径 |
+| 多站某站报 `TLS 配置无效` 未启动 | 该站 TLS 配置错误 | 修好该站配置后重新 `/api/multi/start`；其余站不受牵连，`/api/multi/status` 的 `failed` 数组可见原因 |
 | mTLS 下主站连不上 | 子站开了 `verify_client` 但主站没带客户端证书 | 主站补 `--tls-cert client.pem --tls-key client.key` |
 
-> **降级策略（有意为之）**：TLS 配置无效时引擎会记 ERROR 并**回退为明文**继续启动，
-> 而不是直接退出——避免一个路径笔误导致整套连接不可用。**代价是明文可能在
-> 无察觉的情况下被使用**，因此部署时应 grep 启动日志确认没有
-> `已回退为明文传输`，并确认看到 `TLS enabled (...)`。
+> **失败策略（T20 统一）**：
+>
+> - **Web 单站**（`/api/master/start`、`/api/slave/start`）：TLS 配置无效 →
+>   `ok=false`，**不启动引擎、不降级明文**；
+> - **Web 多站**（`/api/multi/start`）：TLS 配置无效的站**不启动、不降级明文**，
+>   逐站错误经响应与 `GET /api/multi/status` 的 `failed` 数组显式暴露，
+>   其余站正常启动；全部失败时整体 `ok=false`。
+>   `StationStatus.tls_enabled` 只有 启用/未启用 两种实况，**不存在降级态**；
+> - **CLI**（`app.py --tls-*`）：仍为「ERROR 日志 + 降级明文」的遗留策略
+>   （`app.py` 属 CLI 入口，本策略统一未覆盖），日志中 `已回退为明文传输`
+>   即为降级信号——依赖 CLI 跑 TLS 验收时务必确认看到 `TLS enabled (...)`。
 
 ## 5. 实现说明与已知接缝
 
@@ -181,6 +189,11 @@ openssl verify -CAfile ca.pem server.pem client.pem
   可选 `tls` 字段（形态与 `StationConfig.tls` 一致），经
   `EngineSession.start_master` / `start_slave` → 引擎构造参数生效；
   前端连接面板提供最小 TLS 开关。多站模式同样支持（走 `StationConfig.tls`）。
+- **失败策略统一（不静默降级）**：Web 单站配置无效 → `ok=false` 不启动；
+  多站配置无效的站不启动并记入 `MultiStationManager.start_errors`（逐站
+  `failed` 结果，其余站不受牵连，T07 整体回滚语义仅保留给运行期异常）。
+  `GET /api/multi/status` / `summary` 经 `StationStatus.tls_enabled` 与
+  `failed` 数组反映 TLS 实况。详见 `webui/api_contract.md` §2.8。
 
 ## 6. 测试
 
@@ -198,6 +211,10 @@ openssl verify -CAfile ca.pem server.pem client.pem
 - **Web UI 单站**：`tests/test_webui_tls.py` —— `/api/slave/start` /
   `/api/master/start` 携带 `tls` 注入生效、未传时行为不变、无效证书业务失败、
   以及双 Web 会话 TLS 握手 E2E。
+- **多站失败策略**：`tests/test_webui_tls.py::TestMultiStationTlsPolicy` ——
+  无效 TLS 的站不启动（无明文替身）、其余站不受牵连、partial 失败经
+  `/api/multi/start` 与 `/status` 的 `failed` 可见、`tls_enabled` 实况、
+  全部失败时整体 `ok=false` 且不保留管理器。
 
 ```bash
 ./venv/Scripts/python.exe -m pytest tests/test_tls_transport.py -q

@@ -155,13 +155,19 @@
 
 | 方法 | 路径 | 请求 | 响应 |
 |------|------|------|------|
-| POST | `/api/multi/start` | `stations: StationConfig[]`（非空；`station_id` 必填且唯一，`port` 0–65535） | `{ok, stations?, error?}` |
+| POST | `/api/multi/start` | `stations: StationConfig[]`（非空；`station_id` 必填且唯一，`port` 0–65535，`tls` 形态见 §2.2 `TlsOptions`） | `{ok, stations?, failed?, error?}`（`failed: {station_id, ok: false, error}[]`） |
 | POST | `/api/multi/stop` | — | `{ok, error?}` |
-| GET | `/api/multi/status` | — | `{ok, running, stations: StationStatus[]}` |
-| GET | `/api/multi/summary` | — | `{ok, running, station_count, total_clients, uptime, stations: StationSummary[]}` |
+| GET | `/api/multi/status` | — | `{ok, running, stations: StationStatus[], failed}` |
+| GET | `/api/multi/summary` | — | `{ok, running, station_count, total_clients, uptime, stations: StationSummary[], failed}` |
 
 > 多站管理器与主/子站会话独立；Web 会话关停时会随 `shutdown()` 一并回收
 > （见 `webui/session.py::attach_multi_station`）。结构见 §4.7。
+>
+> **TLS 失败语义（T20，与单站一致：不静默降级为明文）**：TLS 配置无效的站
+> **不会启动**，逐站报错出现在 `failed` 数组（`{station_id, ok: false, error}`），
+> 其余站正常启动；全部失败时整体 `ok=false` 且不保留管理器。因此
+> `StationStatus.tls_enabled` 只有 启用(`true`)/未启用(`false`) 两种实况，
+> **不存在降级态**。`failed` 为纯新增字段，不影响 `schemaVersion`。
 
 ---
 
@@ -274,10 +280,14 @@ StationConfig = {               // 字段均有默认值，仅 station_id 必填
   yx_count?: number, yc_count?: number, yk_count?: number, ym_count?: number
   spontaneous_enabled?: boolean, simulation_enabled?: boolean
   yx_interval?: number, yc_interval?: number, yx_change_rate?: number, yc_change_range?: number
+  tls?: TlsOptions             // 形态见 §2.2；配置无效 → 该站不启动（§2.8）
 }
 StationStatus  = { station_id, station_name, port, common_addr, running, client_count,
-                   yx_count, yc_count, yk_count, ym_count, simulation_active }
-StationSummary = { id, name, port, clients }
+                   yx_count, yc_count, yk_count, ym_count, simulation_active,
+                   tls_enabled }        // 该站 TLS 实况：true=启用 / false=未启用
+                                         // （不存在降级态：TLS 配置无效的站不会启动，
+                                         //   见 §2.8 TLS 失败语义）
+StationSummary = { id, name, port, clients, tls_enabled }
 ```
 
 ### 4.8 `ResponseBehavior`（子站应答行为）

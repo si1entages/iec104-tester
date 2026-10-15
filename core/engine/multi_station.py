@@ -14,6 +14,7 @@ from typing import Any
 
 from ..config import FlowControlConfig, TimerConfig, TlsConfig
 from ..data.point_table import PointTable
+from ..transport.connection import TlsConfigError, build_context_from_config
 from .slave import SlaveEngine, SlaveEvent
 
 logger = logging.getLogger("iec104.multi_station")
@@ -84,6 +85,9 @@ class StationStatus:
     yk_count: int = 0
     ym_count: int = 0
     simulation_active: bool = False
+    # TLS 实况（T20）：该站传输层是否启用 TLS。策略上**不存在降级态**——
+    # TLS 配置无效的站根本不会启动（见 start_all），因此只有 启用/未启用 两种。
+    tls_enabled: bool = False
 
 
 class MultiStationManager:
@@ -101,9 +105,22 @@ class MultiStationManager:
         self._config = config
         self._engines: dict[str, SlaveEngine] = {}
         self._station_configs: dict[str, StationConfig] = {}
+        # 逐站 TLS 实况（station_id → 是否启用）与最近一次 start_all 的
+        # 逐站启动失败（station_id → 错误信息），供 status/summary 查询
+        self._tls_enabled: dict[str, bool] = {}
+        self._start_errors: dict[str, str] = {}
         self._global_event_callback: Callable | None = None
         self._running = False
         self._start_time: float = 0.0
+
+    @property
+    def start_errors(self) -> dict[str, str]:
+        """最近一次 ``start_all`` 的逐站启动失败快照（station_id → 错误信息）.
+
+        目前来源：TLS 配置无效（``TlsConfigError``）的站不启动、不降级明文，
+        只记录在此；其余异常仍走整体回滚 + 抛出（T07 语义）。
+        """
+        return dict(self._start_errors)
 
     @property
     def is_running(self) -> bool:
@@ -130,16 +147,28 @@ class MultiStationManager:
         self._global_event_callback = callback
 
     async def start_all(self) -> None:
-        """启动所有子站引擎."""
+        """启动所有子站引擎.
+
+        失败语义（T20 策略统一）：
+
+        - **TLS 配置无效**（``TlsConfigError``，构造前即可判定）：该站**不启动**
+          （绝不静默降级为明文——用户以为在测 TLS 实际是明文会让测试结论不可信），
+          错误记入 ``start_errors``，**其余站正常启动不受牵连**；
+        - **其他异常**（如端口冲突）：保持 T07 语义——回滚全部已启动的站并抛出。
+        """
         if self._running:
             logger.warning("MultiStationManager is already running")
             return
 
+        self._start_errors.clear()
         logger.info(f"Starting {len(self._config.stations)} stations...")
 
         for station_cfg in self._config.stations:
             try:
                 await self._start_station(station_cfg)
+            except TlsConfigError as e:
+                logger.error(f"Failed to start station {station_cfg.station_id}: {e}")
+                self._start_errors[station_cfg.station_id] = str(e)
             except Exception as e:
                 logger.error(f"Failed to start station {station_cfg.station_id}: {e}")
                 # 回滚已启动的站
@@ -184,6 +213,8 @@ class MultiStationManager:
 
         self._engines.clear()
         self._station_configs.clear()
+        self._tls_enabled.clear()
+        self._start_errors.clear()
         self._global_event_callback = None
         self._running = False
         self._start_time = 0.0
@@ -209,19 +240,18 @@ class MultiStationManager:
                        f"YX={config.yx_count}, YC={config.yc_count}")
 
         # TLS（T20）：dict 形态先归一化为 TlsConfig，再在构造期把 SSLContext
-        # 传给引擎（构造参数是唯一注入路径）；无效配置降级为明文并记错误
+        # 传给引擎（构造参数是唯一注入路径）。配置无效 → 抛 TlsConfigError，
+        # 该站**不启动**（不静默降级为明文），由 start_all 记入逐站失败结果。
         ssl_context = None
         tls_cfg = _coerce_tls_config(config.tls)
         if tls_cfg is not None and tls_cfg.enabled:
-            from ..transport.connection import TlsConfigError, build_context_from_config
-
             try:
                 ssl_context = build_context_from_config(tls_cfg, "slave")
-                logger.info(f"TLS enabled for station {config.station_id}")
             except TlsConfigError as e:
-                logger.error(
-                    f"Station {config.station_id} TLS 配置无效，已回退为明文: {e}"
-                )
+                raise TlsConfigError(
+                    f"Station {config.station_id} TLS 配置无效: {e}"
+                ) from e
+            logger.info(f"TLS enabled for station {config.station_id}")
 
         # 创建引擎
         engine = SlaveEngine(
@@ -249,6 +279,7 @@ class MultiStationManager:
         await engine.start()
         self._engines[config.station_id] = engine
         self._station_configs[config.station_id] = config
+        self._tls_enabled[config.station_id] = ssl_context is not None
 
         # 启动模拟
         if config.simulation_enabled:
@@ -287,6 +318,7 @@ class MultiStationManager:
             yk_count=data_stats.get('yk_count', 0),
             ym_count=data_stats.get('ym_count', 0),
             simulation_active=config.simulation_enabled,
+            tls_enabled=self._tls_enabled.get(station_id, False),
         )
 
     def get_all_station_status(self) -> list[StationStatus]:
@@ -316,6 +348,7 @@ class MultiStationManager:
                     "name": s.station_name,
                     "port": s.port,
                     "clients": s.client_count,
+                    "tls_enabled": s.tls_enabled,
                 }
                 for s in statuses
             ],

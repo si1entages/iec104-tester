@@ -144,11 +144,21 @@ class EngineSession:
     def multi_station(self) -> MultiStationManager | None:
         return self._multi_station
 
+    @staticmethod
+    def _failed_list(failed: dict[str, str]) -> list[dict]:
+        """把逐站启动失败快照序列化为稳定形态（station_id/ok/error）."""
+        return [{"station_id": sid, "ok": False, "error": msg}
+                for sid, msg in failed.items()]
+
     async def multi_start(self, stations: list[dict]) -> dict:
         """创建并启动多站管理器（子站侧压力测试）.
 
         每个元素为 ``StationConfig`` 的字段字典（``station_id`` / ``port`` 等）。
         已存在运行中的管理器时返回业务失败（``ok=False``）。
+
+        TLS 配置无效的站**不启动也不降级明文**（T20 策略与单站一致）：
+        - 全部站都失败 → ``ok=False`` 并回收管理器；
+        - 部分失败 → ``ok=True`` + ``stations`` 为成功数 + ``failed`` 逐站报错。
         """
         if self._multi_station is not None:
             return {"ok": False, "error": "multi already running"}
@@ -168,8 +178,22 @@ class EngineSession:
             await mgr.stop_all()
             logger.warning("multi start failed: %s", e)
             return {"ok": False, "error": str(e)}
+        failed = mgr.start_errors
+        if mgr.station_count == 0:
+            # 没有任何站启动成功（如全部 TLS 配置无效）：整体失败并回收
+            await mgr.stop_all()
+            logger.warning("multi start: all stations failed (%s)", list(failed))
+            return {
+                "ok": False,
+                "error": "；".join(f"{sid}: {msg}" for sid, msg in failed.items()),
+                "failed": self._failed_list(failed),
+            }
         self._multi_station = mgr
-        return {"ok": True, "stations": mgr.station_count}
+        return {
+            "ok": True,
+            "stations": mgr.station_count,
+            "failed": self._failed_list(failed),
+        }
 
     async def multi_stop(self) -> dict:
         mgr = self._multi_station
@@ -182,19 +206,21 @@ class EngineSession:
     def multi_status(self) -> dict:
         mgr = self._multi_station
         if mgr is None:
-            return {"ok": True, "running": False, "stations": []}
+            return {"ok": True, "running": False, "stations": [], "failed": []}
         return {
             "ok": True,
             "running": mgr.is_running,
             "stations": [asdict(s) for s in mgr.get_all_station_status()],
+            "failed": self._failed_list(mgr.start_errors),
         }
 
     def multi_summary(self) -> dict:
         mgr = self._multi_station
         if mgr is None:
             return {"ok": True, "running": False, "station_count": 0,
-                    "total_clients": 0, "uptime": 0.0, "stations": []}
-        return {"ok": True, **mgr.get_summary()}
+                    "total_clients": 0, "uptime": 0.0, "stations": [], "failed": []}
+        return {"ok": True, **mgr.get_summary(),
+                "failed": self._failed_list(mgr.start_errors)}
 
     # ── 主站参数状态查询（T08）───────────────────────────────────
 
