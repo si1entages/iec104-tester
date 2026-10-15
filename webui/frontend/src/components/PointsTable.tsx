@@ -4,10 +4,10 @@ import { LineChartOutlined } from '@ant-design/icons'
 import { Alert, Button, Card, Input, Select, Space, Switch, Table, Tag, Typography } from 'antd'
 import type { TableColumnsType } from 'antd'
 
-import { usePointsQuery } from '../../api/queries'
-import type { Point } from '../../api/types'
-import { formatValue } from '../../lib/format'
-import { pointKey } from '../../lib/pointValue'
+import { usePointsQuery } from '../api/queries'
+import type { Point } from '../api/types'
+import { formatValue } from '../lib/format'
+import { pointKey } from '../lib/pointValue'
 
 const TYPE_OPTIONS = ['YX', 'YC', 'YK', 'YM'].map((v) => ({ value: v, label: v }))
 
@@ -51,17 +51,25 @@ interface Props {
   /** 已加入趋势的点位键（`类别-IOA`），用于置灰按钮 */
   watchedKeys?: string[]
   onAddTrend?: (point: Point) => void
+  /** 未选中时的引导文案；主站/子站用途不同，这里可覆盖 */
+  selectHint?: string
 }
 
 /**
- * 点表视图（T12）。
+ * 点表视图（T12）——**主站与子站共用的共享组件**。
  *
  * - **十万行虚拟滚动**：`virtual` + 固定 `scroll.y`，只渲染可视窗口内的行
  * - **就地更新单元格**：值由 WS 增量补丁/合并快照写入 React Query，
  *   仅变化行换新对象（见 `lib/pointValue.ts`），正常行保持引用不重渲染
- * - **单击选中行**（选中后由右侧命令面板下发命令）——**刻意不提供双击发命令路径**
+ * - **单击选中行**（主站据此下发命令、子站据此手动置数）——**刻意不提供双击路径**
  */
-export function PointsTable({ selected, onSelect, watchedKeys = [], onAddTrend }: Props) {
+export function PointsTable({
+  selected,
+  onSelect,
+  watchedKeys = [],
+  onAddTrend,
+  selectHint = '单击行以选中并下发命令',
+}: Props) {
   const { data: points = [], isLoading, isError, error } = usePointsQuery()
   const [keyword, setKeyword] = useState('')
   const [type, setType] = useState<string | undefined>(undefined)
@@ -100,7 +108,7 @@ export function PointsTable({ selected, onSelect, watchedKeys = [], onAddTrend }
             </Tag>
           ) : (
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              单击行以选中并下发命令
+              {selectHint}
             </Typography.Text>
           )}
         </Space>
