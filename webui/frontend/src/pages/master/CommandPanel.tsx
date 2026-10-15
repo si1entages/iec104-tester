@@ -327,6 +327,43 @@ export function CommandPanel({ point, disabled = false }: Props) {
       ),
     },
     {
+      key: 'system',
+      label: '系统召唤 / 对时 / 复位',
+      children: (
+        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+          <Space wrap>
+            <Select
+              style={{ width: 210 }}
+              value={giQoi}
+              options={GI_OPTIONS}
+              onChange={setGiQoi}
+            />
+            <Button
+              type="primary"
+              disabled={noRun || busy}
+              onClick={() => void run('总召唤', gi.mutateAsync({ qoi: giQoi }))}
+            >
+              总召唤
+            </Button>
+          </Space>
+          <Space wrap>
+            <Button disabled={noRun || busy} onClick={() => void run('累计量召唤', ci.mutateAsync())}>
+              累计量召唤
+            </Button>
+            <Button disabled={noRun || busy} onClick={() => void run('时钟同步', clock.mutateAsync())}>
+              时钟同步
+            </Button>
+            <Button disabled={noRun || busy} onClick={() => void run('复位进程', reset.mutateAsync())}>
+              复位进程
+            </Button>
+            <Button disabled={noRun || busy} onClick={() => void run('测试命令', test.mutateAsync())}>
+              测试命令
+            </Button>
+          </Space>
+        </Space>
+      ),
+    },
+    {
       key: 'step',
       label: '升降 / 比特串 / 延时 / 读',
       children: (
@@ -432,43 +469,6 @@ export function CommandPanel({ point, disabled = false }: Props) {
               }
             >
               下发参数
-            </Button>
-          </Space>
-        </Space>
-      ),
-    },
-    {
-      key: 'system',
-      label: '系统召唤 / 对时 / 复位',
-      children: (
-        <Space direction="vertical" size={8} style={{ width: '100%' }}>
-          <Space wrap>
-            <Select
-              style={{ width: 210 }}
-              value={giQoi}
-              options={GI_OPTIONS}
-              onChange={setGiQoi}
-            />
-            <Button
-              type="primary"
-              disabled={noRun || busy}
-              onClick={() => void run('总召唤', gi.mutateAsync({ qoi: giQoi }))}
-            >
-              总召唤
-            </Button>
-          </Space>
-          <Space wrap>
-            <Button disabled={noRun || busy} onClick={() => void run('累计量召唤', ci.mutateAsync())}>
-              累计量召唤
-            </Button>
-            <Button disabled={noRun || busy} onClick={() => void run('时钟同步', clock.mutateAsync())}>
-              时钟同步
-            </Button>
-            <Button disabled={noRun || busy} onClick={() => void run('复位进程', reset.mutateAsync())}>
-              复位进程
-            </Button>
-            <Button disabled={noRun || busy} onClick={() => void run('测试命令', test.mutateAsync())}>
-              测试命令
             </Button>
           </Space>
         </Space>
