@@ -183,7 +183,7 @@ def test_file_transfer_types():
     data = cd.to_bytes()
     cd2 = CallDirectory.from_bytes(data, ioa=0)
     assert cd2.qualifier == 5
-    assert cd2.qualifier_str == "目录"
+    assert cd2.qualifier_str == "选择节"   # 标准 SCQ=5 = SELECT_SECTION
 
     # 最后的节
     ls = LastSection(ioa=0, file_name=1, section_name=1, last_segment=10, status=0)

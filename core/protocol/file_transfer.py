@@ -39,6 +39,23 @@ LSQ_FILE_TRANSFER_WITH_DEACT = 2        # 整个文件传输的最后一节，�
 LSQ_SECTION_TRANSFER_WITHOUT_DEACT = 3  # 仅本节传输结束（文件未结束），不要求去激活
 LSQ_SECTION_TRANSFER_WITH_DEACT = 4     # 仅本节传输结束（文件未结束），要求去激活
 
+# ── F_SC_NA_1 / F_SC_NB_1 的 SCQ（Select and Call Qualifier）取值 ─────
+#
+# 依据：lib60870.NET ``enum SelectAndCallQualifier`` + go-iecp5 ``FileCallOrSelect``
+# （两个互相独立的字节级实现取值一致）。
+SCQ_SELECT_FILE = 1        # 选择文件
+SCQ_REQUEST_FILE = 2       # 请求文件
+SCQ_DEACTIVATE_FILE = 3    # 去激活文件
+SCQ_DELETE_FILE = 4        # 删除文件（**不是**"选择文件"，见 docs/file_transfer_fls.md §5.3）
+SCQ_SELECT_SECTION = 5     # 选择节
+SCQ_REQUEST_SECTION = 6    # 请求节
+SCQ_DEACTIVATE_SECTION = 7  # 去激活节
+
+#: 请求目录在本实现中暂用的 SCQ 值。**未核实**：标准 SCQ=5 为 SELECT_SECTION，
+#: 且参考实现以 COT=REQUEST 触发目录召唤（见 docs/file_transfer_fls.md §4.4）。
+#: 本实现暂沿用 5 触发目录上送——该组合保持开放，未按标准推断。
+SCQ_REQUEST_DIRECTORY = 5
+
 _LSQ_NAMES = {
     LSQ_NOT_USED: "NOT_USED",
     LSQ_FILE_TRANSFER_WITHOUT_DEACT: "FILE_TRANSFER_WITHOUT_DEACT",
@@ -311,16 +328,16 @@ class FileTransferSlave(FileTransferManager):
         self._file_data[file_name] = data
 
     def handle_file_request(self, ioa: int, file_name: int, qualifier: int) -> None:
-        """处理文件请求.
+        """处理文件请求（F_SC_NA_1 / F_SC_NB_1 的 SCQ 分支）.
 
-        qualifier:
-            1 = 请求读/召唤文件 → 发送 F_FR_NA_1 (文件准备就绪)
-            4 = 选择文件        → 记录选择并发送 F_FR_NA_1 (FRQ 肯定)
-            5 = 请求目录        → 发送目录 (F_DR_TA_1 序列)
+        SCQ 取值表（标准，见模块顶部 ``SCQ_*`` 常量与 ``types.SCQ_NAMES``）：
+        1=选择文件、2=请求文件、3=去激活文件、4=删除文件、5=选择节、
+        6=请求节、7=去激活节。**SCQ=4 是删除文件，不得当作"选择文件"上送。**
         """
         logger.info(f"File request received: file_name={file_name} qualifier={qualifier}")
 
-        if qualifier in (1, 4):  # 请求读 / 选择文件
+        if qualifier in (SCQ_SELECT_FILE, SCQ_REQUEST_FILE):
+            # 选择文件 / 请求文件：登记并回 F_FR_NA_1（FRQ 肯定）
             self._context.file_name = file_name
             self._context.state = FileTransferState.FILE_SELECTED
             self._context.start_time = time.monotonic()
@@ -332,8 +349,25 @@ class FileTransferSlave(FileTransferManager):
 
             # 发送文件准备就绪
             self._send_file_ready(ioa)
-        elif qualifier == 5:  # 请求目录
+        elif qualifier == SCQ_REQUEST_DIRECTORY:
+            # SCQ=5 触发目录上送 —— 该组合**未核实**（标准 SCQ=5 为选择节），
+            # 保持开放不推断（见 docs/file_transfer_fls.md §4.4）。
             self._send_directory(ioa)
+        elif qualifier == SCQ_DELETE_FILE:
+            # SCQ=4 = 删除文件：移出缓存并回 F_AF_NA_1（AFQ 肯定文件），
+            # 绝不触发文件上送（旧实现把 4 当"选择文件"是危险误判）。
+            removed = self._file_data.pop(file_name, None)
+            if removed is None:
+                logger.warning(f"Delete file (SCQ=4): file {file_name} not found")
+            else:
+                logger.info(f"File deleted on request (SCQ=4): file_name={file_name}")
+            self._send_ack(ioa, qualifier=1)  # AFQ: 肯定文件
+        elif qualifier in (SCQ_DEACTIVATE_FILE, SCQ_DEACTIVATE_SECTION):
+            # 去激活：多节/去激活流程未实现（开放项，见 docs §4.5/4.6），仅记录
+            logger.info(f"Deactivate request (SCQ={qualifier}) noted, no-op (flow not implemented)")
+        elif qualifier == SCQ_REQUEST_SECTION:
+            # 请求节：多节流程未实现（开放项，见 docs §4.6），不推断
+            logger.warning("Request section (SCQ=6) not implemented (multi-section flow open)")
         else:
             logger.warning(f"Unsupported file request qualifier: {qualifier}")
 
@@ -348,6 +382,17 @@ class FileTransferSlave(FileTransferManager):
             self._on_send_asdu(asdu_data)
         self._context.state = FileTransferState.FILE_READY
         logger.info(f"File Ready sent: file_name={self._context.file_name} length={self._context.file_length}")
+
+    def _send_ack(self, ioa: int, qualifier: int = 1) -> None:
+        """发送文件/节确认 (F_AF_NA_1)."""
+        from .asdu import ASDUBuilder
+        asdu_data = ASDUBuilder.build_ack_file_section(
+            self._common_addr, ioa, self._context.file_name,
+            self._context.section_name, qualifier
+        )
+        if self._on_send_asdu:
+            self._on_send_asdu(asdu_data)
+        logger.info(f"File ACK sent: qualifier={qualifier}")
 
     def handle_file_ready_ack(self, ioa: int, data: FileReadyAck) -> None:
         """处理文件准备就绪确认."""

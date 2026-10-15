@@ -245,27 +245,53 @@ def test_last_section_field_names_disagree_with_standard_currently_known_defect(
     assert ls.status_str == "缺省"                            # 旧标注按"状态"解释，语义有误
 
 
-def test_scq_qualifier_table_disagrees_with_standard_currently_known_defect():
-    """**已知缺陷（待修）**：F_SC_NA_1 的 SCQ 取值表与标准不符.
+def test_scq_qualifier_table_matches_standard():
+    """SCQ 取值表与标准一致（lib60870 ``SelectAndCallQualifier``）.
 
-    标准（lib60870 ``SelectAndCallQualifier``）：1=SELECT_FILE、2=REQUEST_FILE、
-    3=DEACTIVATE_FILE、4=DELETE_FILE、5=SELECT_SECTION、6=REQUEST_SECTION、
-    7=DEACTIVATE_SECTION。本实现为 1=请求读、2=停止、3=删除、4=选择、5=请求目录。
+    1=SELECT_FILE、2=REQUEST_FILE、3=DEACTIVATE_FILE、4=DELETE_FILE、
+    5=SELECT_SECTION、6=REQUEST_SECTION、7=DEACTIVATE_SECTION。
+    （原缺陷钉桩：本实现旧表为 1=请求读、2=停止、3=删除、4=选择、5=请求目录，已修。）
     """
     from core.protocol.types import FileSelectCallGet
 
-    assert FileSelectCallGet(qualifier=1).qualifier_str == "请求读"   # 标准 = SELECT_FILE
-    assert FileSelectCallGet(qualifier=4).qualifier_str == "选择"     # 标准 = DELETE_FILE
+    assert FileSelectCallGet(qualifier=1).qualifier_str == "选择文件"
+    assert FileSelectCallGet(qualifier=2).qualifier_str == "请求文件"
+    assert FileSelectCallGet(qualifier=3).qualifier_str == "去激活文件"
+    assert FileSelectCallGet(qualifier=4).qualifier_str == "删除文件"
+    assert FileSelectCallGet(qualifier=5).qualifier_str == "选择节"
+    assert FileSelectCallGet(qualifier=6).qualifier_str == "请求节"
+    assert FileSelectCallGet(qualifier=7).qualifier_str == "去激活节"
 
 
-def test_handle_file_request_branching_follows_nonstandard_scq_table():
-    """钉住上一条缺陷的行为后果：SCQ=4（标准=删除文件）被当作"选择文件"触发上送."""
+def test_handle_file_request_scq4_deletes_file_and_never_uploads():
+    """SCQ=4（标准 = DELETE_FILE）必须走删除分支：不上送任何文件帧，且文件被移除.
+
+    回归点：旧实现把 SCQ=4 当"选择文件"，会向真机回送 F_FR_NA_1(=120) 触发整个
+    文件上送——真机语义下这是"删除文件"，行为完全相反。
+    """
     mgr, sent = _slave_with_file(b"payload")
 
     mgr.handle_file_request(IOA, FILE_NAME, qualifier=4)
 
-    # 修正后 SCQ=4 应走删除分支（不得上送文件）；当前实现发出了 F_FR_NA_1(=120)
-    assert sent and sent[0][0] == 120
+    # 不得发出 F_FR_NA_1(=120) 等任何文件上送帧；只回一条 F_AF_NA_1(=124) 确认
+    assert len(sent) == 1
+    assert all(frame[0] != 120 for frame in sent)
+    assert sent[0][0] == 124                # F_AF_NA_1（AFQ 肯定文件）
+    assert FILE_NAME not in mgr._file_data  # 文件已从缓存删除
+
+    # 删除后同文件再请求（SCQ=2 请求文件）→ 上送空文件（长度 0）
+    sent.clear()
+    mgr.handle_file_request(IOA, FILE_NAME, qualifier=2)
+    assert sent and sent[0][0] == 120       # 仍按流程回 F_FR_NA_1
+
+
+def test_handle_file_request_scq2_requests_file():
+    """SCQ=2（REQUEST_FILE）与 SCQ=1（SELECT_FILE）一样触发文件上送流程."""
+    mgr, sent = _slave_with_file(b"payload")
+
+    mgr.handle_file_request(IOA, FILE_NAME, qualifier=2)
+
+    assert sent and sent[0][0] == 120       # F_FR_NA_1
 
 
 # ── ④ 裸字节钉桩：直接解一条手工构造的 F_LS 线缆帧 ─────────────────

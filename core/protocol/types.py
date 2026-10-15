@@ -1221,16 +1221,31 @@ class SectionReady:
                 + bytes([self.status]))
 
 
+#: SCQ（选择与召唤限定词）取值 → 名称。
+#: 依据：lib60870.NET ``enum SelectAndCallQualifier`` + go-iecp5 ``FileCallOrSelect``
+#: （两个互相独立的字节级实现取值一致，见 docs/file_transfer_fls.md §2.6）。
+SCQ_NAMES: dict[int, str] = {
+    0: "缺省",
+    1: "选择文件",
+    2: "请求文件",
+    3: "去激活文件",
+    4: "删除文件",
+    5: "选择节",
+    6: "请求节",
+    7: "去激活节",
+}
+
+
 @dataclass
 class CallDirectory:
     """召唤目录/选择文件/召唤文件 (F_SC_NA_1 = 122).
 
-    信息体 = ``NOF(2) + NOS(1) + SCQ(1)``。
+    信息体 = ``NOF(2) + NOS(1) + SCQ(1)``。``qualifier`` 即 SCQ，取值表见 ``SCQ_NAMES``。
     """
     ioa: int = 0
-    file_name: int = 0       # 文件名 (16-bit)
-    section_name: int = 0    # 节名 (8-bit)
-    qualifier: int = 0       # 0=缺省, 1=选择文件, 2=请求文件, 3=停止, 4=删除, 5=目录
+    file_name: int = 0       # NOF: 文件名 (16-bit)
+    section_name: int = 0    # NOS: 节名 (8-bit)
+    qualifier: int = 0       # SCQ: 见 SCQ_NAMES
 
     @classmethod
     def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> CallDirectory:
@@ -1244,7 +1259,7 @@ class CallDirectory:
 
     @property
     def qualifier_str(self) -> str:
-        return {0: "缺省", 1: "选择文件", 2: "请求文件", 3: "停止", 4: "删除", 5: "目录"}.get(self.qualifier, f"未知({self.qualifier})")
+        return SCQ_NAMES.get(self.qualifier, f"未知({self.qualifier})")
 
 
 @dataclass
@@ -1358,7 +1373,7 @@ class FileSelectCallGet:
     ioa: int = 0
     file_name: int = 0
     section_name: int = 0
-    qualifier: int = 0       # 0=缺省, 1=请求读, 2=停止, 3=删除, 4=选择, 5=请求目录
+    qualifier: int = 0       # SCQ: 见 SCQ_NAMES
 
     @classmethod
     def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> FileSelectCallGet:
@@ -1372,7 +1387,7 @@ class FileSelectCallGet:
 
     @property
     def qualifier_str(self) -> str:
-        return {0: "缺省", 1: "请求读", 2: "停止", 3: "删除", 4: "选择", 5: "请求目录"}.get(self.qualifier, f"未知({self.qualifier})")
+        return SCQ_NAMES.get(self.qualifier, f"未知({self.qualifier})")
 
 
 @dataclass

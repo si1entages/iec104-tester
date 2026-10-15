@@ -1500,7 +1500,8 @@ class ASDUBuilder:
             ioa: 信息对象地址
             file_name: 文件名 (16-bit, NOF)
             section_name: 节名 (8-bit, NOS)
-            qualifier: 0=缺省, 1=选择文件, 2=请求文件, 3=停止, 4=删除, 5=目录
+            qualifier: SCQ — 1=选择文件, 2=请求文件, 3=去激活文件, 4=删除文件,
+                5=选择节, 6=请求节, 7=去激活节（见 ``types.SCQ_NAMES``）
         """
         asdu = ASDU(type_id=TypeID.F_SC_NA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
         cd = CallDirectory(ioa=ioa, file_name=file_name, section_name=section_name, qualifier=qualifier)
@@ -1598,7 +1599,8 @@ class ASDUBuilder:
             ioa: 信息对象地址
             file_name: 文件名 (16-bit, NOF)
             section_name: 节名 (8-bit, NOS)
-            qualifier: 0=缺省, 1=请求读, 2=停止, 3=删除, 4=选择, 5=请求目录
+            qualifier: SCQ — 1=选择文件, 2=请求文件, 3=去激活文件, 4=删除文件,
+                5=选择节, 6=请求节, 7=去激活节（见 ``types.SCQ_NAMES``）
         """
         asdu = ASDU(type_id=TypeID.F_SC_NB_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
         fs = FileSelectCallGet(ioa=ioa, file_name=file_name, section_name=section_name, qualifier=qualifier)
