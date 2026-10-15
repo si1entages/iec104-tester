@@ -2,7 +2,7 @@ import { create } from 'zustand'
 
 import type { WsStatus } from '../ws/client'
 
-export type PageKey = 'status' | 'logs'
+export type PageKey = 'status' | 'master' | 'logs'
 
 /**
  * 纯 UI 状态（T11）。
@@ -32,6 +32,14 @@ interface UiState {
   /** 等待重连后的首个快照（此期间应用不接收增量） */
   resyncing: boolean
   setResyncing: (resyncing: boolean) => void
+
+  /**
+   * 点值全量刷新周期（ms，0 = 关闭）。
+   * 值更新的主路径是 WS `event` 增量补丁；本项是兜底/权威对齐，
+   * 大点表下应调大或关闭（组件会给出提示）。
+   */
+  liveRefreshMs: number
+  setLiveRefreshMs: (ms: number) => void
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -52,4 +60,7 @@ export const useUiStore = create<UiState>((set) => ({
 
   resyncing: false,
   setResyncing: (resyncing) => set({ resyncing }),
+
+  liveRefreshMs: 1000,
+  setLiveRefreshMs: (liveRefreshMs) => set({ liveRefreshMs }),
 }))

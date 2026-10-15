@@ -2,7 +2,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { QueryClient } from '@tanstack/react-query'
 
 import { api } from './endpoints'
+import { applyPatches, mergePointValues } from '../lib/pointValue'
+import type { PointPatch } from '../lib/pointValue'
 import type {
+  EngineEvent,
+  Frame,
   LogQueryParams,
   LogRow,
   OkResponse,
@@ -14,6 +18,10 @@ import type {
 
 /** 实时日志缓冲上限（与旧原生 UI 的 500 条保持一致）。 */
 export const MAX_LIVE_LOGS = 500
+/** 实时报文缓冲上限（报文查看器） */
+export const MAX_LIVE_FRAMES = 2000
+/** 实时事件缓冲上限 */
+export const MAX_LIVE_EVENTS = 500
 
 export const queryKeys = {
   schema: ['schema'] as const,
@@ -22,6 +30,8 @@ export const queryKeys = {
   recent: ['recent'] as const,
   logs: (params: LogQueryParams) => ['logs', params] as const,
   liveLogs: ['logs', 'live'] as const,
+  liveFrames: ['frames', 'live'] as const,
+  liveEvents: ['events', 'live'] as const,
 }
 
 // ── 查询 ───────────────────────────────────────────────────────────────
@@ -49,6 +59,9 @@ export function usePointsQuery() {
   return useQuery<Point[]>({
     queryKey: queryKeys.points,
     queryFn: async () => (await api.points()).points,
+    // 十万点表：不再自动轮询，值由 WS（增量补丁/快照刷新）驱动
+    refetchOnWindowFocus: false,
+    staleTime: 30_000,
   })
 }
 
@@ -68,13 +81,9 @@ export function useLogsQuery(params: LogQueryParams) {
   })
 }
 
-/**
- * 实时日志：数据存在 React Query 缓存里（服务端数据不落 Zustand），
- * 由 WS 桥接层用 `appendLiveLog` 增量写入。
- */
-export function useLiveLogs(): LogRow[] {
-  const { data } = useQuery<LogRow[]>({
-    queryKey: queryKeys.liveLogs,
+function useDerivedArray<T>(key: readonly unknown[]): T[] {
+  const { data } = useQuery<T[]>({
+    queryKey: key,
     queryFn: () => [],
     enabled: false,
     initialData: [],
@@ -84,11 +93,31 @@ export function useLiveLogs(): LogRow[] {
   return data
 }
 
-// ── 实时日志缓存写入（给 WS 桥接层用）──────────────────────────────────
+/** 实时日志（由 WS 桥写入 React Query 缓存）。 */
+export function useLiveLogs(): LogRow[] {
+  return useDerivedArray<LogRow>(queryKeys.liveLogs)
+}
+
+/** 实时报文（报文查看器）。 */
+export function useLiveFrames(): Frame[] {
+  return useDerivedArray<Frame>(queryKeys.liveFrames)
+}
+
+/** 实时引擎事件。 */
+export function useLiveEvents(): EngineEvent[] {
+  return useDerivedArray<EngineEvent>(queryKeys.liveEvents)
+}
+
+// ── 缓存写入（给 WS 桥接层用）──────────────────────────────────────────
+
+function appendCapped<T>(list: T[] | undefined, row: T, cap: number): T[] {
+  const next = list ? list.concat(row) : [row]
+  return next.length > cap ? next.slice(next.length - cap) : next
+}
 
 export function appendLiveLog(client: QueryClient, row: LogRow): void {
   client.setQueryData<LogRow[]>(queryKeys.liveLogs, (prev) =>
-    [...(prev ?? []), row].slice(-MAX_LIVE_LOGS),
+    appendCapped(prev, row, MAX_LIVE_LOGS),
   )
 }
 
@@ -98,6 +127,43 @@ export function replaceLiveLogs(client: QueryClient, rows: LogRow[]): void {
 
 export function clearLiveLogs(client: QueryClient): void {
   client.setQueryData<LogRow[]>(queryKeys.liveLogs, [])
+}
+
+export function appendFrame(client: QueryClient, frame: Frame): void {
+  client.setQueryData<Frame[]>(queryKeys.liveFrames, (prev) =>
+    appendCapped(prev, frame, MAX_LIVE_FRAMES),
+  )
+}
+
+export function replaceFrames(client: QueryClient, frames: Frame[]): void {
+  client.setQueryData<Frame[]>(queryKeys.liveFrames, frames.slice(-MAX_LIVE_FRAMES))
+}
+
+export function clearFrames(client: QueryClient): void {
+  client.setQueryData<Frame[]>(queryKeys.liveFrames, [])
+}
+
+export function appendEvent(client: QueryClient, event: EngineEvent): void {
+  client.setQueryData<EngineEvent[]>(queryKeys.liveEvents, (prev) =>
+    appendCapped(prev, event, MAX_LIVE_EVENTS),
+  )
+}
+
+export function replaceEvents(client: QueryClient, events: EngineEvent[]): void {
+  client.setQueryData<EngineEvent[]>(queryKeys.liveEvents, events.slice(-MAX_LIVE_EVENTS))
+}
+
+// ── 点表写入（diff 合并，避免整表重建）─────────────────────────────────
+
+/** 用快照对齐点表：仅变化行换新对象，无变化则保持原数组引用。 */
+export function mergePointsSnapshot(client: QueryClient, points: Point[]): void {
+  client.setQueryData<Point[]>(queryKeys.points, (prev) => mergePointValues(prev, points))
+}
+
+/** 用事件补丁就近更新点表（不触发网络请求）。 */
+export function patchPoints(client: QueryClient, patches: PointPatch[]): void {
+  if (patches.length === 0) return
+  client.setQueryData<Point[]>(queryKeys.points, (prev) => applyPatches(prev, patches))
 }
 
 // ── 命令（mutations）──────────────────────────────────────────────────

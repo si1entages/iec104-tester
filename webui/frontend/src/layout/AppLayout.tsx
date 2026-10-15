@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-import { ApiOutlined, DashboardOutlined, FileTextOutlined } from '@ant-design/icons'
+import { ApiOutlined, DashboardOutlined, FileTextOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { Alert, Badge, Layout, Menu, Tag, Typography } from 'antd'
 
 import { useStatusQuery } from '../api/queries'
@@ -11,6 +11,7 @@ import type { WsStatus } from '../ws/client'
 const { Header, Sider, Content } = Layout
 
 const MENU_ITEMS = [
+  { key: 'master', icon: <ThunderboltOutlined />, label: '主站工作台' },
   { key: 'status', icon: <DashboardOutlined />, label: '状态总览' },
   { key: 'logs', icon: <FileTextOutlined />, label: '日志' },
 ]
