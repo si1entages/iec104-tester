@@ -16,6 +16,7 @@ import {
   Table,
   Tag,
   Typography,
+  theme as antdTheme,
 } from 'antd'
 import type { TableColumnsType } from 'antd'
 
@@ -42,6 +43,7 @@ const CLIENT_COLUMNS: TableColumnsType<ClientRow> = [
  */
 export function SlaveConnectionPanel() {
   const { message } = AntdApp.useApp()
+  const { token } = antdTheme.useToken()
   const statusQuery = useStatusQuery()
   const status = statusQuery.data
   const running = Boolean(status?.running)
@@ -164,7 +166,7 @@ export function SlaveConnectionPanel() {
       </Form>
 
       <Space wrap style={{ marginBottom: 12 }}>
-        <span style={{ color: '#8c8c8c' }}>TLS</span>
+        <span style={{ color: token.colorTextTertiary }}>TLS</span>
         <Switch size="small" checked={tlsEnabled} onChange={setTlsEnabled} />
         {tlsEnabled ? (
           <>

@@ -8,7 +8,7 @@ import {
   FileTextOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons'
-import { Alert, Badge, Layout, Menu, Tag, Typography, theme as antdTheme } from 'antd'
+import { Alert, Badge, Layout, Menu, Switch, Tag, Typography, theme as antdTheme } from 'antd'
 
 import { useStatusQuery } from '../api/queries'
 import type { Role } from '../api/types'
@@ -47,6 +47,9 @@ export function AppLayout({ children }: Props) {
   const droppedFrames = useUiStore((s) => s.droppedFrames)
   const resyncing = useUiStore((s) => s.resyncing)
   const setSendBackpressure = useUiStore((s) => s.setSendBackpressure)
+  const theme = useUiStore((s) => s.theme)
+  const setTheme = useUiStore((s) => s.setTheme)
+  const isDark = theme === 'dark'
 
   const { data: status } = useStatusQuery()
   const role = status?.role
@@ -61,7 +64,7 @@ export function AppLayout({ children }: Props) {
 
   return (
     <Layout style={{ minHeight: '100%' }}>
-      <Sider width={200} theme="dark">
+      <Sider width={200} theme={isDark ? 'dark' : 'light'}>
         <div
           style={{
             height: 48,
@@ -76,7 +79,7 @@ export function AppLayout({ children }: Props) {
           IEC104 Tester
         </div>
         <Menu
-          theme="dark"
+          theme={isDark ? 'dark' : 'light'}
           mode="inline"
           selectedKeys={[page]}
           items={menuItems}
@@ -107,6 +110,14 @@ export function AppLayout({ children }: Props) {
           ) : null}
           {resyncing ? <Tag color="warning">同步快照中…</Tag> : null}
           <span style={{ flex: 1 }} />
+          <Switch
+            size="small"
+            aria-label="深色模式"
+            checked={isDark}
+            checkedChildren="深"
+            unCheckedChildren="浅"
+            onChange={(checked) => setTheme(checked ? 'dark' : 'light')}
+          />
           <Badge
             status={badge.status}
             text={<span style={{ color: token.colorTextTertiary }}>{badge.text}</span>}

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { Role } from '../api/types'
@@ -62,5 +62,26 @@ describe('AppLayout（导航按角色过滤）', () => {
     for (const name of [/多站/, /状态总览/, /日志/]) {
       expect(screen.getByRole('menuitem', { name })).toBeInTheDocument()
     }
+  })
+})
+
+describe('AppLayout（主题切换）', () => {
+  afterEach(() => {
+    window.localStorage.clear()
+    document.documentElement.dataset.theme = ''
+    delete document.documentElement.dataset.theme
+    vi.unstubAllGlobals()
+  })
+
+  it('切换开关：写入 localStorage 并同步 html[data-theme]', async () => {
+    setup('master')
+
+    const sw = await screen.findByRole('switch', { name: '深色模式' })
+    // 初始跟随 jsdom 系统（matchMedia 桩 matches=false → 深色）
+    expect(sw).toBeChecked()
+    fireEvent.click(sw)
+    expect(window.localStorage.getItem('iec104.theme')).toBe('light')
+    expect(document.documentElement.dataset.theme).toBe('light')
+    expect(sw).not.toBeChecked()
   })
 })

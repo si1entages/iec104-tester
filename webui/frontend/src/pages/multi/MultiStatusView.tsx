@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Col, Empty, Popconfirm, Row, Space, Statistic, Table, Tag, Tooltip } from 'antd'
+import { Alert, Button, Card, Col, Empty, Popconfirm, Row, Space, Statistic, Table, Tag, Tooltip, theme as antdTheme } from 'antd'
 import type { TableColumnsType } from 'antd'
 
 import type { MultiStatusResponse, MultiSummaryResponse, StationStatus } from '../../api/types'
@@ -88,6 +88,7 @@ const COLUMNS = (onDisable?: (id: string) => void, busy?: boolean): TableColumns
  * 两个端点都由页面轮询驱动（页面卸载即停）。
  */
 export function MultiStatusView({ summary, status, loading, isError, error, onDisableStation, busy }: Props) {
+  const { token } = antdTheme.useToken()
   const stations = status?.stations ?? []
   const running = Boolean(summary?.running ?? status?.running)
 
@@ -119,7 +120,7 @@ export function MultiStatusView({ summary, status, loading, isError, error, onDi
           <Statistic
             title="总客户端"
             value={summary?.total_clients ?? 0}
-            valueStyle={{ color: (summary?.total_clients ?? 0) > 0 ? '#52c41a' : undefined }}
+            valueStyle={{ color: (summary?.total_clients ?? 0) > 0 ? token.colorSuccess : undefined }}
           />
         </Col>
         <Col span={4}>

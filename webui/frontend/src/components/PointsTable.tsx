@@ -1,7 +1,7 @@
 import { useDeferredValue, useMemo, useState } from 'react'
 
 import { LineChartOutlined } from '@ant-design/icons'
-import { Alert, Button, Card, Input, Select, Space, Switch, Table, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Input, Select, Space, Switch, Table, Tag, Typography, theme as antdTheme } from 'antd'
 import type { TableColumnsType } from 'antd'
 
 import { usePointsQuery } from '../api/queries'
@@ -32,7 +32,7 @@ const COLUMNS: TableColumnsType<Point> = [
     render: (value: Point['value']) => {
       const text = formatValue(value)
       const color =
-        text === 'ON' ? '#52c41a' : text === 'OFF' ? '#8c8c8c' : undefined
+        text === 'ON' ? '#52c41a' : text === 'OFF' ? undefined : undefined
       return (
         <span className="mono" style={{ color }}>
           {text}
@@ -72,6 +72,7 @@ export function PointsTable({
   selectHint = '单击行以选中并下发命令',
 }: Props) {
   const { data: points = [], isLoading, isError, error } = usePointsQuery()
+  const { token } = antdTheme.useToken()
   const [keyword, setKeyword] = useState('')
   const [type, setType] = useState<string | undefined>(undefined)
   const [enabledOnly, setEnabledOnly] = useState(false)
@@ -141,7 +142,7 @@ export function PointsTable({
             placeholder="按名称 / IOA 过滤"
             onChange={(e) => setKeyword(e.target.value)}
           />
-          <span style={{ color: '#8c8c8c', fontSize: 12 }}>仅启用</span>
+          <span style={{ color: token.colorTextTertiary, fontSize: 12 }}>仅启用</span>
           <Switch size="small" checked={enabledOnly} onChange={setEnabledOnly} />
         </Space>
       }

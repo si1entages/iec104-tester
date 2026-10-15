@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { ApiOutlined, LinkOutlined, PauseCircleOutlined } from '@ant-design/icons'
-import { Alert, App as AntdApp, Button, Card, Descriptions, Form, Input, InputNumber, Space, Switch, Tag } from 'antd'
+import { Alert, App as AntdApp, Button, Card, Descriptions, Form, Input, InputNumber, Space, Switch, Tag, theme as antdTheme } from 'antd'
 
 import { api } from '../../api/endpoints'
 import { useCommand, useCommandNoArgs, useStatusQuery } from '../../api/queries'
@@ -10,6 +10,7 @@ import { useUiStore } from '../../store/uiStore'
 /** 连接与状态区（T12）：连接参数 + 启停 + 运行指标。 */
 export function ConnectionPanel() {
   const { message } = AntdApp.useApp()
+  const { token } = antdTheme.useToken()
   const statusQuery = useStatusQuery()
   const status = statusQuery.data
   const running = Boolean(status?.running)
@@ -56,7 +57,7 @@ export function ConnectionPanel() {
       }
       extra={
         <Space>
-          <span style={{ color: '#8c8c8c' }}>断线重连</span>
+          <span style={{ color: token.colorTextTertiary }}>断线重连</span>
           <Switch size="small" checked={reconnect} onChange={setReconnect} />
           <Button
             type="primary"
@@ -139,7 +140,7 @@ export function ConnectionPanel() {
       </Form>
 
       <Space wrap style={{ marginBottom: 12 }}>
-        <span style={{ color: '#8c8c8c' }}>TLS</span>
+        <span style={{ color: token.colorTextTertiary }}>TLS</span>
         <Switch size="small" checked={tlsEnabled} onChange={setTlsEnabled} />
         {tlsEnabled ? (
           <>
@@ -202,6 +203,7 @@ export function ConnectionPanel() {
 
 /** 点值全量刷新节流控制（点值主路径是事件增量，这里是兜底对齐）。 */
 function LiveRefreshControl() {
+  const { token } = antdTheme.useToken()
   const liveRefreshMs = useUiStore((s) => s.liveRefreshMs)
   const setLiveRefreshMs = useUiStore((s) => s.setLiveRefreshMs)
   const { data: status } = useStatusQuery()
@@ -210,8 +212,8 @@ function LiveRefreshControl() {
 
   return (
     <Space wrap style={{ marginTop: 12 }}>
-      <PauseCircleOutlined style={{ color: '#8c8c8c' }} />
-      <span style={{ color: '#8c8c8c' }}>点值快照对齐周期</span>
+      <PauseCircleOutlined style={{ color: token.colorTextTertiary }} />
+      <span style={{ color: token.colorTextTertiary }}>点值快照对齐周期</span>
       <InputNumber
         min={0}
         max={10000}
@@ -221,14 +223,14 @@ function LiveRefreshControl() {
         onChange={(v) => setLiveRefreshMs(Math.max(0, Number(v ?? 0)))}
         addonAfter="ms"
       />
-      <span style={{ color: '#8c8c8c' }}>（0 = 关闭，仅用事件增量）</span>
+      <span style={{ color: token.colorTextTertiary }}>（0 = 关闭，仅用事件增量）</span>
       {heavy ? (
         <Tag color="warning">
           点表 {points} 行较大，建议调大或关闭全量对齐，仅依赖事件增量
         </Tag>
       ) : null}
-      <LinkOutlined style={{ color: '#8c8c8c' }} />
-      <span style={{ color: '#8c8c8c' }}>
+      <LinkOutlined style={{ color: token.colorTextTertiary }} />
+      <span style={{ color: token.colorTextTertiary }}>
         值更新优先走 WS 事件增量补丁，本项仅作兜底权威对齐
       </span>
     </Space>

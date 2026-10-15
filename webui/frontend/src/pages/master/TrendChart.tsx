@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { ClearOutlined, CloseOutlined } from '@ant-design/icons'
-import { Button, Card, Empty, Space, Tag, Typography } from 'antd'
+import { Button, Card, Empty, Space, Tag, Typography, theme as antdTheme } from 'antd'
 // 按需注册：只引入折线 + 必要组件，避免把整个 echarts 打进首屏 bundle
 import { LineChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
@@ -13,6 +13,7 @@ import type { Point } from '../../api/types'
 import { formatClock } from '../../lib/format'
 import { pointKey } from '../../lib/pointValue'
 import { trendBuffer } from '../../lib/trendBuffer'
+import { useUiStore } from '../../store/uiStore'
 
 use([LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
 
@@ -23,29 +24,23 @@ interface Props {
   onClear: () => void
 }
 
-const EMPTY_OPTION = {
-  backgroundColor: 'transparent',
-  grid: { left: 48, right: 16, top: 28, bottom: 28 },
-  tooltip: { trigger: 'axis' as const, confine: true },
-  legend: { textStyle: { color: '#d9d9d9' }, top: 0 },
-  xAxis: {
-    type: 'category' as const,
-    axisLabel: { color: '#8c8c8c' },
-    axisLine: { lineStyle: { color: '#3a3a3a' } },
-  },
-  yAxis: {
-    type: 'value' as const,
-    axisLabel: { color: '#8c8c8c' },
-    splitLine: { lineStyle: { color: '#262626' } },
-  },
-  series: [] as unknown[],
-}
-
 /** 趋势图（T12）：从点表挑选点位看实时曲线（ECharts，按需引入）。 */
 export function TrendChart({ watched, onRemove, onClear }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<EChartsType | null>(null)
   const [version, setVersion] = useState(0)
+  // 图表配色全部来自主题 token；theme 变化时 token 随之变化 → chartColors 重算 → option 重建
+  const theme = useUiStore((s) => s.theme)
+  const { token } = antdTheme.useToken()
+  const chartColors = useMemo(
+    () => ({
+      text: token.colorText,
+      textSecondary: token.colorTextSecondary,
+      axisLine: token.colorBorderSecondary,
+      splitLine: token.colorSplit,
+    }),
+    [token.colorText, token.colorTextSecondary, token.colorBorderSecondary, token.colorSplit],
+  )
 
   // 采样注册（setWatched）由 MasterPage 持有：工作台挂载即采样，与本组件是否
   // 挂载无关；这里只负责订阅缓冲节流通知并重绘
@@ -67,6 +62,23 @@ export function TrendChart({ watched, onRemove, onClear }: Props) {
   useEffect(() => {
     const chart = chartRef.current
     if (!chart) return
+    const emptyOption = {
+      backgroundColor: 'transparent',
+      grid: { left: 48, right: 16, top: 28, bottom: 28 },
+      tooltip: { trigger: 'axis' as const, confine: true },
+      legend: { textStyle: { color: chartColors.text }, top: 0 },
+      xAxis: {
+        type: 'category' as const,
+        axisLabel: { color: chartColors.textSecondary },
+        axisLine: { lineStyle: { color: chartColors.axisLine } },
+      },
+      yAxis: {
+        type: 'value' as const,
+        axisLabel: { color: chartColors.textSecondary },
+        splitLine: { lineStyle: { color: chartColors.splitLine } },
+      },
+      series: [] as unknown[],
+    }
     const series = watched.map((point) => {
       const key = pointKey(point)
       const samples = trendBuffer.get(key)
@@ -81,8 +93,9 @@ export function TrendChart({ watched, onRemove, onClear }: Props) {
         data: samples.map((s) => [formatClock(s.ts), s.value]),
       }
     })
-    chart.setOption({ ...EMPTY_OPTION, series }, { replaceMerge: ['series'] })
-  }, [version, watched])
+    chart.setOption({ ...emptyOption, series }, { replaceMerge: ['series'] })
+    // theme 显式入 deps：切换主题时整体重设 option（配色随主题重建）
+  }, [version, watched, chartColors, theme])
 
   return (
     <Card
@@ -124,7 +137,7 @@ export function TrendChart({ watched, onRemove, onClear }: Props) {
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
           description={
-            <span style={{ color: '#8c8c8c' }}>
+            <span style={{ color: token.colorTextTertiary }}>
               选择点位后开始采样（仅采样被选点位，十万点表也不会吃满内存）
             </span>
           }

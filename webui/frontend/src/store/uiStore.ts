@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 
+import { applyThemeToDom, resolveInitialTheme, saveThemePreference } from '../lib/themePreference'
+import type { ThemeMode } from '../lib/themePreference'
 import type { WsStatus } from '../ws/client'
 
 export type PageKey = 'status' | 'master' | 'slave' | 'multi' | 'logs'
@@ -12,6 +14,10 @@ export type PageKey = 'status' | 'master' | 'slave' | 'multi' | 'logs'
 interface UiState {
   page: PageKey
   setPage: (page: PageKey) => void
+
+  /** 主题（深/浅）：初始值在模块加载时同步解析（渲染前，无闪屏）；切换即持久化 */
+  theme: ThemeMode
+  setTheme: (mode: ThemeMode) => void
 
   /** WS 连接状态（头部指示 + 日志页提示） */
   wsStatus: WsStatus
@@ -45,6 +51,14 @@ interface UiState {
 export const useUiStore = create<UiState>((set) => ({
   page: 'status',
   setPage: (page) => set({ page }),
+
+  // 模块加载即解析（跟随系统/localStorage），保证 ConfigProvider 首帧就用对算法
+  theme: resolveInitialTheme(),
+  setTheme: (mode) => {
+    applyThemeToDom(mode)
+    saveThemePreference(mode)
+    set({ theme: mode })
+  },
 
   wsStatus: 'idle',
   setWsStatus: (wsStatus) => set({ wsStatus }),

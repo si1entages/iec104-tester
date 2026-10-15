@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { DeleteOutlined } from '@ant-design/icons'
-import { Button, Card, Collapse, Input, InputNumber, Space, Switch, Tag, Typography } from 'antd'
+import { Button, Card, Collapse, Input, InputNumber, Space, Switch, Tag, Typography, theme as antdTheme } from 'antd'
 
 import type { DraftStation } from './stationDraft'
 
@@ -34,6 +34,7 @@ function Field({ label, width = 200, children }: { label: string; width?: number
  * `enabled` 是**纯本地**开关（不发给后端），用来表达「本次不启动该站」。
  */
 export function StationCard({ station, index, frozen, onChange, onRemove }: Props) {
+  const { token } = antdTheme.useToken()
   const number = (v: number | null | undefined, fallback = 0): number =>
     v === null || v === undefined || !Number.isFinite(Number(v)) ? fallback : Number(v)
 
@@ -57,7 +58,7 @@ export function StationCard({ station, index, frozen, onChange, onRemove }: Prop
       }
       extra={
         <Space>
-          <span style={{ fontSize: 12, color: '#8c8c8c' }}>参与本次启动</span>
+          <span style={{ fontSize: 12, color: token.colorTextTertiary }}>参与本次启动</span>
           <Switch
             size="small"
             aria-label={`参与本次启动-${station.station_id}`}
