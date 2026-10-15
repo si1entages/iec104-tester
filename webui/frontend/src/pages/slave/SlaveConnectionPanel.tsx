@@ -8,6 +8,7 @@ import {
   Card,
   Descriptions,
   Empty,
+  Form,
   Input,
   InputNumber,
   Space,
@@ -134,28 +135,33 @@ export function SlaveConnectionPanel() {
         />
       ) : null}
 
-      <Space wrap style={{ marginBottom: 12 }}>
-        <Input
-          prefix="绑定地址"
-          style={{ width: 200 }}
-          value={host}
-          placeholder="0.0.0.0"
-          onChange={(e) => setHost(e.target.value)}
-        />
-        <InputNumber
-          prefix="端口"
-          min={0}
-          max={65535}
-          value={port}
-          onChange={(v) => setPort(Number(v ?? 2404))}
-        />
-        <InputNumber
-          prefix="公共地址"
-          min={0}
-          value={addr}
-          onChange={(v) => setAddr(Number(v ?? 1))}
-        />
-      </Space>
+      <Form layout="inline" style={{ marginBottom: 12 }} component="div">
+        <Form.Item label="绑定地址">
+          <Input
+            style={{ width: 160 }}
+            value={host}
+            placeholder="0.0.0.0"
+            onChange={(e) => setHost(e.target.value)}
+          />
+        </Form.Item>
+        <Form.Item label="端口">
+          <InputNumber
+            min={0}
+            max={65535}
+            value={port}
+            style={{ width: 110 }}
+            onChange={(v) => setPort(Number(v ?? 2404))}
+          />
+        </Form.Item>
+        <Form.Item label="公共地址">
+          <InputNumber
+            min={0}
+            value={addr}
+            style={{ width: 110 }}
+            onChange={(v) => setAddr(Number(v ?? 1))}
+          />
+        </Form.Item>
+      </Form>
 
       <Space wrap style={{ marginBottom: 12 }}>
         <span style={{ color: '#8c8c8c' }}>TLS</span>
