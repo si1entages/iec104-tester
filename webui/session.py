@@ -287,7 +287,15 @@ class EngineSession:
         eng = MasterEngine(
             host=host, port=port, common_addr=addr,
             auto_start=True, auto_gi=False, reconnect=reconnect,
-            reconnect_interval=5.0,
+            # 计时器/流控/重连间隔来自会话配置（CLI --config / config.tls 同源），
+            # 默认值与引擎构造默认一致（k=12,w=8,t0=30,t1=15,t2=10,t3=20,ri=5.0）
+            reconnect_interval=self.config.connection.reconnect_interval,
+            k=self.config.flow_control.k,
+            w=self.config.flow_control.w,
+            t0=self.config.timers.t0,
+            t1=self.config.timers.t1,
+            t2=self.config.timers.t2,
+            t3=self.config.timers.t3,
             point_table=getattr(points, "table", None),
             gi_interval=float(gi_interval or 0.0),
             ssl_context=ssl_context, server_hostname=server_hostname,
