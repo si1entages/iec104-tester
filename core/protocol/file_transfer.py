@@ -282,7 +282,7 @@ class FileTransferMaster(FileTransferManager):
         self._context.start_time = time.monotonic()
 
         asdu_data = ASDUBuilder.build_file_select_call_get(
-            self._common_addr, ioa, file_name, qualifier=1  # 请求读
+            self._common_addr, ioa, file_name, qualifier=SCQ_REQUEST_FILE
         )
         if self._on_send_asdu:
             self._on_send_asdu(asdu_data)

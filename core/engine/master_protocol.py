@@ -37,7 +37,12 @@ from ..data.point_table import (
 )
 from ..protocol.apci import APCICodec
 from ..protocol.asdu import ASDU, ASDUBuilder
-from ..protocol.file_transfer import FileTransferState
+from ..protocol.file_transfer import (
+    SCQ_REQUEST_DIRECTORY,
+    SCQ_REQUEST_FILE,
+    SCQ_SELECT_FILE,
+    FileTransferState,
+)
 from ..protocol.types import (
     COT,
     BitString32,
@@ -100,8 +105,11 @@ class MasterProtocolHandler:
         """
         e = self._engine
         asdu_data = ASDUBuilder.build_call_directory(
-            e._common_addr, ioa, qualifier=5
+            e._common_addr, ioa, qualifier=SCQ_REQUEST_DIRECTORY
         )
+        # SCQ_REQUEST_DIRECTORY=5 是**项目约定值**（标准表中 5=SELECT_SECTION）：
+        # 主站发 5 → 子站 handle_file_request 按约定回目录，本仓库内闭环；
+        # 该组合与标准表可能冲突，待真机核实（见 docs/file_transfer_fls.md §4.4）。
         # 与非文件传输命令一致：窗口满时等待至多 t1（文件传输会产生大量 I 帧，
         # 是最容易打满 k 窗口的场景）。
         await e._send_command_asdu(asdu_data)
@@ -116,8 +124,10 @@ class MasterProtocolHandler:
         """
         e = self._engine
         asdu_data = ASDUBuilder.build_file_select_call_get(
-            e._common_addr, ioa, file_name, qualifier=4
+            e._common_addr, ioa, file_name, qualifier=SCQ_SELECT_FILE
         )
+        # SCQ_SELECT_FILE=1（曾用魔法数字 4——SCQ 表修正后 4=DELETE_FILE，
+        # "选择文件"会变成向真机发删除命令，故一律改用带名常量）。
         await e._send_command_asdu(asdu_data)
         logger.info(f"File Select: file_name={file_name}")
 
@@ -130,8 +140,9 @@ class MasterProtocolHandler:
         """
         e = self._engine
         asdu_data = ASDUBuilder.build_file_select_call_get(
-            e._common_addr, ioa, file_name, qualifier=1
+            e._common_addr, ioa, file_name, qualifier=SCQ_REQUEST_FILE
         )
+        # SCQ_REQUEST_FILE=2（曾用魔法数字 1——新表中 1=SELECT_FILE，语义静默翻转）。
         await e._send_command_asdu(asdu_data)
         logger.info(f"File Request: file_name={file_name}")
 
@@ -527,7 +538,7 @@ class MasterProtocolHandler:
         elif type_id == TypeID.F_LS_NA_1:
             e._file_transfer.handle_last_section(obj.data)
             # 收到"最后的节/段"后回复 F_AF_NA_1 (肯定节) 完成握手
-            e._file_transfer.send_ack(obj.ioa, qualifier=3)
+            e._file_transfer.send_ack(obj.ioa, qualifier=3)  # AFQ 3=肯定节（AFQ 表，非 SCQ）
         elif type_id == TypeID.F_DR_TA_1:
             e._file_transfer.handle_directory_entry(obj.data)
         elif type_id == TypeID.F_FR_NB_1:

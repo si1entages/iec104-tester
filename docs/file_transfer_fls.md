@@ -171,11 +171,16 @@ LSQ=0、非法 LSQ、CHS 不参与判定、0/1/200/201/700 字节的分段边界
   本实现把 `file_name` 当任意 16 位标识使用（内部自洽，但真机语义未知）。
 - **开放问题**：目标装置用哪一版语义？目录召唤返回的 NOF 取值集合是什么？
 
-### 4.4 目录传输的表达方式（SCQ 与 NOF 的组合）
-- j60870 把 SCQ=5 定义为 `SELECT_SECTION`；而本实现用 SCQ=5 表示"请求目录"。
-- **开放问题**：请求目录究竟走「SCQ=? + NOF=?」的哪种组合？（是否 `NOF=DEFAULT` +
-  `REQUEST_FILE`？或规范另有 SCQ 值？）SCQ 取值表本身已修（见 5.3），但**目录组合
-  仍保持开放**：本实现暂沿用 SCQ=5 触发目录上送，未按标准推断。
+### 4.4 目录传输的表达方式（SCQ 与 NOF 的组合）—— 已选**内部一致的项目约定**
+- **决定**：目录请求沿用 **SCQ=5**（`SCQ_REQUEST_DIRECTORY`），这是**项目约定值**，
+  **不是标准值**——标准表中 5=`SELECT_SECTION`（j60870 同）。未取得标准正文的
+  「请求目录的 SCQ/NOF 组合」前，不臆测其它组合。
+- **内部闭环证据**（`tests/test_file_transfer_fls.py::test_directory_request_closes_loop_master_to_slave`）：
+  master `file_call_directory` 发 F_SC_NA_1(SCQ=5) → 子站 `handle_file_request(5)` 回
+  每文件一条 F_DR_TA_1 + 一条 F_LS_NA_1(LSQ=0) 终止标记，主子两侧都认 5。
+- **遗留**：真机对 5 的解释可能不同（按标准应理解为"选择节"），真机联调（§6 第 4 步）
+  记录对端实际所用组合后再定夺是否改值。常量化后即使要改，也只动
+  `SCQ_REQUEST_DIRECTORY` 一处定义。
 
 ### 4.5 `WITH_DEACT` 的后续动作
 - LSQ=2/4 语义上要求"随后去激活"。**开放问题**：主站收到后是否必须回
@@ -212,6 +217,19 @@ SCQ=5 暂借为目录触发（开放项见 4.4）；SCQ=3/7、6 仅记录不推�
 
 ### 5.5（原 4.1）CHS 校验和 —— 已实现（ed6584a，见 §4.1）
 发送侧按「算术和 mod 256」计算；接收侧校验不通过**记告警不丢弃**。
+
+### 5.6 master 侧 SCQ 魔法数字 —— 已修（表修正后语义静默翻转的危险）
+- `master_protocol.py::file_select` 曾发 `qualifier=4` —— 新表中 4=`DELETE_FILE`，
+  "选择文件"会向真机发**删除命令**（破坏性）；`file_request` 曾发 1（新表=
+  `SELECT_FILE`）；`file_call_directory` 曾发裸 5。三者全部改为带名常量
+  `SCQ_SELECT_FILE` / `SCQ_REQUEST_FILE` / `SCQ_REQUEST_DIRECTORY`；
+  `file_transfer.py::FileTransferMaster.request_file` 的 `qualifier=1`（# 请求读）
+  同样常量化为 `SCQ_REQUEST_FILE`。
+- 红线用例（`tests/test_file_transfer_fls.py` ⑥）：
+  `test_master_file_commands_send_named_scq`（编码后 SCQ 字节 == 1/2/5）、
+  `test_master_never_sends_scq_delete_file`（任何 F_SC 出帧 SCQ ≠ 4）、
+  `test_master_manager_request_file_sends_scq_request_file`、
+  `test_directory_request_closes_loop_master_to_slave`（目录内部闭环）。
 
 ### 测试状态
 - `tests/test_file_transfer_fls.py`：原 5 处缺陷钉桩（F_FR/F_SR 长度、F_SG 布局、

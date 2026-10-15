@@ -408,3 +408,134 @@ def test_receive_side_lsq0_and_undefined_lsq_skip_chs_validation(caplog):
 
     assert not any("CHS mismatch" in r.getMessage() for r in caplog.records)
     assert received == []
+
+
+# ── ⑥ master 协议层红线：SCQ 一律带名常量，任何路径不得发出 DELETE_FILE ──
+
+def _make_master_engine():
+    """轻量主站引擎（mock TCPClient），截获 master 协议层实际发出的 ASDU."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from core.engine.master import MasterEngine
+    from core.protocol.types import ConnState
+
+    with patch("core.engine.master.TCPClient") as mock_client_cls:
+        client = mock_client_cls.return_value
+        client.send = AsyncMock()
+        client.start = AsyncMock()
+        client.stop = AsyncMock()
+        client.stats = MagicMock()
+        engine = MasterEngine(host="127.0.0.1", port=2404, common_addr=1,
+                              auto_start=False, auto_gi=False, reconnect=False)
+    engine._state_machine._state = ConnState.RUNNING
+    return engine, client
+
+
+def _sent_asdu_frames(client) -> list[bytes]:
+    """从 mock 的 client.send 调用中提取全部 ASDU（APDU 去掉 6 字节 APCI 头）."""
+    frames = []
+    for call in client.send.call_args_list:
+        apdu = call.args[0] if call.args else call.kwargs.get("data")
+        frames.append(apdu[6:])
+    return frames
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method,args,expected_scq", [
+    ("file_select", (0, 5), 1),         # SCQ_SELECT_FILE
+    ("file_request", (0, 5), 2),        # SCQ_REQUEST_FILE
+    ("file_call_directory", (0,), 5),   # SCQ_REQUEST_DIRECTORY（项目约定，见 ⑦）
+])
+async def test_master_file_commands_send_named_scq(method, args, expected_scq):
+    """master 协议层三个文件命令的 SCQ 字节必须等于带名常量的值.
+
+    回归点：``file_select`` 曾发魔法数字 4——SCQ 表修正后 4=DELETE_FILE，
+    "选择文件"会向真机发出**删除文件命令**（破坏性操作）；``file_request``
+    曾发 1（新表=SELECT_FILE，语义静默翻转）。
+    """
+    engine, client = _make_master_engine()
+    await getattr(engine, method)(*args)
+
+    frames = _sent_asdu_frames(client)
+    assert frames, f"{method} 未发出任何帧"
+    body = frames[-1][IO_BODY_OFFSET:]
+    assert body[3] == expected_scq
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method,args", [
+    ("file_select", (0, 5)),
+    ("file_request", (0, 5)),
+    ("file_call_directory", (0,)),
+])
+async def test_master_never_sends_scq_delete_file(method, args):
+    """红线：master 协议层**任何路径**不得发出 SCQ_DELETE_FILE(4).
+
+    当前 master 侧不存在删除文件 API，故凡 F_SC_NA_1/F_SC_NB_1 出帧，
+    SCQ 一律不得为 4。
+    """
+    from core.protocol.asdu import ASDU
+    from core.protocol.file_transfer import SCQ_DELETE_FILE
+    from core.protocol.types import TypeID
+
+    engine, client = _make_master_engine()
+    await getattr(engine, method)(*args)
+
+    frames = _sent_asdu_frames(client)
+    assert frames, f"{method} 未发出任何帧"
+    for frame in frames:
+        asdu = ASDU.decode(frame)
+        if asdu.type_id in (TypeID.F_SC_NA_1, TypeID.F_SC_NB_1):
+            assert asdu.objects[0].data.qualifier != SCQ_DELETE_FILE, (
+                f"{method} 发出了 SCQ=4（DELETE_FILE）——破坏性命令！"
+            )
+
+
+def test_master_manager_request_file_sends_scq_request_file():
+    """``FileTransferMaster.request_file``（engine 包装之外的另一条 master 路径）发 SCQ=2.
+
+    回归点：该方法曾发魔法数字 1（新表=SELECT_FILE），已改用 ``SCQ_REQUEST_FILE``。
+    """
+    from core.protocol.file_transfer import SCQ_REQUEST_FILE, FileTransferMaster
+
+    mgr = FileTransferMaster(common_addr=1)
+    sent: list[bytes] = []
+    mgr.set_callbacks(on_send_asdu=sent.append)
+
+    mgr.request_file(IOA, FILE_NAME)
+
+    body = sent[0][IO_BODY_OFFSET:]
+    assert body[3] == SCQ_REQUEST_FILE
+
+
+@pytest.mark.asyncio
+async def test_directory_request_closes_loop_master_to_slave():
+    """目录请求**内部闭环**：master 发 SCQ=5（项目约定）→ 子站回目录条目 + F_LS(LSQ=0).
+
+    本仓库内自洽：master ``file_call_directory`` → 子站 ``handle_file_request(5)``
+    → 每个文件一条 F_DR_TA_1(126) + 一条 F_LS_NA_1(123, LSQ=0) 终止标记。
+    该 5 值与标准表（5=SELECT_SECTION）可能冲突，属项目约定，待真机核实
+    （docs/file_transfer_fls.md §4.4）。
+    """
+    from core.protocol.asdu import ASDU
+    from core.protocol.types import TypeID
+
+    master, client = _make_master_engine()
+    slave, slave_sent = _slave_with_file(b"x")
+    slave.set_file_data(99, b"y")          # 两个文件 → 两条目录条目
+
+    await master.file_call_directory(0)
+
+    master_frames = _sent_asdu_frames(client)
+    assert master_frames, "master 未发出目录请求"
+    req = ASDU.decode(master_frames[-1])
+    assert req.type_id == TypeID.F_SC_NA_1
+    assert req.objects[0].data.qualifier == 5
+
+    obj = req.objects[0]
+    slave.handle_file_request(obj.ioa, obj.data.file_name, obj.data.qualifier)
+
+    assert len(slave_sent) == 3
+    assert all(frame[0] == 126 for frame in slave_sent[:2])      # 2 × F_DR_TA_1
+    assert slave_sent[-1][0] == 123                              # F_LS 终止标记
+    assert slave_sent[-1][IO_BODY_OFFSET + 3] == LSQ_NOT_USED    # LSQ=0
