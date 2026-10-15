@@ -9,6 +9,7 @@ import { ManualSetPanel } from './ManualSetPanel'
 import { ResponsePanel } from './ResponsePanel'
 import { SimulationPanel } from './SimulationPanel'
 import { SlaveConnectionPanel } from './SlaveConnectionPanel'
+import { TestInjectionPanel } from './TestInjectionPanel'
 
 // 报文查看器与主站页**复用同一个组件**（components/FrameViewer），
 // 这里只做懒加载，保持与主站页一致的拆包收益。
@@ -81,6 +82,11 @@ export default function SlavePage() {
                 key: 'sim',
                 label: '模拟控制',
                 children: <SimulationPanel disabled={!running} />,
+              },
+              {
+                key: 'inject',
+                label: '测试注入',
+                children: <TestInjectionPanel disabled={!running} />,
               },
             ]}
           />
