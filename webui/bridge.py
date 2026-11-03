@@ -332,25 +332,28 @@ class EngineBridge:
            并回收引擎残留后台任务 / 调度器 / 已登记的多站管理器；
         2. 断开日志桥接订阅，避免关停后仍有回调向已废弃的总线投递；
         3. 清空 WebSocket/订阅队列集合，释放订阅者及其内部缓冲。
+
+        步骤 2/3 放在 ``finally``：即使会话关停意外抛错，桥接自身的监听器
+        与订阅队列也必须释放，避免 Web 会话关停后残留引用。
         """
-        # 1) 引擎与会话资源
         try:
+            # 1) 引擎与会话资源
             await self.session.shutdown()
         except Exception as e:
             logger.warning("session shutdown: %s", e)
-
-        # 2) 断开日志 → 总线桥接
-        try:
-            self.logs.unsubscribe(self._on_log_entry)
-        except Exception as e:
-            logger.warning("log bridge detach: %s", e)
-
-        # 3) 清空订阅者队列集合（EventBus 无 clear()，经 unsubscribe 逐个移除）
-        for q in list(getattr(self.bus, "_subscribers", ())):
+        finally:
+            # 2) 断开日志 → 总线桥接
             try:
-                self.bus.unsubscribe(q)
-            except Exception:
-                pass
+                self.logs.unsubscribe(self._on_log_entry)
+            except Exception as e:
+                logger.warning("log bridge detach: %s", e)
+
+            # 3) 清空订阅者队列集合（EventBus 无 clear()，经 unsubscribe 逐个移除）
+            for q in list(getattr(self.bus, "_subscribers", ())):
+                try:
+                    self.bus.unsubscribe(q)
+                except Exception:
+                    pass
 
     async def _cmd(self, coro) -> dict:
         try:

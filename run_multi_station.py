@@ -192,8 +192,12 @@ async def run_multi_station(config: MultiStationConfig):
     except Exception as e:
         logger.error(f"Error: {e}")
     finally:
-        # 停止所有站
-        await manager.stop_all()
+        # 显式回收：无论正常停止、启动失败还是运行期异常，都释放各站
+        # 监听端口、客户端连接与后台 asyncio 任务（stop_all 自身幂等）。
+        try:
+            await manager.stop_all()
+        except Exception as e:
+            logger.error(f"Error during multi-station shutdown: {e}")
         logger.info("多站并发模拟已停止")
 
 

@@ -210,6 +210,53 @@ class TestMultiStationReclaim:
         finally:
             s.close()
 
+    @pytest.mark.asyncio
+    async def test_stop_all_releases_listener_when_engine_stop_raises(self):
+        """单站 stop() 抛错时，其余站仍回收，失败站监听端口也不泄漏。"""
+        ports = [_free_port(), _free_port()]
+        mgr = MultiStationManager(_two_station_config(ports))
+        await mgr.start_all()
+        bad = mgr.get_engine("a")
+        assert bad is not None
+
+        async def boom():
+            raise RuntimeError("engine stop failed")
+
+        bad.stop = boom  # type: ignore[method-assign]
+        await mgr.stop_all()
+
+        assert mgr.station_count == 0
+        assert mgr.is_running is False
+        for p in ports:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                s.bind(("127.0.0.1", p))
+            finally:
+                s.close()
+
+    @pytest.mark.asyncio
+    async def test_stop_all_concurrent_calls_stop_engine_once(self):
+        """并发 stop_all（Web 关停 + /api/multi/stop）只回收同一引擎一次。"""
+        ports = [_free_port(), _free_port()]
+        mgr = MultiStationManager(_two_station_config(ports))
+        await mgr.start_all()
+        engine = mgr.get_engine("a")
+        assert engine is not None
+        calls = 0
+        original_stop = engine.stop
+
+        async def counting_stop():
+            nonlocal calls
+            calls += 1
+            await original_stop()
+
+        engine.stop = counting_stop  # type: ignore[method-assign]
+        await asyncio.gather(mgr.stop_all(), mgr.stop_all())
+
+        assert calls == 1
+        assert mgr.station_count == 0
+        assert mgr.is_running is False
+
 
 # ── Web 桥接关停 ─────────────────────────────────────────────────
 
@@ -234,3 +281,77 @@ class TestBridgeShutdown:
         assert mgr.is_running is False
         # 二次关停幂等
         await bridge.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_reclaims_multistation_started_via_web_api(self):
+        """走真实 Web 注册路径（multi_start）后关停，管理器与端口均被回收。"""
+        from webui.bridge import EngineBridge
+
+        bridge = EngineBridge(role="slave")
+        ports = [_free_port(), _free_port()]
+        result = await bridge.multi_start([
+            {"station_id": "a", "host": "127.0.0.1", "port": ports[0],
+             "common_addr": 1, "auto_generate": True, "yx_count": 3, "yc_count": 2},
+            {"station_id": "b", "host": "127.0.0.1", "port": ports[1],
+             "common_addr": 2, "auto_generate": True, "yx_count": 3, "yc_count": 2},
+        ])
+        assert result["ok"] is True
+        mgr = bridge.session.multi_station
+        assert mgr is not None
+        assert mgr.station_count == 2
+
+        await bridge.shutdown()
+
+        assert bridge.session.multi_station is None
+        assert mgr.station_count == 0
+        assert mgr.is_running is False
+        for p in ports:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                s.bind(("127.0.0.1", p))
+            finally:
+                s.close()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_reclaims_multistation_when_engine_stop_raises(self):
+        """单站引擎关停抛错时，finally 兜底仍回收多站管理器。"""
+        from webui.bridge import EngineBridge
+
+        bridge = EngineBridge(role="slave")
+        ports = [_free_port(), _free_port()]
+        mgr = MultiStationManager(_two_station_config(ports))
+        await mgr.start_all()
+        bridge.session.attach_multi_station(mgr)
+
+        async def boom():
+            raise RuntimeError("engine stop failed")
+
+        bridge.session.stop_slave = boom  # type: ignore[method-assign]
+        await bridge.shutdown()
+
+        assert bridge.session.multi_station is None
+        assert mgr.station_count == 0
+        assert mgr.is_running is False
+        for p in ports:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                s.bind(("127.0.0.1", p))
+            finally:
+                s.close()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_clears_subscribers_when_session_shutdown_raises(self):
+        """会话关停意外抛错时，桥接仍清空订阅者队列（finally 兜底）。"""
+        from webui.bridge import EngineBridge
+
+        bridge = EngineBridge(role="slave")
+        q = bridge.subscribe()
+        assert q in bridge.bus._subscribers
+
+        async def boom():
+            raise RuntimeError("session shutdown failed")
+
+        bridge.session.shutdown = boom  # type: ignore[method-assign]
+        await bridge.shutdown()
+
+        assert bridge.bus._subscribers == set()
