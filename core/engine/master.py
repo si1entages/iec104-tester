@@ -608,16 +608,6 @@ class MasterEngine(EngineBase):
         """记录参数应答超时（转发，语义见 MasterParameterTracker）."""
         self._params.record_timeout(ioa, kind)
 
-    def _record_parameter_timeout(self, ioa: int, kind: str) -> None:
-        """t1 内未收到应答 → 记 TIMEOUT；已有终态（OK/REJECTED/TERMINATED）不被覆盖."""
-        state = self._parameter_states.get(ioa)
-        if state is None:
-            return
-        current = state.activation_result if kind == "activation" else state.load_result
-        if current is not ParameterResult.PENDING:
-            return
-        self._set_parameter_result(ioa, kind, ParameterResult.TIMEOUT, None)
-
     # ── 文件传输命令 ──────────────────────────────────────────────
 
     async def file_call_directory(self, ioa: int = 0) -> None:

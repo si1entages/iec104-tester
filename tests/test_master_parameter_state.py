@@ -191,6 +191,24 @@ async def test_negative_activation_confirmation_records_rejected(engine):
     assert st.activation_cot == COT.ACTCON
 
 
+@pytest.mark.asyncio
+async def test_deactivation_confirm_records_ok():
+    """去激活确认（DEACTCON）→ activation_result=OK，COT 记录为 DEACTCON."""
+    engine = _make_engine(t1=0.0)
+    ioa = 302
+    await engine.parameter_activation(ioa, 2)
+
+    engine._process_asdu(_ack(TypeID.P_AC_NA_1, ioa, COT.DEACTCON))
+    st = engine.get_parameter_state(ioa)
+    assert st.activation_result is ParameterResult.OK
+    assert st.activation_cot == COT.DEACTCON
+
+    # DEACTCON 不唤醒等待者（只有 ACTCON 唤醒）：超时收尾不得覆盖已记录终态
+    await _drain_background(engine)
+    assert engine.get_parameter_state(ioa).activation_result is ParameterResult.OK
+    assert (ioa, "activation") not in engine._pending_parameter_acks
+
+
 # ── 应答超时 ─────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -247,6 +265,44 @@ async def test_actterm_alone_does_not_wake_waiter():
     await _wait_ack_settled(engine, ioa, "activation")
     # ACTTERM 已写入终态，超时不得覆盖
     assert engine.get_parameter_state(ioa).activation_result is ParameterResult.TERMINATED
+
+
+# ── 应答分发（多对象 / 异常 COT）─────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_multi_object_ack_updates_each_ioa(engine):
+    """一帧参数应答含多个对象 → 每个 IOA 各自更新（不只看首个对象）."""
+    ioa1, ioa2 = 303, 304
+    await engine.parameter_normalized(ioa1, 0.1)
+    await engine.parameter_scaled(ioa2, 10)
+    await _wait_ack_registered(engine, ioa1, "load")
+    await _wait_ack_registered(engine, ioa2, "load")
+
+    asdu = ASDU(
+        type_id=TypeID.P_ME_NA_1, sq=False, num=2,
+        cot=COT.ACTCON, pn=False, common_addr=1,
+    )
+    asdu.objects.append(InformationObject(ioa=ioa1))
+    asdu.objects.append(InformationObject(ioa=ioa2))
+    engine._process_asdu(asdu)
+
+    await _drain_background(engine)
+    assert engine.get_parameter_state(ioa1).load_result is ParameterResult.OK
+    assert engine.get_parameter_state(ioa2).load_result is ParameterResult.OK
+
+
+@pytest.mark.asyncio
+async def test_unexpected_cot_does_not_change_state():
+    """非参数应答语义的 COT（如 SPONT）不写入状态，等待者仍按超时收尾."""
+    engine = _make_engine(t1=0.0)
+    ioa = 305
+    await engine.parameter_normalized(ioa, 0.5)
+
+    engine._process_asdu(_ack(TypeID.P_ME_NA_1, ioa, COT.SPONT))
+    assert engine.get_parameter_state(ioa).load_result is ParameterResult.PENDING
+
+    await _drain_background(engine)
+    assert engine.get_parameter_state(ioa).load_result is ParameterResult.TIMEOUT
 
 
 # ── 查询接口语义 ─────────────────────────────────────────────────
