@@ -112,7 +112,7 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - [x] 结构化日志模块 `core/logging_manager.py`：分级/分类/来源，内存环形缓冲 + JSONL 会话文件（轮转）+ Python logging 桥 + Web「日志」面板（过滤/搜索/导出）
 - [x] 协议类型覆盖补齐：**72/72 个已定义类型均可构造 + 可解码**（CP24 变体 8、继保事件 6、成组单点 2、无品质 2、位模式测试 1、对称性缺口 2）
 - [x] 机制层补齐：T 试验位（编码/解码/子站回显/主站不入库）、读未知 IOA 回 COT=45、C_CD 按请求延时、主站累计量 CP24 变体、ASDU 长度上限强制
-- [ ] 参数命令主站侧状态跟踪（当前仅记录日志，未跟踪装载/激活结果）
+- [x] 参数命令主站侧状态跟踪（装载/激活两维：PENDING→OK/TERMINATED/REJECTED/TIMEOUT，记录 COT；`get_parameter_state` / `parameter_states` + REST `/api/master/param_state`、`/api/master/params`）
 - [ ] 升降命令（调节步）不做联动：点表未建模步位置点（真机为 M_ST_NA_1 档位），需要时应新增点类型
 - [x] 多站管理器在 Web 会话关停时的资源清理（`stop()` 已无阻塞，仍缺显式回收路径）
 - [ ] 主站定义表双击值直接发命令（需选中行后用右侧命令面板）
