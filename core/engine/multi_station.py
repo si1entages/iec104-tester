@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import Callable
@@ -112,6 +113,9 @@ class MultiStationManager:
         self._global_event_callback: Callable | None = None
         self._running = False
         self._start_time: float = 0.0
+        # 串行化关停：Web 会话关停与 /api/multi/stop 可能并发进入 stop_all，
+        # 同一引擎被并发 stop/close 会产生重复 cancel 与关闭竞态。
+        self._shutdown_lock = asyncio.Lock()
 
     @property
     def start_errors(self) -> dict[str, str]:
@@ -190,35 +194,71 @@ class MultiStationManager:
           现在只要「有引擎实例」或「标记为运行中」就执行回收。
         - 逐站 ``stop()`` 后再回收其**残留后台任务**（``aclose_background_tasks``），
           避免事件循环关闭时出现 "Task was destroyed but it is pending!"。
+        - ``stop()`` 自身抛错时兜底关闭该站监听器与连接，并断开引擎 → 管理器的
+          事件回调引用；否则 Web 会话关停会残留监听端口/连接及回调引用。
         - 清空引擎/配置字典与全局事件回调，复位运行标记与计时。
+
+        并发调用由 ``_shutdown_lock`` 串行化，保证同一引擎只被回收一次。
         """
+        async with self._shutdown_lock:
+            await self._stop_all_locked()
+
+    async def _stop_all_locked(self) -> None:
+        """``stop_all()`` 的实际回收逻辑（调用方须持有 ``_shutdown_lock``）."""
         if not self._engines and not self._running:
             return
 
         logger.info("Stopping all stations...")
 
-        for station_id, engine in list(self._engines.items()):
-            try:
-                await engine.stop()
-            except Exception as e:
-                logger.error(f"Error stopping station {station_id}: {e}")
-            # 关停后回收残留后台任务，防 pending 告警与资源泄漏
-            aclose = getattr(engine, "aclose_background_tasks", None)
-            if aclose is not None:
+        try:
+            for station_id, engine in list(self._engines.items()):
                 try:
-                    await aclose()
+                    await engine.stop()
                 except Exception as e:
-                    logger.warning(f"Error reaping station {station_id} tasks: {e}")
-            logger.info(f"Station {station_id} stopped")
+                    logger.error(f"Error stopping station {station_id}: {e}")
+                # 关停后回收残留后台任务，防 pending 告警与资源泄漏
+                aclose = getattr(engine, "aclose_background_tasks", None)
+                if aclose is not None:
+                    try:
+                        await aclose()
+                    except Exception as e:
+                        logger.warning(f"Error reaping station {station_id} tasks: {e}")
+                # 兜底：engine.stop() 若在关闭监听器前失败，这里释放端口/连接
+                await self._close_station_listener(engine)
+                # 断开引擎 → 管理器回调，避免关停后仍有事件投递到已废弃的管理器
+                self._detach_station_callback(engine)
+                logger.info(f"Station {station_id} stopped")
+        finally:
+            self._engines.clear()
+            self._station_configs.clear()
+            self._tls_enabled.clear()
+            self._start_errors.clear()
+            self._global_event_callback = None
+            self._running = False
+            self._start_time = 0.0
+            logger.info("All stations stopped")
 
-        self._engines.clear()
-        self._station_configs.clear()
-        self._tls_enabled.clear()
-        self._start_errors.clear()
-        self._global_event_callback = None
-        self._running = False
-        self._start_time = 0.0
-        logger.info("All stations stopped")
+    @staticmethod
+    async def _close_station_listener(engine: Any) -> None:
+        """兜底关闭站点监听器（``engine.stop()`` 失败时仍释放端口）."""
+        server = getattr(engine, "_server", None)
+        if server is None or not getattr(server, "is_running", False):
+            return
+        try:
+            await server.stop()
+        except Exception as e:
+            logger.warning(f"Error closing station listener: {e}")
+
+    @staticmethod
+    def _detach_station_callback(engine: Any) -> None:
+        """断开引擎事件回调，避免其继续引用已关停的管理器."""
+        setter = getattr(engine, "set_event_callback", None)
+        if setter is None:
+            return
+        try:
+            setter(None)
+        except Exception:
+            pass
 
     async def _start_station(self, config: StationConfig) -> None:
         """启动单个子站."""

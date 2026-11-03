@@ -174,6 +174,10 @@ class EngineSession:
         mgr = MultiStationManager(MultiStationConfig(stations=cfgs))
         try:
             await mgr.start_all()
+        except asyncio.CancelledError:
+            # Web 会话在启动过程中被取消：先回收已启动的站，再传播取消
+            await mgr.stop_all()
+            raise
         except Exception as e:
             await mgr.stop_all()
             logger.warning("multi start failed: %s", e)
@@ -188,7 +192,7 @@ class EngineSession:
                 "error": "；".join(f"{sid}: {msg}" for sid, msg in failed.items()),
                 "failed": self._failed_list(failed),
             }
-        self._multi_station = mgr
+        self.attach_multi_station(mgr)
         return {
             "ok": True,
             "stations": mgr.station_count,
@@ -196,11 +200,14 @@ class EngineSession:
         }
 
     async def multi_stop(self) -> dict:
-        mgr = self._multi_station
+        mgr, self._multi_station = self._multi_station, None
         if mgr is None:
             return {"ok": True}
-        await mgr.stop_all()
-        self._multi_station = None
+        try:
+            await mgr.stop_all()
+        except Exception as e:
+            logger.warning("multi stop: %s", e)
+            return {"ok": False, "error": str(e)}
         return {"ok": True}
 
     def multi_status(self) -> dict:
@@ -394,18 +401,31 @@ class EngineSession:
             except Exception as e:
                 logger.warning("background task reap: %s", e)
 
+    async def _shutdown_multi_station(self) -> None:
+        """注销并回收已登记的多站管理器（幂等；关停阶段异常不外抛）."""
+        mgr, self._multi_station = self._multi_station, None
+        if mgr is None:
+            return
+        try:
+            await mgr.stop_all()
+        except Exception as e:
+            logger.warning("multi-station shutdown: %s", e)
+
     async def shutdown(self) -> None:
-        if self.role == "master":
-            await self.stop_master()
-        else:
-            await self.stop_slave()
-        # 多站管理器（若已登记）：释放各子站引擎、监听端口与后台任务
-        if self._multi_station is not None:
-            try:
-                await self._multi_station.stop_all()
-            except Exception as e:
-                logger.warning("multi-station shutdown: %s", e)
-            self._multi_station = None
+        """关停会话持有的全部资源.
+
+        单站引擎 stop 失败时也必须继续回收多站管理器（``finally`` 兜底），
+        否则多站监听端口、连接与后台任务会随 Web 会话关停而残留。
+        """
+        try:
+            if self.role == "master":
+                await self.stop_master()
+            else:
+                await self.stop_slave()
+        except Exception as e:
+            logger.warning("session engine shutdown: %s", e)
+        finally:
+            await self._shutdown_multi_station()
 
     def status_fields(self) -> dict:
         """状态字段.
