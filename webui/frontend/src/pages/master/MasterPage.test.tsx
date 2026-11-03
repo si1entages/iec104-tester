@@ -18,21 +18,40 @@ function jsonResponse(body: unknown): Response {
 }
 
 const POINTS: Point[] = [
-  { ioa: 1001, type: 'YC', name: 'YC_0001', enabled: true, value: 0 },
-  { ioa: 1008, type: 'YC', name: 'YC_0008', enabled: true, value: 12.5 },
-  { ioa: 201, type: 'YK', name: 'YK_SBO_TRUE', enabled: true, value: 'OFF' },
+  { ioa: 1001, type: 'YC', name: 'YC_0001', enabled: true, value: 0, subtype: 'short_float' },
+  { ioa: 1008, type: 'YC', name: 'YC_0008', enabled: true, value: 12.5, subtype: 'short_float' },
+  {
+    ioa: 201,
+    type: 'YK',
+    name: 'YK_SBO_TRUE',
+    enabled: true,
+    value: '—',
+    subtype: 'single',
+    sbo: true,
+  },
 ]
 
-function stubFetch(): void {
+interface Post {
+  path: string
+  body: Record<string, unknown>
+}
+
+function stubFetch(posts?: Post[]): void {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (input: unknown) => {
+    vi.fn(async (input: unknown, init?: RequestInit) => {
       const url = String(input)
       if (url.startsWith('/api/status')) {
         return jsonResponse({ role: 'master', running: true, started: true, schemaVersion: 1 })
       }
       if (url.startsWith('/api/points')) {
         return jsonResponse({ points: POINTS })
+      }
+      if (init?.method === 'POST') {
+        posts?.push({
+          path: url,
+          body: JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>,
+        })
       }
       return jsonResponse({ ok: true })
     }),
@@ -46,11 +65,11 @@ describe('MasterPage（主站工作台）命令面板当前值实时刷新', () 
     vi.unstubAllGlobals()
   })
 
-  function setup() {
+  function setup(posts?: Post[]) {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false, gcTime: 0 } },
     })
-    stubFetch()
+    stubFetch(posts)
     render(
       <QueryClientProvider client={client}>
         <AntdApp>
@@ -95,5 +114,21 @@ describe('MasterPage（主站工作台）命令面板当前值实时刷新', () 
     fireEvent.click(screen.getByRole('button', { name: /加入趋势/ }))
 
     await waitFor(() => expect(setWatchedSpy).toHaveBeenCalledWith(['YC-1008']))
+  })
+
+  it('双击 YK 值单元格 → 确认弹窗 → 下发遥控命令并选中目标行', async () => {
+    const posts: Post[] = []
+    setup(posts)
+    await screen.findByText('YC_0008')
+
+    fireEvent.doubleClick(screen.getByTestId('point-value-YK-201'))
+    await waitFor(() => expect(screen.getByText(/下发遥控命令/)).toBeInTheDocument())
+    // 双击同时把该行带入右侧命令面板
+    await waitFor(() => expect(screen.getAllByText(/已选 YK-201/).length).toBeGreaterThan(0))
+
+    fireEvent.click(screen.getByRole('button', { name: /确\s*认\s*下\s*发/ }))
+    await waitFor(() => expect(posts).toHaveLength(1))
+    expect(posts[0].path).toBe('/api/master/yk')
+    expect(posts[0].body).toMatchObject({ ioa: 201, state: 1, select: false, double: false })
   })
 })

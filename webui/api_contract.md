@@ -78,7 +78,7 @@
 | POST | `/api/master/reset` | — | `{ok, error?}` |
 | POST | `/api/master/test` | — | `{ok, error?}` |
 | POST | `/api/master/read` | `ioa: int (≥0)` | `{ok, error?}` |
-| POST | `/api/master/yk` | `ioa: int (≥0)`, `state: 0\|1 =0`, `select: bool=false`, `double: bool=false`, `with_time: bool=false`, `deactivate: bool=false` | `{ok, error?}` |
+| POST | `/api/master/yk` | `ioa: int (≥0)`, `state: 0\|1\|2 =0`（单命令 0=分/1=合；双命令 1=分/2=合）, `select: bool=false`, `double: bool=false`, `with_time: bool=false`, `deactivate: bool=false` | `{ok, error?}` |
 | POST | `/api/master/setpoint` | `ioa: int (≥0)`, `value: number`, `kind: "short_float"\|"normalized"\|"scaled" ="short_float"`, `select: bool=false`, `with_time: bool=false`, `deactivate: bool=false` | `{ok, error?}` |
 | POST | `/api/master/step` | `ioa: int (≥0)`, `state: 1\|2`（1=降, 2=升）, `select: bool=false` | `{ok, error?}` |
 | POST | `/api/master/bitstring` | `ioa: int (≥0)`, `value: int (≥0, 32bit)` | `{ok, error?}` |
@@ -255,10 +255,16 @@
   enabled: boolean
   value?: number | boolean | string | null
   quality?: string
+  /** 类型细分：YX single/double；YC short_float/normalized/scaled；YK single/double */
+  subtype?: string
+  /** 仅 YK：是否需要选择-执行（SBO） */
+  sbo?: boolean
 }
 ```
 
 > `type ∈ {"YX","YC","YK","YM","STEP"}`；`STEP` 为步位置点（`value` 为档位整数）。
+> `subtype` / `sbo` 由主站定义表快照补充，供前端按点类型下发对应命令
+> （YK 单/双命令、YC 设点类型）；老客户端可忽略这些可选字段。
 
 ### 4.3 `Frame`
 
