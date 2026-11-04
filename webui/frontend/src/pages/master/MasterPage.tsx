@@ -5,10 +5,12 @@ import { Alert, Col, Row, Spin, Tabs } from 'antd'
 import { usePointsQuery, useStatusQuery } from '../../api/queries'
 import type { Point } from '../../api/types'
 import { PointsTable } from '../../components/PointsTable'
+import { directCommandKind } from '../../lib/pointCommand'
 import { pointKey } from '../../lib/pointValue'
 import { trendBuffer } from '../../lib/trendBuffer'
 import { CommandPanel } from './CommandPanel'
 import { ConnectionPanel } from './ConnectionPanel'
+import { PointCommandDialog } from './PointCommandDialog'
 
 // 报文查看器与趋势图（含 ECharts）懒加载：不进主站首屏 chunk，
 // 只有切到对应 Tab 才下载。报文查看器是跨页共享组件（见 components/）。
@@ -32,7 +34,11 @@ const MAX_TREND = 8
  * 主站工作台（T12）。
  *
  * 布局：连接与状态区 → [点表（十万行虚拟滚动） | 命令面板] → [报文查看器 / 趋势图]。
- * 交互变更：**单击选中行 + 右侧面板下发命令**，不再有「双击值直接发命令」路径。
+ *
+ * 交互：单击选中行后由右侧面板下发命令；命令点（YK/YC/STEP）的值单元格
+ * 还支持**双击直接下发**——先弹确认框核对点位/方向/目标值，确认后才发请求。
+ * SBO 点位不在这里手写两段式，统一交给主站引擎按点表配置「选择→等确认→执行」，
+ * 选择失败时不会发送执行帧。
  */
 export default function MasterPage() {
   const { data: status } = useStatusQuery()
@@ -40,14 +46,26 @@ export default function MasterPage() {
   // 只记选中行的键（`类别-IOA`），实时 Point 从点表缓存派生——
   // WS 增量补丁只更新缓存，若缓存选中行快照则「当前值」永远停在选中瞬间（bug 修复）
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  // 双击命令弹窗同样只记键：弹窗开着时 WS 快照刷新，弹窗里的「当前值」也跟着更新
+  const [commandKey, setCommandKey] = useState<string | null>(null)
   const [watched, setWatched] = useState<Point[]>([])
 
   const selected = useMemo(
     () => (selectedKey ? points.find((p) => pointKey(p) === selectedKey) ?? null : null),
     [points, selectedKey],
   )
+  const commandPoint = useMemo(
+    () => (commandKey ? points.find((p) => pointKey(p) === commandKey) ?? null : null),
+    [points, commandKey],
+  )
   const onSelect = useCallback((point: Point | null) => {
     setSelectedKey(point ? pointKey(point) : null)
+  }, [])
+  const onValueDoubleClick = useCallback((point: Point) => {
+    // 双击监视点（YX/YM）只保持选中，不产生命令
+    if (!directCommandKind(point)) return
+    setSelectedKey(pointKey(point))
+    setCommandKey(pointKey(point))
   }, [])
 
   const watchedKeys = useMemo(() => watched.map(pointKey), [watched])
@@ -90,6 +108,7 @@ export default function MasterPage() {
           <PointsTable
             selected={selected}
             onSelect={onSelect}
+            onValueDoubleClick={onValueDoubleClick}
             watchedKeys={watchedKeys}
             onAddTrend={addTrend}
           />
@@ -98,6 +117,13 @@ export default function MasterPage() {
           <CommandPanel point={selected} disabled={!status?.running} />
         </Col>
       </Row>
+
+      <PointCommandDialog
+        key={commandKey ?? 'closed'}
+        point={commandPoint}
+        disabled={!status?.running}
+        onClose={() => setCommandKey(null)}
+      />
 
       <Tabs
         defaultActiveKey="frames"

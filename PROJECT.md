@@ -115,7 +115,7 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - [x] 参数命令主站侧状态跟踪（装载/激活两维：PENDING→OK/TERMINATED/REJECTED/TIMEOUT，记录 COT；`get_parameter_state` / `parameter_states` + REST `/api/master/param_state`、`/api/master/params`）
 - [ ] 升降命令（调节步）不做联动：点表未建模步位置点（真机为 M_ST_NA_1 档位），需要时应新增点类型
 - [x] 多站管理器在 Web 会话关停时的资源清理（`stop()` 已无阻塞，仍缺显式回收路径）
-- [ ] 主站定义表双击值直接发命令（需选中行后用右侧命令面板）
+- [x] 主站定义表双击值直接发命令（YK/YC/STEP 经确认弹窗下发；SBO/选择-执行不绕过）
 
 ## 双应用入口（纯 Web UI）
 

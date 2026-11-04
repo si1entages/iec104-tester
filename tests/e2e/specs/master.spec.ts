@@ -1,8 +1,9 @@
 /**
  * T15 主站交互 e2e：连接建立 → 点表虚拟滚动 → 选中行 → 命令面板下发。
  *
- * 含 T12 红线用例：**双击点表行不得产生任何 `/api/master/*` POST**
- * （历史回归：旧 UI 双击值直接发命令；T12 起改为「选中行 + 命令面板」）。
+ * T21 起定义表命令点支持「双击值直接发命令」：YK/YC/STEP 的值单元格双击后
+ * 先弹确认框，确认才下发；SBO 仍由后端按点表配置完成选择-执行，不绕过确认。
+ * 红线保留：**双击监视点（YX/YM）的值单元格不得产生任何 `/api/master/*` POST**。
  */
 import { expect, test } from '@playwright/test'
 
@@ -117,14 +118,62 @@ test('选中行 → SBO 选择 → 撤销选择（deactivate 请求体断言）'
   await expect(undoBtn).toBeDisabled({ timeout: 10_000 })
 })
 
-test('红线：双击点表行不产生任何 /api/master/* POST', async ({ page }) => {
+test('双击 YK 值单元格 → 确认弹窗 → 下发遥控命令（SBO 不绕过）', async ({ page }) => {
   await gotoApp(page, MASTER, '主站工作台')
   await page.getByPlaceholder('按名称 / IOA 过滤').fill('YK_SBO_TRUE')
   const ykRow = page.locator(ROW).filter({ hasText: 'YK_SBO_TRUE' }).first()
   await expect(ykRow).toBeVisible()
   const posts = capturePosts(page)
-  await ykRow.dblclick()
-  await page.waitForTimeout(1_500)
+
+  await page.getByTestId('point-value-YK-201').dblclick()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toContainText('下发遥控命令')
+  await expect(dialog).toContainText('选择-执行（SBO）')
+  await expect(dialog).toContainText('选择被拒或超时不会发送执行帧')
+  await dialog.getByRole('button', { name: /确\s*认\s*下\s*发/ }).click()
+
+  await expect
+    .poll(() => posts.filter((p) => p.path === '/api/master/yk'), { timeout: 10_000 })
+    .toHaveLength(1)
+  const body = posts.find((p) => p.path === '/api/master/yk')!.body!
+  expect(body).toMatchObject({ ioa: 201, select: false, double: false })
+  expect(typeof body.state).toBe('number')
+})
+
+test('双击 YC 值单元格 → 确认弹窗 → 下发设点命令', async ({ page }) => {
+  await gotoApp(page, MASTER, '主站工作台')
+  await page.getByPlaceholder('按名称 / IOA 过滤').fill('YC_101')
+  const ycRow = page.locator(ROW).filter({ hasText: 'YC_101' }).first()
+  await expect(ycRow).toBeVisible()
+  const posts = capturePosts(page)
+
+  await page.getByTestId('point-value-YC-101').dblclick()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toContainText('下发设点命令')
+  const valueInput = dialog.getByRole('spinbutton')
+  await valueInput.fill('12.5')
+  await dialog.getByRole('button', { name: /确\s*认\s*下\s*发/ }).click()
+
+  await expect
+    .poll(() => posts.filter((p) => p.path === '/api/master/setpoint'), { timeout: 10_000 })
+    .toHaveLength(1)
+  expect(posts.find((p) => p.path === '/api/master/setpoint')!.body).toMatchObject({
+    ioa: 101,
+    value: 12.5,
+    kind: 'short_float',
+    select: false,
+  })
+})
+
+test('红线：双击遥信值单元格不产生任何 /api/master/* POST', async ({ page }) => {
+  await gotoApp(page, MASTER, '主站工作台')
+  await page.getByPlaceholder('按名称 / IOA 过滤').fill('YX_SINGLE_1')
+  const yxRow = page.locator(ROW).filter({ hasText: 'YX_SINGLE_1' }).first()
+  await expect(yxRow).toBeVisible()
+  const posts = capturePosts(page)
+  await page.getByTestId('point-value-YX-1').dblclick()
+  await page.waitForTimeout(1_000)
   const masterPosts = posts.filter((p) => p.path.startsWith('/api/master/'))
-  expect(masterPosts, `双击触发了命令下发: ${JSON.stringify(masterPosts)}`).toHaveLength(0)
+  expect(masterPosts, `双击监视点触发了命令下发: ${JSON.stringify(masterPosts)}`).toHaveLength(0)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
 })

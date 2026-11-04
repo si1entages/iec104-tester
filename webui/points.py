@@ -69,13 +69,17 @@ class PointService:
         out: list[dict] = []
         for p in self.table.get_all_yx():
             out.append({"ioa": p.ioa, "type": "YX", "name": p.name, "group": p.group,
-                        "enabled": p.enabled, "value": "OFF"})
+                        "enabled": p.enabled, "value": "OFF",
+                        "subtype": p.point_type.value})
         for p in self.table.get_all_yc():
             out.append({"ioa": p.ioa, "type": "YC", "name": p.name, "group": p.group,
-                        "enabled": p.enabled, "value": 0.0})
+                        "enabled": p.enabled, "value": 0.0,
+                        "subtype": p.data_type.value})
         for p in self.table.get_all_yk():
             out.append({"ioa": p.ioa, "type": "YK", "name": p.name, "group": p.group,
-                        "enabled": p.enabled, "value": "—"})
+                        "enabled": p.enabled, "value": "—",
+                        "subtype": str(p.command_type),
+                        "sbo": bool(p.select_before_execute)})
         for p in self.table.get_all_ym():
             out.append({"ioa": p.ioa, "type": "YM", "name": p.name, "group": p.group,
                         "enabled": p.enabled, "value": 0})

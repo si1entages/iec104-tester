@@ -21,7 +21,7 @@ function jsonResponse(body: unknown): Response {
   } as unknown as Response
 }
 
-function renderTable(): void {
+function renderTable(onValueDoubleClick?: (point: Point) => void): void {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   })
@@ -31,7 +31,11 @@ function renderTable(): void {
   )
   render(
     <QueryClientProvider client={client}>
-      <PointsTable selected={null} onSelect={() => undefined} />
+      <PointsTable
+        selected={null}
+        onSelect={() => undefined}
+        onValueDoubleClick={onValueDoubleClick}
+      />
     </QueryClientProvider>,
   )
 }
@@ -89,5 +93,18 @@ describe('PointsTable（类型页签，第二批改造②）', () => {
     expect(text).toContain('开关1')
     expect(text).not.toContain('开关2') // 关键字只命中开关1
     expect(text).not.toContain('温度')
+  })
+
+  it('双击「值」单元格回调点位；双击名称列不触发', async () => {
+    const onValueDoubleClick = vi.fn()
+    renderTable(onValueDoubleClick)
+    await waitFor(() => expect(screen.getAllByText('温度').length).toBeGreaterThan(0))
+
+    fireEvent.doubleClick(screen.getByTestId('point-value-YC-101'))
+    expect(onValueDoubleClick).toHaveBeenCalledTimes(1)
+    expect(onValueDoubleClick).toHaveBeenCalledWith(POINTS[2])
+
+    fireEvent.doubleClick(screen.getByText('温度'))
+    expect(onValueDoubleClick).toHaveBeenCalledTimes(1)
   })
 })

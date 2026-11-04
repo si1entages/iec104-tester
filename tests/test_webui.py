@@ -68,6 +68,12 @@ async def test_points_schema(slave_client):
     assert {"ioa", "type", "name", "group", "enabled", "value"} <= set(pts[0].keys())
     types = {p["type"] for p in pts}
     assert types >= {"YX", "YC"}
+    # 双击值直接发命令所需的类型细分：YC 设点类型、YK 单/双命令与 SBO 标记
+    assert all(p.get("subtype") in {"short_float", "normalized", "scaled"}
+               for p in pts if p["type"] == "YC")
+    yk = next(p for p in pts if p["type"] == "YK")
+    assert yk.get("subtype") in {"single", "double"}
+    assert isinstance(yk.get("sbo"), bool)
 
 
 def _free_port() -> int:

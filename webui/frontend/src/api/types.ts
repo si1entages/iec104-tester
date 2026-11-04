@@ -47,6 +47,10 @@ export interface Point {
   enabled: boolean
   value?: number | boolean | string | null
   quality?: string
+  /** 类型细分：YX single/double；YC short_float/normalized/scaled；YK single/double */
+  subtype?: string
+  /** 仅 YK：是否需要选择-执行（SBO） */
+  sbo?: boolean
 }
 
 export interface PointsResponse {
@@ -170,7 +174,8 @@ export interface GiRequest {
 
 export interface YkRequest {
   ioa: number
-  state?: 0 | 1
+  /** 单命令 0=分/1=合；双命令 1=分/2=合 */
+  state?: 0 | 1 | 2 | 3
   select?: boolean
   double?: boolean
   /** true → C_SC_TA_1 / C_DC_TA_1（带时标） */
