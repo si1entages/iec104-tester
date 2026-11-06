@@ -5,10 +5,12 @@ import { Alert, App as AntdApp, Button, Card, Descriptions, Form, Input, InputNu
 
 import { api } from '../../api/endpoints'
 import { useCommand, useCommandNoArgs, useStatusQuery } from '../../api/queries'
+import { useT } from '../../i18n'
 import { useUiStore } from '../../store/uiStore'
 
 /** 连接与状态区（T12）：连接参数 + 启停 + 运行指标。 */
 export function ConnectionPanel() {
+  const t = useT()
   const { message } = AntdApp.useApp()
   const { token } = antdTheme.useToken()
   const statusQuery = useStatusQuery()
@@ -38,8 +40,8 @@ export function ConnectionPanel() {
   }, [status?.host, status?.port, status?.addr])
 
   const report = (result: { ok: boolean; error?: string }): void => {
-    if (result.ok) message.success('命令已下发')
-    else message.error(result.error ?? '命令失败')
+    if (result.ok) message.success(t('common.cmdSent'))
+    else message.error(result.error ?? t('common.cmdFailed'))
   }
 
   const dropped = status?.dropped ?? 0
@@ -50,14 +52,16 @@ export function ConnectionPanel() {
       title={
         <Space>
           <ApiOutlined />
-          <span>连接与状态</span>
-          <Tag color={running ? 'success' : 'default'}>{running ? '已连接/连接中' : '未连接'}</Tag>
+          <span>{t('conn.title')}</span>
+          <Tag color={running ? 'success' : 'default'}>
+            {running ? t('conn.connected') : t('conn.disconnected')}
+          </Tag>
           {status?.state ? <Tag color="blue">{status.state}</Tag> : null}
         </Space>
       }
       extra={
         <Space>
-          <span style={{ color: token.colorTextTertiary }}>断线重连</span>
+          <span style={{ color: token.colorTextTertiary }}>{t('conn.reconnect')}</span>
           <Switch size="small" checked={reconnect} onChange={setReconnect} />
           <Button
             type="primary"
@@ -85,7 +89,7 @@ export function ConnectionPanel() {
                 .then(report)
             }
           >
-            连接
+            {t('conn.connect')}
           </Button>
           <Button
             danger
@@ -93,7 +97,7 @@ export function ConnectionPanel() {
             disabled={!running}
             onClick={() => void stop.mutateAsync().then(report)}
           >
-            断开
+            {t('conn.disconnect')}
           </Button>
         </Space>
       }
@@ -103,16 +107,16 @@ export function ConnectionPanel() {
           type="error"
           showIcon
           style={{ marginBottom: 12 }}
-          message="读取 /api/status 失败"
+          message={t('status.loadStatusFailed')}
           description={String((statusQuery.error as Error)?.message ?? statusQuery.error)}
         />
       ) : null}
 
       <Form layout="inline" style={{ marginBottom: 12 }} component="div">
-        <Form.Item label="主机">
+        <Form.Item label={t('status.host')}>
           <Input style={{ width: 160 }} value={host} onChange={(e) => setHost(e.target.value)} />
         </Form.Item>
-        <Form.Item label="端口">
+        <Form.Item label={t('status.port')}>
           <InputNumber
             min={0}
             max={65535}
@@ -121,7 +125,7 @@ export function ConnectionPanel() {
             onChange={(v) => setPort(Number(v ?? 2404))}
           />
         </Form.Item>
-        <Form.Item label="公共地址">
+        <Form.Item label={t('status.addr')}>
           <InputNumber
             min={0}
             value={addr}
@@ -129,7 +133,7 @@ export function ConnectionPanel() {
             onChange={(v) => setAddr(Number(v ?? 1))}
           />
         </Form.Item>
-        <Form.Item label="周期总召(秒)" tooltip="对只在总召时才回遥测的装置，可设周期自动召唤（秒，0=关闭）">
+        <Form.Item label={t('conn.giInterval')} tooltip={t('conn.giIntervalTip')}>
           <InputNumber
             min={0}
             value={giInterval}
@@ -145,21 +149,21 @@ export function ConnectionPanel() {
         {tlsEnabled ? (
           <>
             <Input
-              prefix="CA 证书"
+              prefix={t('conn.tlsCa')}
               placeholder="ca.pem"
               style={{ width: 200 }}
               value={tlsCa}
               onChange={(e) => setTlsCa(e.target.value)}
             />
             <Input
-              prefix="客户端证书"
+              prefix={t('conn.tlsCert')}
               placeholder="client.pem"
               style={{ width: 200 }}
               value={tlsCert}
               onChange={(e) => setTlsCert(e.target.value)}
             />
             <Input
-              prefix="客户端私钥"
+              prefix={t('conn.tlsKey')}
               placeholder="client.key"
               style={{ width: 200 }}
               value={tlsKey}
@@ -173,15 +177,15 @@ export function ConnectionPanel() {
         size="small"
         column={5}
         items={[
-          { key: 'points', label: '点位数', children: status?.points ?? '-' },
-          { key: 'tx', label: '发送帧', children: status?.tx ?? '-' },
-          { key: 'rx', label: '接收帧', children: status?.rx ?? '-' },
-          { key: 'window', label: '发送窗口 k', children: status?.window ?? '-' },
+          { key: 'points', label: t('status.points'), children: status?.points ?? '-' },
+          { key: 'tx', label: t('status.tx'), children: status?.tx ?? '-' },
+          { key: 'rx', label: t('status.rx'), children: status?.rx ?? '-' },
+          { key: 'window', label: t('conn.window'), children: status?.window ?? '-' },
           { key: 'vs', label: 'Vs', children: status?.vs ?? '-' },
           { key: 'vr', label: 'Vr', children: status?.vr ?? '-' },
           {
             key: 'dropped',
-            label: '背压丢帧',
+            label: t('conn.dropped'),
             children: (
               <span style={{ color: dropped > 0 ? '#faad14' : undefined }}>{dropped}</span>
             ),
@@ -192,7 +196,7 @@ export function ConnectionPanel() {
             label: 'schemaVersion',
             children: status?.schemaVersion ?? '-',
           },
-          { key: 'sim', label: '模拟', children: status?.simulation ? '开' : '关' },
+          { key: 'sim', label: t('conn.sim'), children: status?.simulation ? t('conn.on') : t('conn.off') },
         ]}
       />
 
@@ -203,6 +207,7 @@ export function ConnectionPanel() {
 
 /** 点值全量刷新节流控制（点值主路径是事件增量，这里是兜底对齐）。 */
 function LiveRefreshControl() {
+  const t = useT()
   const { token } = antdTheme.useToken()
   const liveRefreshMs = useUiStore((s) => s.liveRefreshMs)
   const setLiveRefreshMs = useUiStore((s) => s.setLiveRefreshMs)
@@ -213,7 +218,7 @@ function LiveRefreshControl() {
   return (
     <Space wrap style={{ marginTop: 12 }}>
       <PauseCircleOutlined style={{ color: token.colorTextTertiary }} />
-      <span style={{ color: token.colorTextTertiary }}>点值快照对齐周期</span>
+      <span style={{ color: token.colorTextTertiary }}>{t('conn.liveRefresh')}</span>
       <InputNumber
         min={0}
         max={10000}
@@ -223,16 +228,12 @@ function LiveRefreshControl() {
         onChange={(v) => setLiveRefreshMs(Math.max(0, Number(v ?? 0)))}
         addonAfter="ms"
       />
-      <span style={{ color: token.colorTextTertiary }}>（0 = 关闭，仅用事件增量）</span>
+      <span style={{ color: token.colorTextTertiary }}>{t('conn.liveOff')}</span>
       {heavy ? (
-        <Tag color="warning">
-          点表 {points} 行较大，建议调大或关闭全量对齐，仅依赖事件增量
-        </Tag>
+        <Tag color="warning">{t('conn.heavy', { n: points })}</Tag>
       ) : null}
       <LinkOutlined style={{ color: token.colorTextTertiary }} />
-      <span style={{ color: token.colorTextTertiary }}>
-        值更新优先走 WS 事件增量补丁，本项仅作兜底权威对齐
-      </span>
+      <span style={{ color: token.colorTextTertiary }}>{t('conn.liveHint')}</span>
     </Space>
   )
 }

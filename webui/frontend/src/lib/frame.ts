@@ -3,7 +3,14 @@
  *
  * 只做**只读解析**：APCI（启动/长度/控制域）+ ASDU 头部 + 首个信息对象地址。
  * 不依赖后端 `core/`，类型名/COT 名在此独立登记（与 core/protocol/types.py 对齐）。
+ *
+ * i18n：协议类型/传送原因的标准名称用本地 zh/en 对照表（避免污染主词典）；
+ * 说明性文案（长度不符、组召唤模板）走 i18n 词典的 `frame.*` 键。
  */
+
+import { tNow } from '../i18n'
+import type { Locale } from '../i18n'
+import { useUiStore } from '../store/uiStore'
 
 export type FrameFormat = 'I' | 'S' | 'U' | '?'
 
@@ -33,97 +40,160 @@ export interface ParsedFrame {
   note?: string
 }
 
-const TYPE_NAMES: Record<number, string> = {
-  1: 'M_SP_NA_1 单点信息',
-  2: 'M_SP_TA_1 带时标单点',
-  3: 'M_DP_NA_1 双点信息',
-  4: 'M_DP_TA_1 带时标双点',
-  5: 'M_ST_NA_1 步位置',
-  6: 'M_ST_TA_1 带时标步位置',
-  7: 'M_BO_NA_1 32比特串',
-  8: 'M_BO_TA_1 带时标32比特串',
-  9: 'M_ME_NA_1 归一化测量值',
-  10: 'M_ME_TA_1 带时标归一化测量值',
-  11: 'M_ME_NB_1 标度化测量值',
-  12: 'M_ME_TB_1 带时标标度化测量值',
-  13: 'M_ME_NC_1 短浮点测量值',
-  14: 'M_ME_TC_1 带时标短浮点测量值',
-  15: 'M_IT_NA_1 累计量',
-  16: 'M_IT_TA_1 带时标累计量',
-  17: 'M_EP_TA_1 继保事件',
-  18: 'M_EP_TB_1 继保成组启动事件',
-  19: 'M_EP_TC_1 继保成组输出电路信息',
-  20: 'M_PS_NA_1 成组单点(带状态检出)',
-  21: 'M_ME_ND_1 归一化测量值(无品质)',
-  30: 'M_SP_TB_1 单点信息(CP56)',
-  31: 'M_DP_TB_1 双点信息(CP56)',
-  32: 'M_ST_TB_1 步位置(CP56)',
-  33: 'M_BO_TB_1 32比特串(CP56)',
-  34: 'M_ME_TD_1 归一化测量值(CP56)',
-  35: 'M_ME_TE_1 标度化测量值(CP56)',
-  36: 'M_ME_TF_1 短浮点测量值(CP56)',
-  37: 'M_IT_TB_1 累计量(CP56)',
-  38: 'M_EP_TD_1 继保事件(CP56)',
-  39: 'M_EP_TE_1 继保成组启动事件(CP56)',
-  40: 'M_EP_TF_1 继保成组输出电路信息(CP56)',
-  45: 'C_SC_NA_1 单命令',
-  46: 'C_DC_NA_1 双命令',
-  47: 'C_RC_NA_1 升降命令',
-  48: 'C_SE_NA_1 设点(归一化)',
-  49: 'C_SE_NB_1 设点(标度化)',
-  50: 'C_SE_NC_1 设点(短浮点)',
-  51: 'C_BO_NA_1 32比特串命令',
-  58: 'C_SC_TA_1 单命令(CP56)',
-  59: 'C_DC_TA_1 双命令(CP56)',
-  60: 'C_RC_TA_1 升降命令(CP56)',
-  61: 'C_SE_TA_1 设点(归一化,CP56)',
-  62: 'C_SE_TB_1 设点(标度化,CP56)',
-  63: 'C_SE_TC_1 设点(短浮点,CP56)',
-  64: 'C_BO_TA_1 32比特串命令(CP56)',
-  70: 'M_EI_NA_1 初始化结束',
-  71: 'M_PS_TB_1 成组单点(CP56)',
-  100: 'C_IC_NA_1 总召唤',
-  101: 'C_CI_NA_1 累计量召唤',
-  102: 'C_RD_NA_1 读命令',
-  103: 'C_CS_NA_1 时钟同步',
-  104: 'C_TS_NA_1 测试命令',
-  105: 'C_RP_NA_1 复位进程',
-  106: 'C_CD_NA_1 延时获得',
-  107: 'C_TS_TA_1 测试命令(CP56)',
-  110: 'P_ME_NA_1 参数(归一化)',
-  111: 'P_ME_NB_1 参数(标度化)',
-  112: 'P_ME_NC_1 参数(短浮点)',
-  113: 'P_AC_NA_1 参数激活',
-  120: 'F_FR_NA_1 文件准备就绪',
-  121: 'F_SR_NA_1 节准备就绪',
-  122: 'F_SC_NA_1 召唤目录/选择文件/召唤文件',
-  123: 'F_LS_NA_1 最后的节/段',
-  124: 'F_AF_NA_1 确认文件/节',
-  125: 'F_SG_NA_1 段',
-  126: 'F_DR_TA_1 目录',
+type L10n = Record<Locale, string>
+
+function loc(value: L10n): string {
+  return value[useUiStore.getState().locale] ?? value.zh
 }
 
-const COT_NAMES: Record<number, string> = {
-  0: '未用',
-  1: '周期',
-  2: '背景扫描',
-  3: '突发',
-  4: '初始化',
-  5: '被请求',
-  6: '激活',
-  7: '激活确认',
-  8: '停止激活',
-  9: '停止激活确认',
-  10: '激活终止',
-  11: '远方命令返送',
-  12: '当地命令返送',
-  13: '文件传输',
-  20: '响应站召唤',
-  37: '响应累计量总召唤',
-  42: '未知类型标识',
-  43: '未知传送原因',
-  44: '未知公共地址',
-  45: '未知信息对象地址',
+const TYPE_NAMES: Record<number, L10n> = {
+  1: { zh: 'M_SP_NA_1 单点信息', en: 'M_SP_NA_1 Single-point information' },
+  2: { zh: 'M_SP_TA_1 带时标单点', en: 'M_SP_TA_1 Single-point information with time tag' },
+  3: { zh: 'M_DP_NA_1 双点信息', en: 'M_DP_NA_1 Double-point information' },
+  4: { zh: 'M_DP_TA_1 带时标双点', en: 'M_DP_TA_1 Double-point information with time tag' },
+  5: { zh: 'M_ST_NA_1 步位置', en: 'M_ST_NA_1 Step position information' },
+  6: { zh: 'M_ST_TA_1 带时标步位置', en: 'M_ST_TA_1 Step position information with time tag' },
+  7: { zh: 'M_BO_NA_1 32比特串', en: 'M_BO_NA_1 Bitstring of 32 bit' },
+  8: { zh: 'M_BO_TA_1 带时标32比特串', en: 'M_BO_TA_1 Bitstring of 32 bit with time tag' },
+  9: { zh: 'M_ME_NA_1 归一化测量值', en: 'M_ME_NA_1 Measured value, normalized value' },
+  10: {
+    zh: 'M_ME_TA_1 带时标归一化测量值',
+    en: 'M_ME_TA_1 Measured value, normalized value with time tag',
+  },
+  11: { zh: 'M_ME_NB_1 标度化测量值', en: 'M_ME_NB_1 Measured value, scaled value' },
+  12: {
+    zh: 'M_ME_TB_1 带时标标度化测量值',
+    en: 'M_ME_TB_1 Measured value, scaled value with time tag',
+  },
+  13: { zh: 'M_ME_NC_1 短浮点测量值', en: 'M_ME_NC_1 Measured value, short floating point' },
+  14: {
+    zh: 'M_ME_TC_1 带时标短浮点测量值',
+    en: 'M_ME_TC_1 Measured value, short floating point with time tag',
+  },
+  15: { zh: 'M_IT_NA_1 累计量', en: 'M_IT_NA_1 Integrated totals' },
+  16: { zh: 'M_IT_TA_1 带时标累计量', en: 'M_IT_TA_1 Integrated totals with time tag' },
+  17: { zh: 'M_EP_TA_1 继保事件', en: 'M_EP_TA_1 Event of protection equipment with time tag' },
+  18: {
+    zh: 'M_EP_TB_1 继保成组启动事件',
+    en: 'M_EP_TB_1 Packed start events of protection equipment with time tag',
+  },
+  19: {
+    zh: 'M_EP_TC_1 继保成组输出电路信息',
+    en: 'M_EP_TC_1 Packed output circuit information of protection equipment with time tag',
+  },
+  20: {
+    zh: 'M_PS_NA_1 成组单点(带状态检出)',
+    en: 'M_PS_NA_1 Packed single-point information with status change detection',
+  },
+  21: {
+    zh: 'M_ME_ND_1 归一化测量值(无品质)',
+    en: 'M_ME_ND_1 Measured value, normalized value without quality descriptor',
+  },
+  30: { zh: 'M_SP_TB_1 单点信息(CP56)', en: 'M_SP_TB_1 Single-point information with CP56Time2a' },
+  31: { zh: 'M_DP_TB_1 双点信息(CP56)', en: 'M_DP_TB_1 Double-point information with CP56Time2a' },
+  32: { zh: 'M_ST_TB_1 步位置(CP56)', en: 'M_ST_TB_1 Step position information with CP56Time2a' },
+  33: { zh: 'M_BO_TB_1 32比特串(CP56)', en: 'M_BO_TB_1 Bitstring of 32 bit with CP56Time2a' },
+  34: {
+    zh: 'M_ME_TD_1 归一化测量值(CP56)',
+    en: 'M_ME_TD_1 Measured value, normalized value with CP56Time2a',
+  },
+  35: {
+    zh: 'M_ME_TE_1 标度化测量值(CP56)',
+    en: 'M_ME_TE_1 Measured value, scaled value with CP56Time2a',
+  },
+  36: {
+    zh: 'M_ME_TF_1 短浮点测量值(CP56)',
+    en: 'M_ME_TF_1 Measured value, short floating point with CP56Time2a',
+  },
+  37: { zh: 'M_IT_TB_1 累计量(CP56)', en: 'M_IT_TB_1 Integrated totals with CP56Time2a' },
+  38: {
+    zh: 'M_EP_TD_1 继保事件(CP56)',
+    en: 'M_EP_TD_1 Event of protection equipment with CP56Time2a',
+  },
+  39: {
+    zh: 'M_EP_TE_1 继保成组启动事件(CP56)',
+    en: 'M_EP_TE_1 Packed start events of protection equipment with CP56Time2a',
+  },
+  40: {
+    zh: 'M_EP_TF_1 继保成组输出电路信息(CP56)',
+    en: 'M_EP_TF_1 Packed output circuit information of protection equipment with CP56Time2a',
+  },
+  45: { zh: 'C_SC_NA_1 单命令', en: 'C_SC_NA_1 Single command' },
+  46: { zh: 'C_DC_NA_1 双命令', en: 'C_DC_NA_1 Double command' },
+  47: { zh: 'C_RC_NA_1 升降命令', en: 'C_RC_NA_1 Regulating step command' },
+  48: { zh: 'C_SE_NA_1 设点(归一化)', en: 'C_SE_NA_1 Set-point command, normalized value' },
+  49: { zh: 'C_SE_NB_1 设点(标度化)', en: 'C_SE_NB_1 Set-point command, scaled value' },
+  50: {
+    zh: 'C_SE_NC_1 设点(短浮点)',
+    en: 'C_SE_NC_1 Set-point command, short floating point',
+  },
+  51: { zh: 'C_BO_NA_1 32比特串命令', en: 'C_BO_NA_1 Bitstring of 32 bit command' },
+  58: { zh: 'C_SC_TA_1 单命令(CP56)', en: 'C_SC_TA_1 Single command with CP56Time2a' },
+  59: { zh: 'C_DC_TA_1 双命令(CP56)', en: 'C_DC_TA_1 Double command with CP56Time2a' },
+  60: { zh: 'C_RC_TA_1 升降命令(CP56)', en: 'C_RC_TA_1 Regulating step command with CP56Time2a' },
+  61: {
+    zh: 'C_SE_TA_1 设点(归一化,CP56)',
+    en: 'C_SE_TA_1 Set-point command, normalized value with CP56Time2a',
+  },
+  62: {
+    zh: 'C_SE_TB_1 设点(标度化,CP56)',
+    en: 'C_SE_TB_1 Set-point command, scaled value with CP56Time2a',
+  },
+  63: {
+    zh: 'C_SE_TC_1 设点(短浮点,CP56)',
+    en: 'C_SE_TC_1 Set-point command, short floating point with CP56Time2a',
+  },
+  64: { zh: 'C_BO_TA_1 32比特串命令(CP56)', en: 'C_BO_TA_1 Bitstring of 32 bit command with CP56Time2a' },
+  70: { zh: 'M_EI_NA_1 初始化结束', en: 'M_EI_NA_1 End of initialization' },
+  71: {
+    zh: 'M_PS_TB_1 成组单点(CP56)',
+    en: 'M_PS_TB_1 Packed single-point information with status change detection (CP56Time2a)',
+  },
+  100: { zh: 'C_IC_NA_1 总召唤', en: 'C_IC_NA_1 Interrogation command' },
+  101: { zh: 'C_CI_NA_1 累计量召唤', en: 'C_CI_NA_1 Counter interrogation command' },
+  102: { zh: 'C_RD_NA_1 读命令', en: 'C_RD_NA_1 Read command' },
+  103: { zh: 'C_CS_NA_1 时钟同步', en: 'C_CS_NA_1 Clock synchronization command' },
+  104: { zh: 'C_TS_NA_1 测试命令', en: 'C_TS_NA_1 Test command' },
+  105: { zh: 'C_RP_NA_1 复位进程', en: 'C_RP_NA_1 Reset process command' },
+  106: { zh: 'C_CD_NA_1 延时获得', en: 'C_CD_NA_1 Delay acquisition command' },
+  107: { zh: 'C_TS_TA_1 测试命令(CP56)', en: 'C_TS_TA_1 Test command with CP56Time2a' },
+  110: { zh: 'P_ME_NA_1 参数(归一化)', en: 'P_ME_NA_1 Parameter, normalized value' },
+  111: { zh: 'P_ME_NB_1 参数(标度化)', en: 'P_ME_NB_1 Parameter, scaled value' },
+  112: { zh: 'P_ME_NC_1 参数(短浮点)', en: 'P_ME_NC_1 Parameter, short floating point' },
+  113: { zh: 'P_AC_NA_1 参数激活', en: 'P_AC_NA_1 Parameter activation' },
+  120: { zh: 'F_FR_NA_1 文件准备就绪', en: 'F_FR_NA_1 File ready' },
+  121: { zh: 'F_SR_NA_1 节准备就绪', en: 'F_SR_NA_1 Section ready' },
+  122: {
+    zh: 'F_SC_NA_1 召唤目录/选择文件/召唤文件',
+    en: 'F_SC_NA_1 Call directory / select file / call file',
+  },
+  123: { zh: 'F_LS_NA_1 最后的节/段', en: 'F_LS_NA_1 Last section or segment' },
+  124: { zh: 'F_AF_NA_1 确认文件/节', en: 'F_AF_NA_1 ACK file or section' },
+  125: { zh: 'F_SG_NA_1 段', en: 'F_SG_NA_1 Segment' },
+  126: { zh: 'F_DR_TA_1 目录', en: 'F_DR_TA_1 Directory' },
+}
+
+const COT_NAMES: Record<number, L10n> = {
+  0: { zh: '未用', en: 'Not used' },
+  1: { zh: '周期', en: 'Periodic/cyclic' },
+  2: { zh: '背景扫描', en: 'Background scan' },
+  3: { zh: '突发', en: 'Spontaneous' },
+  4: { zh: '初始化', en: 'Initialized' },
+  5: { zh: '被请求', en: 'Requested' },
+  6: { zh: '激活', en: 'Activation' },
+  7: { zh: '激活确认', en: 'Activation confirmation' },
+  8: { zh: '停止激活', en: 'Deactivation' },
+  9: { zh: '停止激活确认', en: 'Deactivation confirmation' },
+  10: { zh: '激活终止', en: 'Activation termination' },
+  11: { zh: '远方命令返送', en: 'Return info caused by remote command' },
+  12: { zh: '当地命令返送', en: 'Return info caused by local command' },
+  13: { zh: '文件传输', en: 'File transfer' },
+  20: { zh: '响应站召唤', en: 'Interrogated by station interrogation' },
+  37: { zh: '响应累计量总召唤', en: 'Requested by general counter request' },
+  42: { zh: '未知类型标识', en: 'Unknown type identification' },
+  43: { zh: '未知传送原因', en: 'Unknown cause of transmission' },
+  44: { zh: '未知公共地址', en: 'Unknown common address' },
+  45: { zh: '未知信息对象地址', en: 'Unknown information object address' },
 }
 
 const U_FUNCS: Record<number, string> = {
@@ -136,13 +206,15 @@ const U_FUNCS: Record<number, string> = {
 }
 
 export function typeName(typeId: number): string {
-  return TYPE_NAMES[typeId] ?? `TypeID ${typeId}`
+  const name = TYPE_NAMES[typeId]
+  return name ? loc(name) : `TypeID ${typeId}`
 }
 
 export function cotName(cot: number): string {
-  if (COT_NAMES[cot]) return COT_NAMES[cot]
-  if (cot >= 21 && cot <= 36) return `响应第 ${cot - 20} 组召唤`
-  if (cot >= 38 && cot <= 41) return `响应第 ${cot - 37} 组累计量召唤`
+  const known = COT_NAMES[cot]
+  if (known) return loc(known)
+  if (cot >= 21 && cot <= 36) return tNow('frame.cot.group', { n: cot - 20 })
+  if (cot >= 38 && cot <= 41) return tNow('frame.cot.counterGroup', { n: cot - 37 })
   return `COT ${cot}`
 }
 
@@ -160,7 +232,10 @@ export function parseFrame(hex: string): ParsedFrame | null {
   const parsed: ParsedFrame = { format: '?' }
   const declared = bytes[1]
   if (declared + 2 !== bytes.length) {
-    parsed.note = `长度字段 ${declared + 2} ≠ 实际 ${bytes.length}`
+    parsed.note = tNow('frame.note.lengthMismatch', {
+      declared: declared + 2,
+      actual: bytes.length,
+    })
   }
 
   const b0 = bytes[2]
@@ -180,7 +255,7 @@ export function parseFrame(hex: string): ParsedFrame | null {
   parsed.nr = ((bytes[4] >> 1) | (bytes[5] << 7)) & 0xffff
 
   if (bytes.length < 10) {
-    parsed.note = 'I 帧无 ASDU'
+    parsed.note = tNow('frame.note.noAsdu')
     return parsed
   }
   parsed.typeId = bytes[6]
@@ -209,7 +284,13 @@ export const DIRECTION_COLOR: Record<string, string> = {
   rx: 'gold',
 }
 
-export const DIRECTION_LABEL: Record<string, string> = {
-  tx: '发送',
-  rx: '接收',
+const DIRECTION_LABELS: Record<string, L10n> = {
+  tx: { zh: '发送', en: 'Send' },
+  rx: { zh: '接收', en: 'Receive' },
+}
+
+/** 方向显示名（随界面语言）；未知方向原样返回 */
+export function directionLabel(direction: string): string {
+  const label = DIRECTION_LABELS[direction]
+  return label ? loc(label) : direction
 }

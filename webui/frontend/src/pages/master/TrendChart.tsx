@@ -10,6 +10,7 @@ import type { EChartsType } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 
 import type { Point } from '../../api/types'
+import { useT } from '../../i18n'
 import { formatClock } from '../../lib/format'
 import { pointKey } from '../../lib/pointValue'
 import { trendBuffer } from '../../lib/trendBuffer'
@@ -26,6 +27,7 @@ interface Props {
 
 /** 趋势图（T12）：从点表挑选点位看实时曲线（ECharts，按需引入）。 */
 export function TrendChart({ watched, onRemove, onClear }: Props) {
+  const t = useT()
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<EChartsType | null>(null)
   const [version, setVersion] = useState(0)
@@ -102,10 +104,10 @@ export function TrendChart({ watched, onRemove, onClear }: Props) {
       size="small"
       title={
         <Space wrap>
-          <span>趋势图</span>
+          <span>{t('trend.title')}</span>
           {watched.length === 0 ? (
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              在点表中选中一行后点「加入趋势」
+              {t('trend.emptyHint')}
             </Typography.Text>
           ) : (
             watched.map((point) => {
@@ -127,7 +129,7 @@ export function TrendChart({ watched, onRemove, onClear }: Props) {
           )}
           {watched.length > 0 ? (
             <Button size="small" icon={<ClearOutlined />} onClick={onClear}>
-              清空曲线
+              {t('trend.clear')}
             </Button>
           ) : null}
         </Space>
@@ -138,7 +140,7 @@ export function TrendChart({ watched, onRemove, onClear }: Props) {
           image={Empty.PRESENTED_IMAGE_SIMPLE}
           description={
             <span style={{ color: token.colorTextTertiary }}>
-              选择点位后开始采样（仅采样被选点位，十万点表也不会吃满内存）
+              {t('trend.sampling')}
             </span>
           }
         />
@@ -147,7 +149,7 @@ export function TrendChart({ watched, onRemove, onClear }: Props) {
       )}
       {watched.length > 0 ? (
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          <CloseOutlined /> 最多保留最近 600 个采样点；采样由 WS 点值更新驱动。
+          <CloseOutlined /> {t('trend.footer')}
         </Typography.Text>
       ) : null}
     </Card>

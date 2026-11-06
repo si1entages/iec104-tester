@@ -17,6 +17,8 @@ import { api } from '../../api/endpoints'
 import { useCommand } from '../../api/queries'
 import type { Point, SetpointKind } from '../../api/types'
 import { formatValue } from '../../lib/format'
+import { useT } from '../../i18n'
+import type { MessageKey } from '../../i18n'
 import {
   buildSetpointRequest,
   buildStepRequest,
@@ -26,11 +28,15 @@ import {
   setpointKindOf,
 } from '../../lib/pointCommand'
 
-const SETPOINT_KINDS: { value: SetpointKind; label: string }[] = [
-  { value: 'short_float', label: 'short_float 短浮点 (C_SE_NC_1)' },
-  { value: 'normalized', label: 'normalized 归一化 (C_SE_NA_1)' },
-  { value: 'scaled', label: 'scaled 标度化 (C_SE_NB_1)' },
-]
+type TFn = (key: MessageKey, params?: Record<string, string | number>) => string
+
+function setpointKinds(t: TFn) {
+  return [
+    { value: 'short_float' as SetpointKind, label: t('cmd.sp.shortFloat') },
+    { value: 'normalized' as SetpointKind, label: t('cmd.sp.normalized') },
+    { value: 'scaled' as SetpointKind, label: t('cmd.sp.scaled') },
+  ]
+}
 
 interface Props {
   /** 双击的值单元格对应点位；null 时弹窗关闭 */
@@ -52,6 +58,7 @@ interface Props {
  * 编辑的 IOA/参数影响；命令参数完全由当前点位与本次输入决定。
  */
 export function PointCommandDialog({ point, disabled = false, onClose }: Props) {
+  const t = useT()
   const { message } = AntdApp.useApp()
 
   const [ykOn, setYkOn] = useState<'on' | 'off'>('on')
@@ -82,33 +89,39 @@ export function PointCommandDialog({ point, disabled = false, onClose }: Props) 
         const on = ykOn === 'on'
         const result = await yk.mutateAsync(buildYkRequest(point, on))
         if (result.ok) {
-          message.success(`遥控命令已下发（${on ? '合闸 ON' : '分闸 OFF'}）`)
+          message.success(t('pcd.ykSent', { dir: on ? t('pcd.on') : t('pcd.off') }))
           onClose()
         } else {
-          message.error(`遥控命令失败：${result.error ?? '未知错误'}`)
+          message.error(
+            t('pcd.ykFailed', { error: result.error ?? t('cmd.unknown') }),
+          )
         }
         return
       }
       if (kind === 'setpoint') {
         const result = await setpoint.mutateAsync(buildSetpointRequest(point, spValue, spKind))
         if (result.ok) {
-          message.success(`设点命令已下发（目标值 ${spValue}）`)
+          message.success(t('pcd.spSent', { value: spValue }))
           onClose()
         } else {
-          message.error(`设点命令失败：${result.error ?? '未知错误'}`)
+          message.error(
+            t('pcd.spFailed', { error: result.error ?? t('cmd.unknown') }),
+          )
         }
         return
       }
       const result = await step.mutateAsync(buildStepRequest(point, stepUp))
       if (result.ok) {
-        message.success(`升降命令已下发（${stepUp ? '升一步' : '降一步'}）`)
+        message.success(t('pcd.stepSent', { dir: stepUp ? t('pcd.up') : t('pcd.down') }))
         onClose()
       } else {
-        message.error(`升降命令失败：${result.error ?? '未知错误'}`)
+        message.error(
+          t('pcd.stepFailed', { error: result.error ?? t('cmd.unknown') }),
+        )
       }
     } catch (err) {
       const text = err instanceof Error ? err.message : String(err)
-      message.error(`命令下发失败：${text}`)
+      message.error(t('pcd.sendFailed', { error: text }))
     }
   }
 
@@ -116,15 +129,22 @@ export function PointCommandDialog({ point, disabled = false, onClose }: Props) 
 
   const double = isDoubleCommand(point)
   const titleText =
-    kind === 'yk' ? '下发遥控命令' : kind === 'setpoint' ? '下发设点命令' : '下发升降命令'
+    kind === 'yk'
+      ? t('pcd.title.yk')
+      : kind === 'setpoint'
+        ? t('pcd.title.sp')
+        : t('pcd.title.step')
   const commandSummary =
     kind === 'yk'
-      ? `${double ? '双命令' : '单命令'} · ${ykOn === 'on' ? '合闸 ON' : '分闸 OFF'}`
+      ? t('pcd.summary.yk', {
+          kind: double ? t('cmd.double') : t('cmd.single'),
+          dir: ykOn === 'on' ? t('pcd.on') : t('pcd.off'),
+        })
       : kind === 'setpoint'
-        ? `${spKind} · 目标值 ${spValue}`
+        ? t('pcd.summary.sp', { kind: spKind, value: spValue })
         : stepUp
-          ? '升一步'
-          : '降一步'
+          ? t('pcd.up')
+          : t('pcd.down')
 
   return (
     <Modal
@@ -137,8 +157,8 @@ export function PointCommandDialog({ point, disabled = false, onClose }: Props) 
           </Tag>
         </Space>
       }
-      okText="确认下发"
-      cancelText="取消"
+      okText={t('pcd.ok')}
+      cancelText={t('pcd.cancel')}
       okButtonProps={{ danger: true, disabled }}
       cancelButtonProps={{ disabled: busy }}
       confirmLoading={busy}
@@ -154,39 +174,41 @@ export function PointCommandDialog({ point, disabled = false, onClose }: Props) 
           size="small"
           column={2}
           items={[
-            { key: 'name', label: '名称', children: point.name || '—' },
-            { key: 'value', label: '当前值', children: formatValue(point.value) },
+            { key: 'name', label: t('pcd.name'), children: point.name || '—' },
+            { key: 'value', label: t('pcd.current'), children: formatValue(point.value) },
             {
               key: 'type',
-              label: '点位类型',
+              label: t('pcd.pointType'),
               children: point.subtype ? `${point.type} / ${point.subtype}` : point.type,
             },
-            { key: 'cmd', label: '下发命令', children: commandSummary },
+            { key: 'cmd', label: t('pcd.command'), children: commandSummary },
           ]}
         />
 
         {kind === 'yk' ? (
           <>
             <Space wrap>
-              <Typography.Text>操作方向</Typography.Text>
+              <Typography.Text>{t('pcd.direction')}</Typography.Text>
               <Radio.Group
                 value={ykOn}
                 onChange={(e) => setYkOn(e.target.value as 'on' | 'off')}
                 optionType="button"
                 buttonStyle="solid"
               >
-                <Radio.Button value="on">合闸 ON</Radio.Button>
-                <Radio.Button value="off">分闸 OFF</Radio.Button>
+                <Radio.Button value="on">{t('pcd.on')}</Radio.Button>
+                <Radio.Button value="off">{t('pcd.off')}</Radio.Button>
               </Radio.Group>
-              <Tag color={double ? 'purple' : 'blue'}>{double ? '双命令' : '单命令'}</Tag>
-              {point.sbo ? <Tag color="orange">SBO 选择-执行</Tag> : null}
+              <Tag color={double ? 'purple' : 'blue'}>
+                {double ? t('cmd.double') : t('cmd.single')}
+              </Tag>
+              {point.sbo ? <Tag color="orange">{t('pcd.sboTag')}</Tag> : null}
             </Space>
             {point.sbo ? (
               <Alert
                 type="warning"
                 showIcon
-                message="该点配置了选择-执行（SBO）"
-                description="确认后主站自动先发送选择帧并等待肯定确认；选择被拒或超时不会发送执行帧。"
+                message={t('pcd.sboTitle')}
+                description={t('pcd.sboDesc')}
               />
             ) : null}
           </>
@@ -197,11 +219,11 @@ export function PointCommandDialog({ point, disabled = false, onClose }: Props) 
             <Select
               style={{ width: 260 }}
               value={spKind}
-              options={SETPOINT_KINDS}
+              options={setpointKinds(t)}
               onChange={setSpKind}
             />
             <InputNumber
-              prefix="目标值"
+              prefix={t('pcd.target')}
               value={spValue}
               onChange={(v) => setSpValue(Number(v ?? 0))}
               style={{ width: 160 }}
@@ -211,24 +233,24 @@ export function PointCommandDialog({ point, disabled = false, onClose }: Props) 
 
         {kind === 'step' ? (
           <Space wrap>
-            <Typography.Text>操作方向</Typography.Text>
+            <Typography.Text>{t('pcd.direction')}</Typography.Text>
             <Radio.Group
               value={stepUp ? 'up' : 'down'}
               onChange={(e) => setStepUp(e.target.value === 'up')}
               optionType="button"
               buttonStyle="solid"
             >
-              <Radio.Button value="up">升一步 (2)</Radio.Button>
-              <Radio.Button value="down">降一步 (1)</Radio.Button>
+              <Radio.Button value="up">{t('cmd.step.up')}</Radio.Button>
+              <Radio.Button value="down">{t('cmd.step.down')}</Radio.Button>
             </Radio.Group>
           </Space>
         ) : null}
 
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          请核对点位与操作方向；命令下发后将立即生效。
+          {t('pcd.hint')}
         </Typography.Text>
         {disabled ? (
-          <Alert type="info" showIcon message="引擎未连接，命令不可下发" />
+          <Alert type="info" showIcon message={t('cmd.engineOff')} />
         ) : null}
       </Space>
     </Modal>

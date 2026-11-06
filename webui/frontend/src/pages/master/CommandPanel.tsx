@@ -20,33 +20,45 @@ import { api } from '../../api/endpoints'
 import { useCommand, useCommandNoArgs } from '../../api/queries'
 import type { FileAction, OkResponse, ParamKind, Point, SetpointKind } from '../../api/types'
 import { formatValue } from '../../lib/format'
+import { useT } from '../../i18n'
+import type { MessageKey } from '../../i18n'
 
-const SETPOINT_KINDS: { value: SetpointKind; label: string }[] = [
-  { value: 'short_float', label: 'short_float 短浮点 (C_SE_NC_1)' },
-  { value: 'normalized', label: 'normalized 归一化 (C_SE_NA_1)' },
-  { value: 'scaled', label: 'scaled 标度化 (C_SE_NB_1)' },
-]
+type TFn = (key: MessageKey, params?: Record<string, string | number>) => string
 
-const PARAM_KINDS: { value: ParamKind; label: string }[] = [
-  { value: 'float', label: 'float 短浮点' },
-  { value: 'normalized', label: 'normalized 归一化' },
-  { value: 'scaled', label: 'scaled 标度化' },
-  { value: 'activation', label: 'activation 参数激活' },
-]
+function setpointKinds(t: TFn) {
+  return [
+    { value: 'short_float' as SetpointKind, label: t('cmd.sp.shortFloat') },
+    { value: 'normalized' as SetpointKind, label: t('cmd.sp.normalized') },
+    { value: 'scaled' as SetpointKind, label: t('cmd.sp.scaled') },
+  ]
+}
 
-const FILE_ACTIONS: { value: FileAction; label: string }[] = [
-  { value: 'directory', label: 'directory 召唤目录' },
-  { value: 'select', label: 'select 选择文件' },
-  { value: 'request', label: 'request 召唤文件' },
-]
+function paramKinds(t: TFn) {
+  return [
+    { value: 'float' as ParamKind, label: t('cmd.param.float') },
+    { value: 'normalized' as ParamKind, label: t('cmd.param.normalized') },
+    { value: 'scaled' as ParamKind, label: t('cmd.param.scaled') },
+    { value: 'activation' as ParamKind, label: t('cmd.param.activation') },
+  ]
+}
 
-const GI_OPTIONS = [
-  { value: 20, label: '站召唤 (QOI=20)' },
-  ...Array.from({ length: 16 }, (_, i) => ({
-    value: i + 1,
-    label: `组召唤 第${i + 1}组 (QOI=${i + 1})`,
-  })),
-]
+function fileActions(t: TFn) {
+  return [
+    { value: 'directory' as FileAction, label: t('cmd.file.directory') },
+    { value: 'select' as FileAction, label: t('cmd.file.select') },
+    { value: 'request' as FileAction, label: t('cmd.file.request') },
+  ]
+}
+
+function giOptions(t: TFn) {
+  return [
+    { value: 20, label: t('cmd.gi.station') },
+    ...Array.from({ length: 16 }, (_, i) => ({
+      value: i + 1,
+      label: t('cmd.gi.group', { n: i + 1 }),
+    })),
+  ]
+}
 
 interface Props {
   /** 当前选中的点位；未选中时仅能手动指定 IOA */
@@ -66,6 +78,7 @@ interface Props {
  * 文件传输（目录/选择/请求）、读命令。
  */
 export function CommandPanel({ point, disabled = false }: Props) {
+  const t = useT()
   const { message } = AntdApp.useApp()
 
   const [ioa, setIoa] = useState<number>(0)
@@ -121,12 +134,15 @@ export function CommandPanel({ point, disabled = false }: Props) {
 
   const run = async (label: string, task: Promise<OkResponse>): Promise<void> => {
     const result = await task
+    const text = result.ok
+      ? t('cmd.done', { label })
+      : t('cmd.failed', { label, error: result.error ?? t('cmd.unknown') })
     if (result.ok) {
-      setLast({ ok: true, text: `${label} 已下发` })
-      message.success(`${label} 已下发`)
+      setLast({ ok: true, text })
+      message.success(text)
     } else {
-      setLast({ ok: false, text: `${label} 失败：${result.error ?? '未知错误'}` })
-      message.error(`${label} 失败：${result.error ?? '未知错误'}`)
+      setLast({ ok: false, text })
+      message.error(text)
     }
   }
 
@@ -152,7 +168,7 @@ export function CommandPanel({ point, disabled = false }: Props) {
       double: ykDouble,
       with_time: ykWithTime,
     })
-    if (!selected.ok) return run('YK 选择(SBO)', Promise.resolve(selected))
+    if (!selected.ok) return run(t('cmd.yk.selectSbo'), Promise.resolve(selected))
     setYkSelected(true)
     const executed = await yk.mutateAsync({
       ioa,
@@ -162,13 +178,13 @@ export function CommandPanel({ point, disabled = false }: Props) {
       with_time: ykWithTime,
     })
     if (executed.ok) setYkSelected(false)
-    return run('YK 两段式(选择+执行)', Promise.resolve(executed))
+    return run(t('cmd.yk.twoStage'), Promise.resolve(executed))
   }
 
   /** SBO 选择成功 → 记录「已选择未执行」，解锁撤销按钮 */
   const ykSelectSbo = (): void => {
     void run(
-      'YK 选择(SBO)',
+      t('cmd.yk.selectSbo'),
       yk
         .mutateAsync({ ioa, state: ykState, select: true, double: ykDouble, with_time: ykWithTime })
         .then((r) => {
@@ -181,7 +197,7 @@ export function CommandPanel({ point, disabled = false }: Props) {
   /** 撤销 SBO 选择：发送 DEACT（COT=8），select 位与被撤销的选择帧一致 */
   const ykDeactivate = (): void => {
     void run(
-      'YK 撤销',
+      t('cmd.yk.deactivate'),
       yk
         .mutateAsync({
           ioa,
@@ -201,18 +217,18 @@ export function CommandPanel({ point, disabled = false }: Props) {
   const items = [
     {
       key: 'yk',
-      label: '遥控 YK',
+      label: t('cmd.yk.title'),
       children: (
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
           <Space wrap>
-            <span>命令类型</span>
+            <span>{t('cmd.commandType')}</span>
             <Switch
-              checkedChildren="双命令"
-              unCheckedChildren="单命令"
+              checkedChildren={t('cmd.double')}
+              unCheckedChildren={t('cmd.single')}
               checked={ykDouble}
               onChange={setYkDouble}
             />
-            <span>带时标</span>
+            <span>{t('cmd.withTime')}</span>
             <Switch size="small" checked={ykWithTime} onChange={setYkWithTime} />
           </Space>
           <Space wrap>
@@ -221,21 +237,18 @@ export function CommandPanel({ point, disabled = false }: Props) {
               value={ykState}
               onChange={(v) => setYkState(v)}
               options={[
-                { value: 1, label: '合闸 / ON' },
-                { value: 0, label: '分闸 / OFF' },
+                { value: 1, label: t('cmd.on') },
+                { value: 0, label: t('cmd.off') },
               ]}
             />
-            <Button
-              disabled={noRun || noIoa || busy}
-              onClick={ykSelectSbo}
-            >
-              选择 (SBO)
+            <Button disabled={noRun || noIoa || busy} onClick={ykSelectSbo}>
+              {t('cmd.yk.selectSbo')}
             </Button>
             <Button
               disabled={noRun || noIoa || busy}
               onClick={() =>
                 void run(
-                  'YK 执行',
+                  t('cmd.yk.execute'),
                   yk
                     .mutateAsync({ ioa, state: ykState, select: false, double: ykDouble, with_time: ykWithTime })
                     .then((r) => {
@@ -245,20 +258,20 @@ export function CommandPanel({ point, disabled = false }: Props) {
                 )
               }
             >
-              执行
+              {t('cmd.yk.execute')}
             </Button>
             <Button
               type="primary"
               disabled={noRun || noIoa || busy}
               onClick={() => void ykSelectThenExecute()}
             >
-              两段式连发
+              {t('cmd.yk.twoStage')}
             </Button>
             <Button
               disabled={noRun || noIoa || busy}
               onClick={() =>
                 void run(
-                  'YK 单帧直发',
+                  t('cmd.yk.singleFrame'),
                   yk
                     .mutateAsync({ ioa, state: ykState, select: false, double: ykDouble, with_time: ykWithTime })
                     .then((r) => {
@@ -268,51 +281,40 @@ export function CommandPanel({ point, disabled = false }: Props) {
                 )
               }
             >
-              单帧直发
+              {t('cmd.yk.singleFrame')}
             </Button>
-            <Button
-              danger
-              disabled={noRun || noIoa || busy || !ykSelected}
-              onClick={ykDeactivate}
-            >
-              撤销选择
+            <Button danger disabled={noRun || noIoa || busy || !ykSelected} onClick={ykDeactivate}>
+              {t('cmd.yk.deactivate')}
             </Button>
           </Space>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            两段式 = 选择(select=true) + 执行(select=false)；单帧直发只发执行帧，
-            若该点声明 SBO，由后端自动补选择。选择成功后可用「撤销选择」
-            发送 DEACT(COT=8) 停止激活。
+            {t('cmd.yk.hint')}
           </Typography.Text>
         </Space>
       ),
     },
     {
       key: 'setpoint',
-      label: '设点命令',
+      label: t('cmd.sp.title'),
       children: (
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
-          <Select
-            style={{ width: '100%' }}
-            value={spKind}
-            options={SETPOINT_KINDS}
-            onChange={setSpKind}
-          />
+          <Select style={{ width: '100%' }} value={spKind} options={setpointKinds(t)} onChange={setSpKind} />
           <Space wrap>
             <InputNumber
-              prefix="值"
+              prefix={t('cmd.value')}
               value={spValue}
               onChange={(v) => setSpValue(Number(v ?? 0))}
             />
             <span>SBO</span>
             <Switch size="small" checked={spSelect} onChange={setSpSelect} />
-            <span>带时标</span>
+            <span>{t('cmd.withTime')}</span>
             <Switch size="small" checked={spWithTime} onChange={setSpWithTime} />
             <Button
               type="primary"
               disabled={noRun || noIoa || busy}
               onClick={() =>
                 void run(
-                  '设点',
+                  t('cmd.sp.send'),
                   setpoint.mutateAsync({
                     ioa,
                     value: spValue,
@@ -323,7 +325,7 @@ export function CommandPanel({ point, disabled = false }: Props) {
                 )
               }
             >
-              下发设点
+              {t('cmd.sp.send')}
             </Button>
           </Space>
         </Space>
@@ -331,36 +333,31 @@ export function CommandPanel({ point, disabled = false }: Props) {
     },
     {
       key: 'system',
-      label: '系统召唤 / 对时 / 复位',
+      label: t('cmd.system.title'),
       children: (
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
           <Space wrap>
-            <Select
-              style={{ width: 210 }}
-              value={giQoi}
-              options={GI_OPTIONS}
-              onChange={setGiQoi}
-            />
+            <Select style={{ width: 210 }} value={giQoi} options={giOptions(t)} onChange={setGiQoi} />
             <Button
               type="primary"
               disabled={noRun || busy}
-              onClick={() => void run('总召唤', gi.mutateAsync({ qoi: giQoi }))}
+              onClick={() => void run(t('cmd.gi.label'), gi.mutateAsync({ qoi: giQoi }))}
             >
-              总召唤
+              {t('cmd.gi.label')}
             </Button>
           </Space>
           <Space wrap>
-            <Button disabled={noRun || busy} onClick={() => void run('累计量召唤', ci.mutateAsync())}>
-              累计量召唤
+            <Button disabled={noRun || busy} onClick={() => void run(t('cmd.ci.label'), ci.mutateAsync())}>
+              {t('cmd.ci.label')}
             </Button>
-            <Button disabled={noRun || busy} onClick={() => void run('时钟同步', clock.mutateAsync())}>
-              时钟同步
+            <Button disabled={noRun || busy} onClick={() => void run(t('cmd.clock.label'), clock.mutateAsync())}>
+              {t('cmd.clock.label')}
             </Button>
-            <Button disabled={noRun || busy} onClick={() => void run('复位进程', reset.mutateAsync())}>
-              复位进程
+            <Button disabled={noRun || busy} onClick={() => void run(t('cmd.reset.label'), reset.mutateAsync())}>
+              {t('cmd.reset.label')}
             </Button>
-            <Button disabled={noRun || busy} onClick={() => void run('测试命令', test.mutateAsync())}>
-              测试命令
+            <Button disabled={noRun || busy} onClick={() => void run(t('cmd.test.label'), test.mutateAsync())}>
+              {t('cmd.test.label')}
             </Button>
           </Space>
         </Space>
@@ -368,18 +365,18 @@ export function CommandPanel({ point, disabled = false }: Props) {
     },
     {
       key: 'step',
-      label: '升降 / 比特串 / 延时 / 读',
+      label: t('cmd.misc.title'),
       children: (
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
           <Space wrap>
-            <span>升降</span>
+            <span>{t('cmd.step.title')}</span>
             <Select
               style={{ width: 110 }}
               value={stepState}
               onChange={setStepState}
               options={[
-                { value: 2, label: '升一步 (2)' },
-                { value: 1, label: '降一步 (1)' },
+                { value: 2, label: t('cmd.step.up') },
+                { value: 1, label: t('cmd.step.down') },
               ]}
             />
             <span>SBO</span>
@@ -387,14 +384,14 @@ export function CommandPanel({ point, disabled = false }: Props) {
             <Button
               disabled={noRun || noIoa || busy}
               onClick={() =>
-                void run('升降命令', step.mutateAsync({ ioa, state: stepState, select: stepSelect }))
+                void run(t('cmd.step.label'), step.mutateAsync({ ioa, state: stepState, select: stepSelect }))
               }
             >
-              下发
+              {t('cmd.send')}
             </Button>
           </Space>
           <Space wrap>
-            <span>比特串</span>
+            <span>{t('cmd.bit.title')}</span>
             <InputNumber
               min={0}
               value={bitValue}
@@ -403,13 +400,13 @@ export function CommandPanel({ point, disabled = false }: Props) {
             />
             <Button
               disabled={noRun || noIoa || busy}
-              onClick={() => void run('比特串命令', bitstring.mutateAsync({ ioa, value: bitValue }))}
+              onClick={() => void run(t('cmd.bit.label'), bitstring.mutateAsync({ ioa, value: bitValue }))}
             >
-              下发
+              {t('cmd.send')}
             </Button>
           </Space>
           <Space wrap>
-            <span>延时获得</span>
+            <span>{t('cmd.delay.title')}</span>
             <InputNumber
               min={0}
               max={60000}
@@ -420,17 +417,17 @@ export function CommandPanel({ point, disabled = false }: Props) {
             />
             <Button
               disabled={noRun || busy}
-              onClick={() => void run('延时命令', delay.mutateAsync({ delay_ms: delayMs }))}
+              onClick={() => void run(t('cmd.delay.label'), delay.mutateAsync({ delay_ms: delayMs }))}
             >
-              下发
+              {t('cmd.send')}
             </Button>
           </Space>
           <Space wrap>
             <Button
               disabled={noRun || noIoa || busy}
-              onClick={() => void run('读命令', read.mutateAsync({ ioa }))}
+              onClick={() => void run(t('cmd.read.label'), read.mutateAsync({ ioa }))}
             >
-              读命令 (C_RD_NA_1)
+              {t('cmd.read.button')}
             </Button>
           </Space>
         </Space>
@@ -438,19 +435,23 @@ export function CommandPanel({ point, disabled = false }: Props) {
     },
     {
       key: 'param',
-      label: '参数命令',
+      label: t('cmd.param.title'),
       children: (
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
           <Select
             style={{ width: '100%' }}
             value={paramKind}
-            options={PARAM_KINDS}
+            options={paramKinds(t)}
             onChange={setParamKind}
           />
           <Space wrap>
-            <InputNumber prefix="值" value={paramValue} onChange={(v) => setParamValue(Number(v ?? 0))} />
             <InputNumber
-              prefix="限定词"
+              prefix={t('cmd.value')}
+              value={paramValue}
+              onChange={(v) => setParamValue(Number(v ?? 0))}
+            />
+            <InputNumber
+              prefix={t('cmd.qualifier')}
               min={0}
               max={255}
               value={paramQualifier}
@@ -461,7 +462,7 @@ export function CommandPanel({ point, disabled = false }: Props) {
               disabled={noRun || noIoa || busy}
               onClick={() =>
                 void run(
-                  '参数命令',
+                  t('cmd.param.send'),
                   param.mutateAsync({
                     kind: paramKind,
                     ioa,
@@ -471,7 +472,7 @@ export function CommandPanel({ point, disabled = false }: Props) {
                 )
               }
             >
-              下发参数
+              {t('cmd.param.send')}
             </Button>
           </Space>
         </Space>
@@ -479,18 +480,18 @@ export function CommandPanel({ point, disabled = false }: Props) {
     },
     {
       key: 'file',
-      label: '文件传输',
+      label: t('cmd.file.title'),
       children: (
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
           <Select
             style={{ width: '100%' }}
             value={fileAction}
-            options={FILE_ACTIONS}
+            options={fileActions(t)}
             onChange={setFileAction}
           />
           <Space wrap>
             <InputNumber
-              prefix="文件号"
+              prefix={t('cmd.file.no')}
               min={0}
               value={fileName}
               onChange={(v) => setFileName(Number(v ?? 0))}
@@ -498,14 +499,14 @@ export function CommandPanel({ point, disabled = false }: Props) {
             <Button
               disabled={noRun || noIoa || busy}
               onClick={() =>
-                void run('文件传输', file.mutateAsync({ action: fileAction, ioa, file_name: fileName }))
+                void run(t('cmd.file.label'), file.mutateAsync({ action: fileAction, ioa, file_name: fileName }))
               }
             >
-              下发
+              {t('cmd.send')}
             </Button>
           </Space>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            文件传输使用目标 IOA（选择文件/召唤文件时通常为 0）。
+            {t('cmd.file.hint')}
           </Typography.Text>
         </Space>
       ),
@@ -518,8 +519,12 @@ export function CommandPanel({ point, disabled = false }: Props) {
       title={
         <Space>
           <SendOutlined />
-          <span>命令面板</span>
-          {point ? <Tag color="gold">已选 {point.type}-{point.ioa}</Tag> : <Tag>未选点</Tag>}
+          <span>{t('cmd.title')}</span>
+          {point ? (
+            <Tag color="gold">{t('cmd.selected', { type: point.type, ioa: point.ioa })}</Tag>
+          ) : (
+            <Tag>{t('cmd.noPoint')}</Tag>
+          )}
         </Space>
       }
       styles={{ body: { maxHeight: 620, overflowY: 'auto' } }}
@@ -527,7 +532,7 @@ export function CommandPanel({ point, disabled = false }: Props) {
       <Space direction="vertical" size={10} style={{ width: '100%' }}>
         <Space wrap>
           <InputNumber
-            prefix="目标 IOA"
+            prefix={t('cmd.targetIoa')}
             min={0}
             value={ioa}
             style={{ width: 190 }}
@@ -535,20 +540,18 @@ export function CommandPanel({ point, disabled = false }: Props) {
           />
           {point ? (
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {point.name} · 当前值 {formatValue(point.value)}
+              {t('cmd.currentValue', { name: point.name, value: formatValue(point.value) })}
             </Typography.Text>
           ) : (
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              在左侧点表单击一行即可带入
+              {t('cmd.pickHint')}
             </Typography.Text>
           )}
         </Space>
 
-        {disabled ? (
-          <Alert type="info" showIcon message="引擎未连接，命令不可下发" />
-        ) : null}
+        {disabled ? <Alert type="info" showIcon message={t('cmd.engineOff')} /> : null}
         {!disabled && noIoa ? (
-          <Alert type="warning" showIcon message="请先选择点位或填写目标 IOA" />
+          <Alert type="warning" showIcon message={t('cmd.needIoa')} />
         ) : null}
         {last ? (
           <Alert

@@ -5,6 +5,7 @@ import { Alert, Col, Row, Spin, Tabs } from 'antd'
 import { usePointsQuery, useStatusQuery } from '../../api/queries'
 import type { Point } from '../../api/types'
 import { PointsTable } from '../../components/PointsTable'
+import { useT } from '../../i18n'
 import { directCommandKind } from '../../lib/pointCommand'
 import { pointKey } from '../../lib/pointValue'
 import { trendBuffer } from '../../lib/trendBuffer'
@@ -41,6 +42,7 @@ const MAX_TREND = 8
  * 选择失败时不会发送执行帧。
  */
 export default function MasterPage() {
+  const t = useT()
   const { data: status } = useStatusQuery()
   const { data: points = [] } = usePointsQuery()
   // 只记选中行的键（`类别-IOA`），实时 Point 从点表缓存派生——
@@ -93,8 +95,8 @@ export default function MasterPage() {
       <Alert
         type="info"
         showIcon
-        message="当前部署为子站角色"
-        description="主站工作台仅在主站（--mode master）下可用；子站工作台见左侧「子站工作台」页。"
+        message={t('master.slaveRole')}
+        description={t('master.slaveRoleDesc')}
       />
     )
   }
@@ -130,7 +132,7 @@ export default function MasterPage() {
         items={[
           {
             key: 'frames',
-            label: '报文查看器',
+            label: t('frameViewer.title'),
             children: (
               <Suspense fallback={<TabFallback />}>
                 <FrameViewer />
@@ -139,7 +141,7 @@ export default function MasterPage() {
           },
           {
             key: 'trend',
-            label: '趋势图',
+            label: t('trend.title'),
             children: (
               <Suspense fallback={<TabFallback />}>
                 <TrendChart

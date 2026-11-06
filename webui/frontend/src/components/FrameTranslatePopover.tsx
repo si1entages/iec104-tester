@@ -4,6 +4,7 @@ import { Popover, Spin, Typography } from 'antd'
 
 import { api } from '../api/endpoints'
 import type { FrameTranslation } from '../api/types'
+import { useT } from '../i18n'
 
 /** 翻译结果缓存（hex → 结果）；上限 500 条，满则丢弃最早插入项 */
 const CACHE = new Map<string, FrameTranslation | { error: string }>()
@@ -21,6 +22,7 @@ interface Result {
  * 结果按 hex 缓存——同帧重复悬停不再发请求。
  */
 function TranslateContent({ hex }: { hex: string }) {
+  const t = useT()
   const [result, setResult] = useState<Result | null>(() => {
     const cached = CACHE.get(hex)
     if (!cached) return null
@@ -44,7 +46,7 @@ function TranslateContent({ hex }: { hex: string }) {
           CACHE.set(hex, r.translation)
           setResult({ data: r.translation, error: null })
         } else {
-          setResult({ data: null, error: r.error ?? '翻译失败' })
+          setResult({ data: null, error: r.error ?? t('frameTranslate.failed') })
         }
       })
       .catch((e: Error) => {
@@ -65,7 +67,13 @@ function TranslateContent({ hex }: { hex: string }) {
     )
   }
   if (result.error || !result.data) {
-    return <Typography.Text type="secondary">翻译失败：{result.error ?? '未知错误'}</Typography.Text>
+    return (
+      <Typography.Text type="secondary">
+        {t('frameTranslate.failedWith', {
+          error: result.error ?? t('frameTranslate.unknown'),
+        })}
+      </Typography.Text>
+    )
   }
   return (
     <div style={{ maxWidth: 560 }}>
