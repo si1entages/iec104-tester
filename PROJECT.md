@@ -140,6 +140,7 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - [x] 一致性套件接入 pytest：`tests/test_conformance_suite.py` 按套件 `_test_*` 方法参数化（失败输出具体 case id）+ 汇总用例锁死 42 case/零 FAIL/ERROR/SKIP；独立 runner 保留；全量 1308 passed
 - [x] 分支覆盖率 88.86%→92.08%：补 `scheduler`（47%→97%）、`data_store`（83.6%→95%）、`master_session`（77.5%→92%）、`multi_station`（80.6%→98%）及协议层零散分支（types/asdu 负数编码、短报文异常、时标变体、自定义类型校验、APDU 编解码）；新增 73 例；CI 门禁 88→91（保留约 1 点抖动余量）；全量 1381 passed
 - [x] 全流程验收进 CI：`e2e-full-flow` job 内拉起主站(8765)/子站(8766)/IEC 24040，等就绪后跑 `tests/e2e/qa_full_flow.py` 12 阶段（本机实测 12/12 通过、exit 0），退出回收服务，失败上传两端日志；历史库以 `--no-history` 关闭
+- [x] 前端 i18n（阶段一）：零依赖 `src/i18n`（zh/en 词典 + `t()`/`useT()`/`tNow()`）、头部「中 / EN」切换（localStorage 记忆、antd ConfigProvider locale 联动）；已覆盖外壳/认证/状态/日志/历史/模拟卡片/共享列宽/运行时告警；`npm run i18n:inventory` 输出剩余 20 文件/535 行（工作台内部）作为后续批次清单；新增 5 用例（字典键对齐 + 英文渲染）；前端 123 passed
 
 ## 双应用入口（纯 Web UI）
 

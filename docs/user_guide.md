@@ -44,6 +44,7 @@ IEC 60870-5-104 测试工具是一款面向电力系统 SCADA 调试和测试的
 | 历史库 | 默认开启（SQLite 按角色分库），保留期/条数/容量三重清理，`--no-history` 关闭；Web「历史」页可查询与导出 |
 | 非标 TypeID | YAML 注册厂商私有类型即可编解码往返（未注册按标准回 COT=42） |
 | 文件传输 | F_FR/F_SR/F_SC/F_LS/F_AF/F_SG/F_DR，字节级语义经多实现交叉核实（见 [`file_transfer_fls.md`](file_transfer_fls.md)） |
+| 界面语言 | 中/英切换（头部「中 / EN」，记忆偏好）；已覆盖外壳、认证、状态/日志/历史页与网络模拟卡片，工作台内部文案按 `npm run i18n:inventory` 清单后续迁移 |
 
 ---
 

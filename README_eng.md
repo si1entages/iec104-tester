@@ -48,6 +48,9 @@ diagnostics and a one-command loopback demo.
 - **Logs page**: structured logs with level/category/source filters, search, pause/clear,
   JSONL export
 - Dark/light theme follows the system on first launch and remembers manual choice
+- **zh/en UI switching** (header "中 / EN"): shell, auth, status/logs/history pages and
+  the network-simulation card are bilingual; workbench internals are tracked by
+  `npm run i18n:inventory` for the next batch
 - WebSocket live refresh; button availability driven by server state
 
 ### Master (`core/engine/master.py`)

@@ -374,8 +374,9 @@ graph TD
 | **T35** | 一致性套件接入 pytest（2026-11-07） | `tests/test_conformance_suite.py`：按 `_test_*` 方法参数化（10 例，失败输出 case id）+ 汇总锁死 42 case/零 FAIL/ERROR/SKIP；独立 runner 保留；全量 1308 passed |
 | **T36** | 分支覆盖率提升（2026-11-07） | 实测 88.86%→**92.08%**（门禁 88→91，保留约 1 点抖动余量）：补 scheduler 47→97%、data_store 83.6→95%、master_session 77.5→92%、multi_station 80.6→98%，及 types/asdu 零散分支；新增 73 例；全量 1381 passed |
 | **T37** | 全流程验收进 CI（2026-11-07） | `.github/workflows/ci.yml` 新增 `e2e-full-flow` job：job 内拉起主站(8765)/子站(8766)/IEC 24040 → 等就绪（40s 上限）→ `tests/e2e/qa_full_flow.py` 12 阶段 → trap 回收；失败上传 `master.log`/`slave.log`；本机实测 12/12、exit 0 |
+| **T38** | 前端 i18n 阶段一（2026-11-07） | 零依赖 `src/i18n`（zh/en 词典、`t()`/`useT()`/`tNow()`、占位符）+ 头部「中 / EN」（localStorage 记忆、antd locale 联动）；覆盖外壳/认证/状态/日志/历史/模拟卡片/共享列宽/运行时告警；`i18n:inventory` 清单剩余 20 文件/535 行（工作台内部，后续批次）；5 用例；前端 123 passed |
 
-> **累计统计**：T01~T37 **全部完成，待办 0**。
+> **累计统计**：T01~T38 **全部完成，待办 0**（T38 为阶段一，工作台内部文案迁移列入后续）。
 
 ---
 
