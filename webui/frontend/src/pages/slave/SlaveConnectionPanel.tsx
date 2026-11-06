@@ -189,7 +189,7 @@ export function SlaveConnectionPanel() {
             />
             <Input
               prefix={t('conn.tlsCa')}
-              placeholder="ca.pem（双向认证时）"
+              placeholder={t('scp.tlsCaPlaceholder')}
               style={{ width: 220 }}
               value={tlsCa}
               onChange={(e) => setTlsCa(e.target.value)}

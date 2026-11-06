@@ -2,6 +2,10 @@ import { Alert, Button, Card, Col, Empty, Popconfirm, Row, Space, Statistic, Tab
 import type { TableColumnsType } from 'antd'
 
 import type { MultiStatusResponse, MultiSummaryResponse, StationStatus } from '../../api/types'
+import { useT } from '../../i18n'
+import type { MessageKey } from '../../i18n'
+
+type TFn = (key: MessageKey, params?: Record<string, string | number>) => string
 
 interface Props {
   summary?: MultiSummaryResponse
@@ -25,51 +29,58 @@ function formatUptime(seconds: number): string {
   return `${sec}s`
 }
 
-const COLUMNS = (onDisable?: (id: string) => void, busy?: boolean): TableColumnsType<StationStatus> => [
-  { title: '站标识', dataIndex: 'station_id', width: 150, className: 'mono' },
-  { title: '站名', dataIndex: 'station_name', width: 160, ellipsis: true },
-  { title: '端口', dataIndex: 'port', width: 80, className: 'mono' },
-  { title: '公共地址', dataIndex: 'common_addr', width: 90, className: 'mono' },
+const columns = (
+  t: TFn,
+  onDisable?: (id: string) => void,
+  busy?: boolean,
+): TableColumnsType<StationStatus> => [
+  { title: t('msv.col.id'), dataIndex: 'station_id', width: 150, className: 'mono' },
+  { title: t('msv.col.name'), dataIndex: 'station_name', width: 160, ellipsis: true },
+  { title: t('msv.col.port'), dataIndex: 'port', width: 80, className: 'mono' },
+  { title: t('msv.col.addr'), dataIndex: 'common_addr', width: 90, className: 'mono' },
   {
-    title: '运行',
+    title: t('msv.col.running'),
     dataIndex: 'running',
     width: 80,
     render: (running: boolean) => (
-      <Tag color={running ? 'success' : 'default'}>{running ? '运行中' : '已停止'}</Tag>
+      <Tag color={running ? 'success' : 'default'}>
+        {running ? t('msv.rowRunning') : t('msv.rowStopped')}
+      </Tag>
     ),
   },
   {
-    title: '客户端',
+    title: t('msv.col.clients'),
     dataIndex: 'client_count',
     width: 80,
     render: (n: number) => <span style={{ color: n > 0 ? '#52c41a' : undefined }}>{n}</span>,
   },
   {
-    title: '点数 YX/YC/YK/YM',
+    title: t('msv.col.points'),
     width: 170,
     className: 'mono',
     render: (_v, row) => `${row.yx_count}/${row.yc_count}/${row.yk_count}/${row.ym_count}`,
   },
   {
-    title: '模拟',
+    title: t('msv.col.sim'),
     dataIndex: 'simulation_active',
     width: 80,
-    render: (on: boolean) => (on ? <Tag color="green">开</Tag> : <Tag>关</Tag>),
+    render: (on: boolean) =>
+      on ? <Tag color="green">{t('msv.simOn')}</Tag> : <Tag>{t('msv.simOff')}</Tag>,
   },
   {
-    title: '操作',
+    title: t('msv.col.actions'),
     width: 130,
     render: (_v, row) =>
       onDisable ? (
         <Popconfirm
-          title={`停用 ${row.station_id}？`}
-          description="后端只支持整体启停：会先停止全部站，再以「其余站」重新启动。其他站的连接会短暂断开。"
-          okText="确认停用并重建"
-          cancelText="取消"
+          title={t('msv.disableTitle', { id: row.station_id })}
+          description={t('msv.disableDesc')}
+          okText={t('msv.confirmDisable')}
+          cancelText={t('pcd.cancel')}
           onConfirm={() => onDisable(row.station_id)}
         >
           <Button size="small" danger type="text" disabled={busy}>
-            停用此站
+            {t('msv.disableBtn')}
           </Button>
         </Popconfirm>
       ) : (
@@ -88,6 +99,7 @@ const COLUMNS = (onDisable?: (id: string) => void, busy?: boolean): TableColumns
  * 两个端点都由页面轮询驱动（页面卸载即停）。
  */
 export function MultiStatusView({ summary, status, loading, isError, error, onDisableStation, busy }: Props) {
+  const t = useT()
   const { token } = antdTheme.useToken()
   const stations = status?.stations ?? []
   const running = Boolean(summary?.running ?? status?.running)
@@ -97,8 +109,10 @@ export function MultiStatusView({ summary, status, loading, isError, error, onDi
       size="small"
       title={
         <Space>
-          <span>聚合状态</span>
-          <Tag color={running ? 'success' : 'default'}>{running ? '运行中' : '未运行'}</Tag>
+          <span>{t('msv.title')}</span>
+          <Tag color={running ? 'success' : 'default'}>
+            {running ? t('msv.running') : t('msv.notRunning')}
+          </Tag>
         </Space>
       }
     >
@@ -107,29 +121,29 @@ export function MultiStatusView({ summary, status, loading, isError, error, onDi
           type="error"
           showIcon
           style={{ marginBottom: 12 }}
-          message="读取 /api/multi/status・/api/multi/summary 失败"
+          message={t('msv.error')}
           description={String((error as Error)?.message ?? error)}
         />
       ) : null}
 
       <Row gutter={12} style={{ marginBottom: 12 }}>
         <Col span={4}>
-          <Statistic title="站数" value={summary?.station_count ?? stations.length} />
+          <Statistic title={t('msv.stationCount')} value={summary?.station_count ?? stations.length} />
         </Col>
         <Col span={4}>
           <Statistic
-            title="总客户端"
+            title={t('msv.totalClients')}
             value={summary?.total_clients ?? 0}
             valueStyle={{ color: (summary?.total_clients ?? 0) > 0 ? token.colorSuccess : undefined }}
           />
         </Col>
         <Col span={4}>
-          <Statistic title="运行时长" value={formatUptime(summary?.uptime ?? 0)} />
+          <Statistic title={t('msv.uptime')} value={formatUptime(summary?.uptime ?? 0)} />
         </Col>
         <Col span={4}>
-          <Tooltip title="全部站的 YX/YC/YK/YM 点数合计">
+          <Tooltip title={t('msv.pointsTotalTip')}>
             <Statistic
-              title="点合计"
+              title={t('msv.pointsTotal')}
               value={
                 summary
                   ? (summary.total_yx ?? 0) +
@@ -146,7 +160,7 @@ export function MultiStatusView({ summary, status, loading, isError, error, onDi
         </Col>
         <Col span={4}>
           <Statistic
-            title="在线站"
+            title={t('msv.online')}
             value={stations.filter((s) => s.running).length}
             suffix={`/ ${stations.length}`}
           />
@@ -156,14 +170,14 @@ export function MultiStatusView({ summary, status, loading, isError, error, onDi
       {stations.length === 0 ? (
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description="没有正在运行的多站（用上方配置列表启动）"
+          description={t('msv.empty')}
         />
       ) : (
         <Table<StationStatus>
           rowKey="station_id"
           size="small"
           loading={loading}
-          columns={COLUMNS(onDisableStation, busy)}
+          columns={columns(t, onDisableStation, busy)}
           dataSource={stations}
           pagination={false}
           scroll={{ x: 980, y: 320 }}

@@ -7,14 +7,23 @@ import type { TableColumnsType } from 'antd'
 
 import { usePointsQuery } from '../api/queries'
 import type { Point } from '../api/types'
+import { useT } from '../i18n'
+import type { MessageKey } from '../i18n'
 import { formatValue } from '../lib/format'
 import { directCommandHint } from '../lib/pointCommand'
 import { pointKey } from '../lib/pointValue'
 import { useResizableColumns } from '../hooks/useResizableColumns'
 import { PointsTools } from './PointsTools'
 
+type TFn = (key: MessageKey, params?: Record<string, string | number>) => string
+
 /** 类型页签（第二批体验改造 ②）：全部 + 五类点；默认「全部」 */
-const TYPE_TABS = ['全部', 'YX', 'YC', 'YK', 'YM', 'STEP'].map((v) => ({ value: v, label: v }))
+function typeTabs(t: TFn) {
+  return [
+    { value: 'all', label: t('pt2.tab.all') },
+    ...['YX', 'YC', 'YK', 'YM', 'STEP'].map((v) => ({ value: v, label: v })),
+  ]
+}
 
 /**
  * 列定义。
@@ -24,24 +33,27 @@ const TYPE_TABS = ['全部', 'YX', 'YC', 'YK', 'YM', 'STEP'].map((v) => ({ value
  * 只有命令点（YK/YC/STEP）才加指针样式与「双击下发…」悬停提示。
  */
 function buildColumns(
+  t: TFn,
   onValueDoubleClick?: (point: Point) => void,
 ): TableColumnsType<Point> {
   return [
-    { title: 'IOA', dataIndex: 'ioa', width: 100, className: 'mono' },
-    { title: '类型', dataIndex: 'type', width: 80 },
+    { title: t('status.col.ioa'), dataIndex: 'ioa', width: 100, className: 'mono' },
+    { title: t('status.col.type'), dataIndex: 'type', width: 80 },
     // 名称/品质是长文本列：给宽默认值（可拖拽扩大），不再写死省略
-    { title: '名称', dataIndex: 'name', width: 360 },
-    { title: '组', dataIndex: 'group', width: 70 },
+    { title: t('status.col.name'), dataIndex: 'name', width: 360 },
+    { title: t('status.col.group'), dataIndex: 'group', width: 70 },
     {
-      title: '使能',
+      title: t('status.col.enabled'),
       dataIndex: 'enabled',
       width: 80,
       render: (enabled: boolean) => (
-        <Tag color={enabled ? 'green' : 'default'}>{enabled ? '启用' : '停用'}</Tag>
+        <Tag color={enabled ? 'green' : 'default'}>
+          {enabled ? t('status.enabled') : t('status.disabled')}
+        </Tag>
       ),
     },
     {
-      title: '值',
+      title: t('status.col.value'),
       dataIndex: 'value',
       width: 150,
       onCell: (point) => {
@@ -66,7 +78,7 @@ function buildColumns(
         )
       },
     },
-    { title: '品质', dataIndex: 'quality', width: 220, className: 'mono' },
+    { title: t('status.col.quality'), dataIndex: 'quality', width: 220, className: 'mono' },
   ]
 }
 
@@ -104,26 +116,25 @@ export function PointsTable({
   onAddTrend,
   selectHint,
 }: Props) {
+  const t = useT()
   const { data: points = [], isLoading, isError, error } = usePointsQuery()
   const { token } = antdTheme.useToken()
   const tableHint =
     selectHint ??
-    (onValueDoubleClick
-      ? '单击行选中；双击命令点的值可直接下发命令'
-      : '单击行以选中')
+    (onValueDoubleClick ? t('pt2.hint.command') : t('pt2.hint.select'))
   const baseColumns = useMemo(
-    () => buildColumns(onValueDoubleClick),
-    [onValueDoubleClick],
+    () => buildColumns(t, onValueDoubleClick),
+    [t, onValueDoubleClick],
   )
   // 列宽拖拽（第二批改造③）：会话内记忆，virtual 表需要确定列宽故保留默认基线
   const { columns, headerComponents, totalWidth } = useResizableColumns(baseColumns)
   const [keyword, setKeyword] = useState('')
-  // 类型页签：'全部' = 不过滤；'YX'/'YC'/… = 只看该类型（取代原下拉选择器）
-  const [typeTab, setTypeTab] = useState<string>('全部')
+  // 类型页签：'all' = 不过滤；'YX'/'YC'/… = 只看该类型（取代原下拉选择器）
+  const [typeTab, setTypeTab] = useState<string>('all')
   const [enabledOnly, setEnabledOnly] = useState(false)
   // 十万行过滤放到低优先级更新，保证输入框不掉帧
   const deferredKeyword = useDeferredValue(keyword)
-  const type = typeTab === '全部' ? undefined : typeTab
+  const type = typeTab === 'all' ? undefined : typeTab
 
   const rows = useMemo(() => {
     const kw = deferredKeyword.trim().toLowerCase()
@@ -143,16 +154,16 @@ export function PointsTable({
       size="small"
       title={
         <Space>
-          <span>点表</span>
+          <span>{t('pt2.title')}</span>
           <Tag color="blue">{rows.length}</Tag>
           {rows.length !== points.length ? (
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              / 共 {points.length}
+              {t('pt2.total', { n: points.length })}
             </Typography.Text>
           ) : null}
           {selected ? (
             <Tag color="gold">
-              已选 {selected.type}-{selected.ioa}
+              {t('cmd.selected', { type: selected.type, ioa: selected.ioa })}
             </Tag>
           ) : (
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
@@ -170,16 +181,16 @@ export function PointsTable({
             disabled={!selected || !onAddTrend || watchedKeys.includes(pointKey(selected))}
             onClick={() => selected && onAddTrend?.(selected)}
           >
-            加入趋势
+            {t('pt2.addTrend')}
           </Button>
           <Input.Search
             size="small"
             style={{ width: 200 }}
             allowClear
-            placeholder="按名称 / IOA 过滤"
+            placeholder={t('pt2.filterPlaceholder')}
             onChange={(e) => setKeyword(e.target.value)}
           />
-          <span style={{ color: token.colorTextTertiary, fontSize: 12 }}>仅启用</span>
+          <span style={{ color: token.colorTextTertiary, fontSize: 12 }}>{t('pt2.enabledOnly')}</span>
           <Switch size="small" checked={enabledOnly} onChange={setEnabledOnly} />
         </Space>
       }
@@ -189,14 +200,14 @@ export function PointsTable({
           type="error"
           showIcon
           style={{ marginBottom: 8 }}
-          message="读取 /api/points 失败"
+          message={t('pt2.loadFailed')}
           description={String((error as Error)?.message ?? error)}
         />
       ) : null}
       <Segmented
         size="small"
         style={{ marginBottom: 8 }}
-        options={TYPE_TABS}
+        options={typeTabs(t)}
         value={typeTab}
         onChange={(v) => setTypeTab(String(v))}
       />

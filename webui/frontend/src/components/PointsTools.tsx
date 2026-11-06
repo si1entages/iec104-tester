@@ -12,6 +12,7 @@ import { api } from '../api/endpoints'
 import { useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '../api/queries'
 import type { BatchAction, BatchPointsRequest, ImportFormat, Point } from '../api/types'
+import { useT } from '../i18n'
 
 const TYPE_OPTIONS = ['YX', 'YC', 'YK', 'YM', 'STEP'].map((v) => ({ value: v, label: v }))
 
@@ -21,7 +22,7 @@ function readText(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(String(reader.result ?? ''))
-    reader.onerror = () => reject(reader.error ?? new Error('读取文件失败'))
+    reader.onerror = () => reject(reader.error ?? new Error('read file failed')) // i18n-ignore 内部异常
     reader.readAsText(file)
   })
 }
@@ -34,6 +35,7 @@ function readText(file: File): Promise<string> {
  * 挂在共享 PointsTable 卡片工具区，主站/子站页均可用。
  */
 export function PointsTools() {
+  const t = useT()
   const { message } = AntdApp.useApp()
   const queryClient = useQueryClient()
   const fileRef = useRef<HTMLInputElement | null>(null)
@@ -57,20 +59,22 @@ export function PointsTools() {
     try {
       const r = await api.importPoints(text, format)
       if (r.ok) {
-        message.success(`已导入 ${String((r as Record<string, unknown>).points ?? '')} 点`.replace('  ', ' '))
+        message.success(t('pt.imported', {
+          n: String((r as Record<string, unknown>).points ?? ''),
+        }))
         invalidate()
       } else {
-        message.error(r.error ?? '导入失败')
+        message.error(r.error ?? t('pt.importFailed'))
       }
     } catch (e) {
-      message.error(`导入失败：${(e as Error).message}`)
+      message.error(t('pt.importFailedWith', { error: (e as Error).message }))
     }
   }
 
   const exportItems: MenuProps['items'] = [
-    { key: 'yaml', label: '导出 YAML' },
-    { key: 'csv', label: '导出 CSV' },
-    { key: 'session', label: '导出会话 JSON' },
+    { key: 'yaml', label: t('pt.exportYaml') },
+    { key: 'csv', label: t('pt.exportCsv') },
+    { key: 'session', label: t('pt.exportSession') },
   ]
   const onExport: MenuProps['onClick'] = ({ key }) => {
     const url =
@@ -93,7 +97,7 @@ export function PointsTools() {
   const doBatch = async (action: BatchAction, points: Point[] | undefined): Promise<void> => {
     const ioas = resolveIoas(points)
     if (ioas.length === 0) {
-      message.warning('请输入 IOA（逗号分隔），或留空对所选类型全部生效')
+      message.warning(t('pt.needIoas'))
       return
     }
     const body: BatchPointsRequest = { type: batchType, ioas, action, group: action === 'group' ? batchGroup : null }
@@ -101,14 +105,16 @@ export function PointsTools() {
     try {
       const r = await api.batchPoints(body)
       if (r.ok) {
-        message.success(`已更新 ${String((r as Record<string, unknown>).changed ?? ioas.length)} 点`)
+        message.success(t('pt.updated', {
+          n: String((r as Record<string, unknown>).changed ?? ioas.length),
+        }))
         setBatchOpen(false)
         invalidate()
       } else {
-        message.error(r.error ?? '批量操作失败')
+        message.error(r.error ?? t('pt.batchFailed'))
       }
     } catch (e) {
-      message.error(`批量操作失败：${(e as Error).message}`)
+      message.error(t('pt.batchFailedWith', { error: (e as Error).message }))
     } finally {
       setBatchBusy(false)
     }
@@ -129,11 +135,11 @@ export function PointsTools() {
         }}
       />
       <Button size="small" icon={<ImportOutlined />} onClick={() => fileRef.current?.click()}>
-        导入
+        {t('pt.import')}
       </Button>
       <Dropdown menu={{ items: exportItems, onClick: onExport }}>
         <Button size="small" icon={<DownloadOutlined />}>
-          导出
+          {t('pt.export')}
         </Button>
       </Dropdown>
       <Popover
@@ -141,19 +147,19 @@ export function PointsTools() {
         onOpenChange={setBatchOpen}
         trigger={['click']}
         placement="bottomRight"
-        title="批量操作（/api/points/batch）"
+        title={t('pt.batchTitle')}
         content={
           <Space direction="vertical" size={8} style={{ width: 300 }}>
             <Space wrap>
-              <span style={{ fontSize: 12 }}>类型</span>
+              <span style={{ fontSize: 12 }}>{t('pt.type')}</span>
               <Select size="small" style={{ width: 90 }} value={batchType} options={TYPE_OPTIONS} onChange={setBatchType} />
-              <span style={{ fontSize: 12 }}>组号</span>
+              <span style={{ fontSize: 12 }}>{t('pt.group')}</span>
               <InputNumber size="small" min={1} value={batchGroup} onChange={(v) => setBatchGroup(Number(v ?? 1))} />
             </Space>
             <Input
               size="small"
               value={batchIoas}
-              placeholder="IOA 逗号分隔，如 1,2,3（留空=该类型全部）"
+              placeholder={t('pt.ioasPlaceholder')}
               onChange={(e) => setBatchIoas(e.target.value)}
             />
             <Space wrap>
@@ -163,28 +169,28 @@ export function PointsTools() {
                 loading={batchBusy}
                 onClick={() => void doBatch('enable', queryClient.getQueryData<Point[]>(queryKeys.points))}
               >
-                启用
+                {t('pt.enable')}
               </Button>
               <Button
                 size="small"
                 loading={batchBusy}
                 onClick={() => void doBatch('disable', queryClient.getQueryData<Point[]>(queryKeys.points))}
               >
-                禁用
+                {t('pt.disable')}
               </Button>
               <Button
                 size="small"
                 loading={batchBusy}
                 onClick={() => void doBatch('group', queryClient.getQueryData<Point[]>(queryKeys.points))}
               >
-                改组
+                {t('pt.regroup')}
               </Button>
             </Space>
           </Space>
         }
       >
         <Button size="small" icon={<ToolOutlined />}>
-          批量
+          {t('pt.batch')}
         </Button>
       </Popover>
     </Space>

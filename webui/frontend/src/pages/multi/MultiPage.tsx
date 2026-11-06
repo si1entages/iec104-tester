@@ -10,6 +10,7 @@ import {
   useMultiStatusQuery,
   useMultiSummaryQuery,
 } from '../../api/queries'
+import { useT } from '../../i18n'
 import { MultiStatusView } from './MultiStatusView'
 import { StationCard } from './StationCard'
 import type { DraftStation } from './stationDraft'
@@ -38,6 +39,7 @@ function sameSet(a: Set<string>, b: Set<string>): boolean {
  * 不按角色隐藏；页面顶部给出一条说明避免误认为它是当前会话的子功能。
  */
 export default function MultiPage() {
+  const t = useT()
   const { message } = AntdApp.useApp()
 
   const statusQuery = useMultiStatusQuery()
@@ -81,39 +83,39 @@ export default function MultiPage() {
     async (stations: DraftStation[]): Promise<boolean> => {
       const payload = toStationConfigs(stations)
       if (payload.length === 0) {
-        report(false, '没有启用的站，无法启动')
+        report(false, t('multi.noEnabled'))
         return false
       }
       try {
         const r = await start.mutateAsync({ stations: payload })
         if (!r.ok) {
-          report(false, `启动失败：${r.error ?? '未知错误'}`)
+          report(false, t('multi.startFailed', { error: r.error ?? t('cmd.unknown') }))
           return false
         }
-        report(true, `已启动 ${r.stations ?? payload.length} 个站`)
+        report(true, t('multi.started', { n: r.stations ?? payload.length }))
         return true
       } catch (e) {
-        report(false, `启动失败：${(e as Error).message}`)
+        report(false, t('multi.startFailed', { error: (e as Error).message }))
         return false
       }
     },
-    [start, report],
+    [start, report, t],
   )
 
   const runStop = useCallback(async (): Promise<boolean> => {
     try {
       const r = await stop.mutateAsync()
       if (!r.ok) {
-        report(false, `停止失败：${r.error ?? '未知错误'}`)
+        report(false, t('multi.stopFailed', { error: r.error ?? t('cmd.unknown') }))
         return false
       }
-      report(true, '已停止全部站')
+      report(true, t('multi.stoppedAll'))
       return true
     } catch (e) {
-      report(false, `停止失败：${(e as Error).message}`)
+      report(false, t('multi.stopFailed', { error: (e as Error).message }))
       return false
     }
-  }, [stop, report])
+  }, [stop, report, t])
 
   /** 以目标草稿「重建」管理器：先停全部，再按启用站启动 */
   const rebuild = useCallback(
@@ -122,18 +124,24 @@ export default function MultiPage() {
       if (!stopped) return
       if (toStationConfigs(next).length === 0) {
         setDraft(next)
-        setLast({ ok: true, text: '已停止全部站（当前没有启用的站）' })
+        setLast({ ok: true, text: t('multi.stoppedNoEnabled') })
         return
       }
       const ok = await runStart(next)
       if (ok) setDraft(next)
     },
-    [runStop, runStart],
+    [runStop, runStart, t],
   )
 
   const onStartAll = (): void => {
     if (issues.length > 0) {
-      report(false, `参数校验未通过：${issues[0]}${issues.length > 1 ? ` 等 ${issues.length} 项` : ''}`)
+      report(
+        false,
+        t('multi.validationFailed', {
+          first: issues[0],
+          more: issues.length > 1 ? t('multi.validationMore', { n: issues.length }) : '',
+        }),
+      )
       return
     }
     void runStart(draft)
@@ -149,8 +157,8 @@ export default function MultiPage() {
         type="info"
         showIcon
         closable
-        message="多站管理器与当前会话角色无关"
-        description="它挂在 Web 会话上，用途是「子站侧压力测试」：一次拉起多个子站去压被测主站。后端只支持整体启停，因此单站启停会被实现为「停止全部 → 以剩余站重新启动」。"
+        message={t('multi.roleNote')}
+        description={t('multi.roleNoteDesc')}
       />
 
       {last ? (
@@ -168,11 +176,11 @@ export default function MultiPage() {
         title={
           <Space wrap>
             <CloudServerOutlined />
-            <span>站配置（草稿）</span>
+            <span>{t('multi.draftTitle')}</span>
             <Tag color="blue">{draft.length}</Tag>
-            <Tag color="green">启用 {enabledIds.size}</Tag>
-            {running ? <Tag color="orange">运行中：字段已冻结，仅「参与本次启动」可切</Tag> : null}
-            {pendingRebuild ? <Tag color="warning">有未生效的站变更</Tag> : null}
+            <Tag color="green">{t('multi.enabledCount', { n: enabledIds.size })}</Tag>
+            {running ? <Tag color="orange">{t('multi.runningFrozen')}</Tag> : null}
+            {pendingRebuild ? <Tag color="warning">{t('multi.pendingChanges')}</Tag> : null}
           </Space>
         }
         extra={
@@ -183,7 +191,7 @@ export default function MultiPage() {
               disabled={running}
               onClick={() => setDraft((prev) => [...prev, newStation(prev.length + 1)])}
             >
-              添加站
+              {t('multi.addStation')}
             </Button>
             <Button
               type="primary"
@@ -193,7 +201,7 @@ export default function MultiPage() {
               disabled={running || busy}
               onClick={onStartAll}
             >
-              启动全部启用站
+              {t('multi.startAll')}
             </Button>
             <Button
               danger
@@ -203,9 +211,8 @@ export default function MultiPage() {
               disabled={!running || busy}
               onClick={() => void runStop()}
             >
-              停止全部
-            </Button>
-          </Space>
+              {t('multi.stopAll')}
+            </Button>          </Space>
         }
       >
         {issues.length > 0 ? (
@@ -213,7 +220,7 @@ export default function MultiPage() {
             type="warning"
             showIcon
             style={{ marginBottom: 12 }}
-            message={`参数校验：${issues.length} 项待修正`}
+            message={t('multi.validationIssues', { n: issues.length })}
             description={
               <ul style={{ margin: 0, paddingLeft: 18 }}>
                 {issues.map((it) => (
@@ -229,11 +236,11 @@ export default function MultiPage() {
             type="warning"
             showIcon
             style={{ marginBottom: 12 }}
-            message="站集合与当前运行中的站不一致"
+            message={t('multi.stationMismatch')}
             description={
               <Space>
                 <Typography.Text style={{ fontSize: 12 }}>
-                  当前运行 {runningIds.size} 个站，草稿启用 {enabledIds.size} 个。
+                  {t('multi.runningCount', { running: runningIds.size, enabled: enabledIds.size })}
                 </Typography.Text>
                 <Button
                   size="small"
@@ -241,7 +248,7 @@ export default function MultiPage() {
                   loading={busy}
                   onClick={() => void rebuild(draft)}
                 >
-                  重建管理器以应用
+                  {t('multi.rebuild')}
                 </Button>
               </Space>
             }
@@ -250,7 +257,7 @@ export default function MultiPage() {
 
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           {draft.length === 0 ? (
-            <Typography.Text type="secondary">还没有站，点右上角「添加站」。</Typography.Text>
+            <Typography.Text type="secondary">{t('multi.empty')}</Typography.Text>
           ) : (
             draft.map((station, i) => (
               <StationCard

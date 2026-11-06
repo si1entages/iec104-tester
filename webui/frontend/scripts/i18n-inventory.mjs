@@ -62,7 +62,9 @@ function stripComments(line, state) {
 const rows = []
 let total = 0
 for (const file of walk(SRC)) {
-  const lines = readFileSync(file, 'utf8').split('\n')
+  const content = readFileSync(file, 'utf8')
+  if (content.includes('i18n-ignore-file')) continue
+  const lines = content.split('\n')
   const state = { inBlock: false }
   let count = 0
   for (const line of lines) {
@@ -83,4 +85,4 @@ for (const [count, file] of rows) {
   console.log(`${String(count).padStart(4)}  ${file}`)
 }
 console.log(`\n合计 ${rows.length} 个文件 / ${total} 行`)
-console.log('（阶段一已覆盖：外壳、认证、状态/日志/历史页、网络模拟卡片、共享列宽组件/运行时告警）')
+console.log('（全站 i18n 已完成：清单应为 0；新增硬编码文案会重新出现在上面）')

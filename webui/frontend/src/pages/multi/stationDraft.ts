@@ -12,6 +12,7 @@
  */
 
 import type { StationConfig } from '../../api/types'
+import { tNow } from '../../i18n'
 
 /** 草稿行 = StationConfig + 本地参与开关 */
 export interface DraftStation extends StationConfig {
@@ -23,7 +24,7 @@ export interface DraftStation extends StationConfig {
 export function newStation(seq: number, basePort = 2404): DraftStation {
   return {
     station_id: `station-${seq}`,
-    station_name: `子站 ${seq}`,
+    station_name: tNow('multi.defaultName', { n: seq }),
     host: '0.0.0.0',
     port: basePort + seq - 1,
     common_addr: seq,
@@ -57,35 +58,35 @@ export function validateDraft(draft: DraftStation[]): string[] {
   const active = draft.filter((s) => s.enabled)
 
   if (active.length === 0) {
-    issues.push('至少要启用一个站，否则没有可启动的内容')
+    issues.push(tNow('multi.v.enableAtLeastOne'))
   }
 
   const seen = new Map<string, number>()
   active.forEach((s, i) => {
-    const label = s.station_id?.trim() || `第 ${i + 1} 行`
+    const label = s.station_id?.trim() || tNow('multi.v.rowLabel', { n: i + 1 })
 
     if (!s.station_id || !s.station_id.trim()) {
-      issues.push(`第 ${i + 1} 行：station_id 必填`)
+      issues.push(tNow('multi.v.stationIdRequired', { label: tNow('multi.v.rowLabel', { n: i + 1 }) }))
     } else {
       const key = s.station_id.trim()
       const prev = seen.get(key)
       if (prev !== undefined) {
-        issues.push(`station_id 重复：${key}（第 ${prev + 1} 行与第 ${i + 1} 行）`)
+        issues.push(tNow('multi.v.stationIdDup', { id: key, a: prev + 1, b: i + 1 }))
       } else {
         seen.set(key, i)
       }
     }
 
     if (!s.host || !s.host.trim()) {
-      issues.push(`${label}：绑定地址不能为空`)
+      issues.push(tNow('multi.v.hostRequired', { label }))
     }
     const port = s.port
     if (port === undefined || !Number.isInteger(port) || port < 0 || port > 65535) {
-      issues.push(`${label}：端口必须是 0–65535 的整数（当前 ${String(port)}）`)
+      issues.push(tNow('multi.v.portInvalid', { label, value: String(port) }))
     }
     const ca = s.common_addr
     if (ca === undefined || !Number.isInteger(ca) || ca < 0) {
-      issues.push(`${label}：公共地址必须 ≥ 0 的整数（当前 ${String(ca)}）`)
+      issues.push(tNow('multi.v.addrInvalid', { label, value: String(ca) }))
     }
     for (const [name, v] of [
       ['yx_count', s.yx_count],
@@ -94,7 +95,7 @@ export function validateDraft(draft: DraftStation[]): string[] {
       ['ym_count', s.ym_count],
     ] as const) {
       if (v !== undefined && (!Number.isInteger(v) || v < 0)) {
-        issues.push(`${label}：${name} 必须 ≥ 0 的整数（当前 ${v}）`)
+        issues.push(tNow('multi.v.countInvalid', { label, name, value: v }))
       }
     }
   })
@@ -105,9 +106,13 @@ export function validateDraft(draft: DraftStation[]): string[] {
     if (s.port === undefined) continue // 已在上面报过
     const prev = byPort.get(s.port)
     if (prev !== undefined) {
-      issues.push(`端口重复：${s.port}（${prev} 与 ${s.station_id || '未命名'}）`)
+      issues.push(tNow('multi.v.portDup', {
+        port: s.port,
+        a: prev,
+        b: s.station_id || tNow('multi.v.unnamed'),
+      }))
     } else {
-      byPort.set(s.port, s.station_id || '未命名')
+      byPort.set(s.port, s.station_id || tNow('multi.v.unnamed'))
     }
   }
 

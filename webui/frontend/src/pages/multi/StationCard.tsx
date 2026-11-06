@@ -4,6 +4,7 @@ import { DeleteOutlined } from '@ant-design/icons'
 import { Button, Card, Collapse, Input, InputNumber, Space, Switch, Tag, Typography, theme as antdTheme } from 'antd'
 
 import type { DraftStation } from './stationDraft'
+import { useT } from '../../i18n'
 
 interface Props {
   station: DraftStation
@@ -34,6 +35,7 @@ function Field({ label, width = 200, children }: { label: string; width?: number
  * `enabled` 是**纯本地**开关（不发给后端），用来表达「本次不启动该站」。
  */
 export function StationCard({ station, index, frozen, onChange, onRemove }: Props) {
+  const t = useT()
   const { token } = antdTheme.useToken()
   const number = (v: number | null | undefined, fallback = 0): number =>
     v === null || v === undefined || !Number.isFinite(Number(v)) ? fallback : Number(v)
@@ -44,7 +46,7 @@ export function StationCard({ station, index, frozen, onChange, onRemove }: Prop
       title={
         <Space wrap>
           <Tag color={station.enabled ? 'blue' : 'default'}>{index + 1}</Tag>
-          <span className="mono">{station.station_id || '（未命名）'}</span>
+          <span className="mono">{station.station_id || t('sc.stationUnnamed')}</span>
           {station.station_name ? (
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               {station.station_name}
@@ -58,10 +60,10 @@ export function StationCard({ station, index, frozen, onChange, onRemove }: Prop
       }
       extra={
         <Space>
-          <span style={{ fontSize: 12, color: token.colorTextTertiary }}>参与本次启动</span>
+          <span style={{ fontSize: 12, color: token.colorTextTertiary }}>{t('sc.include')}</span>
           <Switch
             size="small"
-            aria-label={`参与本次启动-${station.station_id}`}
+            aria-label={t('sc.includeAria', { id: station.station_id })}
             checked={station.enabled}
             // 运行中仍可切换：它表达的是「下一次重建时的参与集合」，
             // 改完会出现「重建管理器以应用」提示（见 MultiPage）
@@ -73,32 +75,32 @@ export function StationCard({ station, index, frozen, onChange, onRemove }: Prop
             type="text"
             icon={<DeleteOutlined />}
             disabled={frozen}
-            aria-label={`删除-${station.station_id}`}
+            aria-label={t('sc.deleteAria', { id: station.station_id })}
             onClick={onRemove}
           >
-            删除
+            {t('sc.delete')}
           </Button>
         </Space>
       }
     >
       <Space direction="vertical" size={8} style={{ width: '100%' }}>
         <Space wrap size={12}>
-          <Field label="站标识" width={180}>
+          <Field label={t('sc.stationId')} width={180}>
             <Input
               value={station.station_id}
               disabled={frozen}
-              placeholder="station_id（唯一、必填）"
+              placeholder={t('sc.stationIdPlaceholder')}
               onChange={(e) => onChange({ station_id: e.target.value })}
             />
           </Field>
-          <Field label="站名" width={180}>
+          <Field label={t('sc.stationName')} width={180}>
             <Input
               value={station.station_name}
               disabled={frozen}
               onChange={(e) => onChange({ station_name: e.target.value })}
             />
           </Field>
-          <Field label="绑定地址" width={160}>
+          <Field label={t('sc.bind')} width={160}>
             <Input
               value={station.host}
               disabled={frozen}
@@ -106,7 +108,7 @@ export function StationCard({ station, index, frozen, onChange, onRemove }: Prop
               onChange={(e) => onChange({ host: e.target.value })}
             />
           </Field>
-          <Field label="端口" width={120}>
+          <Field label={t('sc.port')} width={120}>
             <InputNumber
               min={0}
               max={65535}
@@ -116,7 +118,7 @@ export function StationCard({ station, index, frozen, onChange, onRemove }: Prop
               onChange={(v) => onChange({ port: number(v, 2404) })}
             />
           </Field>
-          <Field label="公共地址" width={110}>
+          <Field label={t('sc.addr')} width={110}>
             <InputNumber
               min={0}
               style={{ width: '100%' }}
@@ -125,7 +127,7 @@ export function StationCard({ station, index, frozen, onChange, onRemove }: Prop
               onChange={(v) => onChange({ common_addr: number(v, 1) })}
             />
           </Field>
-          <Field label="最大连接" width={110}>
+          <Field label={t('sc.maxConn')} width={110}>
             <InputNumber
               min={0}
               style={{ width: '100%' }}
@@ -143,32 +145,32 @@ export function StationCard({ station, index, frozen, onChange, onRemove }: Prop
           items={[
             {
               key: 'points',
-              label: '点表与模拟',
+              label: t('sc.pointsSim'),
               children: (
                 <Space direction="vertical" size={8} style={{ width: '100%' }}>
                   <Space wrap size={12}>
-                    <Field label="自动生成点表" width={60}>
+                    <Field label={t('sc.autoGen')} width={60}>
                       <Switch
                         size="small"
-                        aria-label={`自动生成点表-${station.station_id}`}
+                        aria-label={t('sc.autoGenAria', { id: station.station_id })}
                         checked={Boolean(station.auto_generate)}
                         disabled={frozen}
                         onChange={(v) => onChange({ auto_generate: v })}
                       />
                     </Field>
                     {!station.auto_generate ? (
-                      <Field label="点表文件" width={280}>
+                      <Field label={t('sc.pointFile')} width={280}>
                         <Input
                           value={station.point_table_file}
                           disabled={frozen}
-                          placeholder="点表 YAML / CSV 路径"
+                          placeholder={t('sc.pointFilePlaceholder')}
                           onChange={(e) => onChange({ point_table_file: e.target.value })}
                         />
                       </Field>
                     ) : null}
                   </Space>
                   <Space wrap size={12}>
-                    <Field label="YX 数" width={100}>
+                    <Field label={t('sc.yxCount')} width={100}>
                       <InputNumber
                         min={0}
                         style={{ width: '100%' }}
@@ -177,7 +179,7 @@ export function StationCard({ station, index, frozen, onChange, onRemove }: Prop
                         onChange={(v) => onChange({ yx_count: number(v, 100) })}
                       />
                     </Field>
-                    <Field label="YC 数" width={100}>
+                    <Field label={t('sc.ycCount')} width={100}>
                       <InputNumber
                         min={0}
                         style={{ width: '100%' }}
@@ -186,7 +188,7 @@ export function StationCard({ station, index, frozen, onChange, onRemove }: Prop
                         onChange={(v) => onChange({ yc_count: number(v, 50) })}
                       />
                     </Field>
-                    <Field label="YK 数" width={100}>
+                    <Field label={t('sc.ykCount')} width={100}>
                       <InputNumber
                         min={0}
                         style={{ width: '100%' }}
@@ -195,7 +197,7 @@ export function StationCard({ station, index, frozen, onChange, onRemove }: Prop
                         onChange={(v) => onChange({ yk_count: number(v, 20) })}
                       />
                     </Field>
-                    <Field label="YM 数" width={100}>
+                    <Field label={t('sc.ymCount')} width={100}>
                       <InputNumber
                         min={0}
                         style={{ width: '100%' }}
@@ -209,22 +211,22 @@ export function StationCard({ station, index, frozen, onChange, onRemove }: Prop
                     <Space size={6}>
                       <Switch
                         size="small"
-                        aria-label={`自发上送-${station.station_id}`}
+                        aria-label={t('sc.spontaneousAria', { id: station.station_id })}
                         checked={Boolean(station.spontaneous_enabled)}
                         disabled={frozen}
                         onChange={(v) => onChange({ spontaneous_enabled: v })}
                       />
-                      <Typography.Text style={{ fontSize: 12 }}>自发上送</Typography.Text>
+                      <Typography.Text style={{ fontSize: 12 }}>{t('sc.spontaneous')}</Typography.Text>
                     </Space>
                     <Space size={6}>
                       <Switch
                         size="small"
-                        aria-label={`自动模拟-${station.station_id}`}
+                        aria-label={t('sc.autoSimAria', { id: station.station_id })}
                         checked={Boolean(station.simulation_enabled)}
                         disabled={frozen}
                         onChange={(v) => onChange({ simulation_enabled: v })}
                       />
-                      <Typography.Text style={{ fontSize: 12 }}>启动后自动模拟</Typography.Text>
+                      <Typography.Text style={{ fontSize: 12 }}>{t('sc.autoSim')}</Typography.Text>
                     </Space>
                   </Space>
                 </Space>
