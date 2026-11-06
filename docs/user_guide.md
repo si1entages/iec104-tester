@@ -39,7 +39,7 @@ IEC 60870-5-104 测试工具是一款面向电力系统 SCADA 调试和测试的
 | 数据模拟 | 手动/自动遥信遥测变化 |
 | 点表管理 | YAML 导入/导出，可视化编辑 |
 | 报文录制 | 支持 .i104/.json 格式，可导出 **pcap/pcapng**（Wireshark 直接打开） |
-| 网络模拟 | 丢包、延迟、乱序、损坏等异常 |
+| 网络模拟 | 丢包、延迟、乱序、损坏等异常（Web 状态页卡片 + CLI `sim_tool.py`） |
 | TLS 传输加密 | 证书/CA 校验、双向认证（mTLS）；**仅传输层加密，不等于 IEC 62351 合规**（见 [`tls.md`](tls.md)） |
 | 历史库 | 默认开启（SQLite 按角色分库），保留期/条数/容量三重清理，`--no-history` 关闭；Web「历史」页可查询与导出 |
 | 非标 TypeID | YAML 注册厂商私有类型即可编解码往返（未注册按标准回 COT=42） |
@@ -405,6 +405,22 @@ python sim_tool.py --preset poor_wifi --mode master --host 127.0.0.1
 # 自定义参数
 python sim_tool.py --loss 0.1 --delay 50 --corrupt 0.05 --mode master
 ```
+
+### Web UI（状态总览页）
+
+主站/子站 Web 均可：**状态总览 → 网络异常模拟**卡片。
+
+- 开关控制是否注入；引擎未启动也可启用——主站「连接」/子站「启动监听」时自动安装，
+  停止时自动卸载，下次启动按启用状态自动重装。
+- 预设下拉 +「应用预设」；或填写延迟/丢包/损坏/乱序/断线概率/限速与方向后
+  「应用自定义」。
+- 「断线」按钮手动触发一次断线（1–600 秒）；「重置统计」清零计数。
+- 卡片实时展示 RX/TX 的总数、丢帧、重复、乱序、损坏与断线次数。
+- REST：`GET/POST /api/simulation`、`POST /api/simulation/reset|disconnect`
+  （见 [`api_contract.md`](../webui/api_contract.md) §2.12）。
+
+> 注入点在**传输层回调**（TCP 客户端/服务端）：帧在进入协议处理前被延迟/丢弃/损坏，
+> 被丢弃的帧也不会出现在报文查看器；引擎的 raw_frame_callback（UI 观测点）不被包装。
 
 ### 参数说明
 
