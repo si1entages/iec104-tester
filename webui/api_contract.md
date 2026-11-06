@@ -196,6 +196,17 @@
 > 地址 / 逐个信息体 IOA+值+品质+时标）。解析失败段只记备注行，不抛 5xx；
 > `hex` 非法/过短返回 `{ok: false, error}`。前端报文查看器悬停 HEX 单元格时调用。
 
+### 2.10 一键诊断包
+
+| 方法 | 路径 | 请求 | 响应 |
+|------|------|------|------|
+| GET | `/api/diagnostics/export` | — | `application/zip` 附件（`Content-Disposition`） |
+
+> 包内固定包含 `manifest.json` / `status.json` / `config.json` / `logs.json` /
+> `frames.json` / `events.json` / `points.json` / `history.json` / `README.txt`。
+> `config.tls.keyfile` 脱敏为 `<redacted>`；日志/报文/点表可能含现场业务值，
+> 转发前请确认接收方。前端「运行状态」卡片提供下载按钮。
+
 ---
 
 ## 3. WebSocket `/ws`

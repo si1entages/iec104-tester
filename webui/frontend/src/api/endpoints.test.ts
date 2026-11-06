@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 
 import { describe, expect, it, vi } from 'vitest'
 
-import { api } from './endpoints'
+import { api, DIAGNOSTICS_EXPORT_URL } from './endpoints'
 
 // jsdom 环境下 import.meta.url 不是 file: 协议，故以 vitest 的 cwd（= vite root，
 // 即 webui/frontend）为基准定位契约文档与源码。
@@ -35,6 +35,10 @@ describe('REST 端点覆盖（与 api_contract.md 对齐）', () => {
 
   it('端点数量符合契约规模（35 REST + /api/schema）', () => {
     expect(documentedEndpoints().length).toBeGreaterThanOrEqual(35)
+  })
+
+  it('诊断包下载 URL 指向契约端点', () => {
+    expect(DIAGNOSTICS_EXPORT_URL).toBe('/api/diagnostics/export')
   })
 
   it('api 对象暴露全部端点分组', () => {

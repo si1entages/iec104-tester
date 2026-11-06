@@ -16,8 +16,9 @@ import {
   App as AntdApp,
 } from 'antd'
 import type { TableColumnsType } from 'antd'
+import { DownloadOutlined } from '@ant-design/icons'
 
-import { api } from '../api/endpoints'
+import { api, DIAGNOSTICS_EXPORT_URL } from '../api/endpoints'
 import {
   useCommand,
   useCommandNoArgs,
@@ -199,7 +200,16 @@ export function StatusPage() {
         </Col>
       </Row>
 
-      <Card title="运行状态" size="small" loading={statusQuery.isLoading}>
+      <Card
+        title="运行状态"
+        size="small"
+        loading={statusQuery.isLoading}
+        extra={
+          <Button size="small" icon={<DownloadOutlined />} href={DIAGNOSTICS_EXPORT_URL}>
+            导出诊断包
+          </Button>
+        }
+      >
         <Descriptions column={4} size="small" items={items} />
       </Card>
 
