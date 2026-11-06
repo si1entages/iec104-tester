@@ -10,6 +10,7 @@
 import argparse
 import json
 import logging
+import os
 import socket
 import subprocess
 import sys
@@ -111,7 +112,8 @@ def _open_browser_when_ready(
 
 def run_web(role: str, http_port: int | None = None, open_browser: bool = True,
             point_table=None, connection: dict | None = None,
-            history_db=None, engine_config=None) -> None:
+            history_db=None, engine_config=None,
+            http_host: str = "127.0.0.1", auth_token: str | None = None) -> None:
     """启动 Web 服务（阻塞）并在就绪后打开浏览器.
 
     Args:
@@ -127,14 +129,31 @@ def run_web(role: str, http_port: int | None = None, open_browser: bool = True,
             run_server → EngineBridge → EngineSession 传入引擎构造，使
             ``--tls*`` / 冗余等 CLI 配置在默认 Web 模式下真实生效；
             为 None 时 Web 层使用默认配置（与改动前行为一致）。
+        http_host: Web UI 监听地址（默认 127.0.0.1；0.0.0.0 会暴露到局域网）.
+        auth_token: 可选访问令牌；设置后 /api/* 与 /ws 需携带令牌.
     """
     from webui.server import run_server
 
     port = http_port if http_port is not None else _DEFAULT_HTTP_PORT.get(
         role, _DEFAULT_HTTP_PORT["master"]
     )
-    url = f"http://127.0.0.1:{port}/"
+    # 0.0.0.0/:: 是监听地址而非可访问地址：本机浏览器仍走回环地址
+    browse_host = "127.0.0.1" if http_host in ("0.0.0.0", "::", "") else http_host
+    url = f"http://{browse_host}:{port}/"
 
+    if http_host not in ("127.0.0.1", "localhost", "::1"):
+        print(
+            f"Web UI 监听 {http_host}:{port}（非本地回环）——"
+            + ("已启用访问令牌认证" if auth_token
+               else "未启用认证！请使用 --auth-token 或改回 127.0.0.1"),
+            flush=True,
+        )
+    if auth_token:
+        print(
+            f"Web UI 认证已启用：首次打开会提示输入令牌；也可直接访问 "
+            f"http://{browse_host}:{port}/app/?token=<token>",
+            flush=True,
+        )
     print(f"Web UI: {url}", flush=True)
     if open_browser:
         _open_browser_when_ready(url, port)
@@ -143,9 +162,9 @@ def run_web(role: str, http_port: int | None = None, open_browser: bool = True,
     print("关闭此窗口或按 Ctrl+C 停止服务", flush=True)
 
     try:
-        run_server(role, "127.0.0.1", port, point_table=point_table,
+        run_server(role, http_host, port, point_table=point_table,
                    connection=connection, history_db=history_db,
-                   app_config=engine_config)
+                   app_config=engine_config, auth_token=auth_token)
     except KeyboardInterrupt:
         pass
 
@@ -279,6 +298,12 @@ def _run_demo(args) -> int:
     master_url = f"http://127.0.0.1:{master_http}/"
     slave_url = f"http://127.0.0.1:{slave_http}/"
 
+    # 演示模式的两个子进程只监听 127.0.0.1，且 _demo_connect 不带令牌；
+    # 为保证一键演示可用，--auth-token/--http-host 在演示模式下不生效。
+    if args.auth_token or args.http_host not in ("127.0.0.1", "localhost", "::1"):
+        print("提示：演示模式仅监听 127.0.0.1，不启用访问令牌"
+              "（--auth-token / --http-host 已忽略）", flush=True)
+
     print("启动演示环境（子站 + 主站）...", flush=True)
     try:
         procs.append(subprocess.Popen(slave_cmd))
@@ -406,6 +431,16 @@ def cli(default_role: str | None = None) -> int:
     parser.add_argument(
         "--http-port", type=int, default=None,
         help="Web UI HTTP 端口 (默认主站 8765 / 子站 8766)"
+    )
+    parser.add_argument(
+        "--http-host", type=str, default="127.0.0.1",
+        help="Web UI 监听地址 (默认 127.0.0.1；0.0.0.0 会暴露到局域网)"
+    )
+    parser.add_argument(
+        "--auth-token", type=str,
+        default=os.environ.get("IEC104_AUTH_TOKEN") or None,
+        help="Web API 访问令牌（可选）；设置后 REST/WS 需携带令牌；"
+             "默认读环境变量 IEC104_AUTH_TOKEN"
     )
     parser.add_argument(
         "--no-browser", action="store_true",
@@ -604,7 +639,8 @@ def cli(default_role: str | None = None) -> int:
         }
         run_web(role, args.http_port, open_browser=not args.no_browser,
                 point_table=point_table, connection=connection,
-                history_db=history_db, engine_config=config)
+                history_db=history_db, engine_config=config,
+                http_host=args.http_host, auth_token=args.auth_token)
         return 0
     finally:
         # 保证异常路径也会关闭历史数据库

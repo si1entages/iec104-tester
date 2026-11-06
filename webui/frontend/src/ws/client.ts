@@ -1,3 +1,4 @@
+import { getToken } from '../api/client'
 import type { WsMessage } from '../api/types'
 
 export type WsStatus = 'idle' | 'connecting' | 'open' | 'closed'
@@ -156,8 +157,11 @@ export class WsClient {
   }
 }
 
-/** 同源 WS 地址：dev 期由 vite 代理 /ws 到后端。 */
+/** 同源 WS 地址：dev 期由 vite 代理 /ws 到后端。启用访问令牌时以 query 携带。 */
 export function resolveWsUrl(path = '/ws'): string {
   const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
-  return `${scheme}://${window.location.host}${path}`
+  const token = getToken()
+  const sep = path.includes('?') ? '&' : '?'
+  const suffix = token ? `${sep}token=${encodeURIComponent(token)}` : ''
+  return `${scheme}://${window.location.host}${path}${suffix}`
 }

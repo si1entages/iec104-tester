@@ -6,6 +6,7 @@
 
 import { apiGet, apiGetText, apiPost, apiPostText } from './client'
 import type {
+  AuthProbeResponse,
   BatchPointsRequest,
   BitstringRequest,
   CommandResponse,
@@ -84,6 +85,9 @@ function historyQuery(
 export const api = {
   // ── 状态与点表 ───────────────────────────────────────────────────────
   schema: () => apiGet<SchemaResponse>('/api/schema'),
+  /** 认证探测（公开；契约 §2.13）：token 显式传入时用 query 携带 */
+  auth: (token?: string) =>
+    apiGet<AuthProbeResponse>('/api/auth', token ? { token } : undefined),
   status: () => apiGet<Status>('/api/status'),
   points: () => apiGet<PointsResponse>('/api/points'),
   recent: () => apiGet<RecentResponse>('/api/recent'),

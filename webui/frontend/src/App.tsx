@@ -3,6 +3,7 @@ import { Suspense, lazy, useEffect, useRef } from 'react'
 import { Spin } from 'antd'
 
 import { useStatusQuery } from './api/queries'
+import { AuthGate } from './components/AuthGate'
 import { useSchemaHandshake } from './hooks/useSchemaHandshake'
 import { useHashRoute } from './hooks/useHashRoute'
 import { ErrorBoundary } from './layout/ErrorBoundary'
@@ -48,26 +49,28 @@ export default function App() {
   }, [status?.role, setPage])
 
   return (
-    <AppLayout>
-      <Suspense fallback={<PageFallback />}>
-        {/* 页面级错误边界：单页抛错只影响本页（可重试/切页恢复），外壳不受牵连；
-            key=page 保证切页后边界状态重置 */}
-        <ErrorBoundary key={page}>
-          {page === 'master' ? (
-            <MasterPage />
-          ) : page === 'slave' ? (
-            <SlavePage />
-          ) : page === 'multi' ? (
-            <MultiPage />
-          ) : page === 'logs' ? (
-            <LogsPage />
-          ) : page === 'history' ? (
-            <HistoryPage />
-          ) : (
-            <StatusPage />
-          )}
-        </ErrorBoundary>
-      </Suspense>
-    </AppLayout>
+    <AuthGate>
+      <AppLayout>
+        <Suspense fallback={<PageFallback />}>
+          {/* 页面级错误边界：单页抛错只影响本页（可重试/切页恢复），外壳不受牵连；
+              key=page 保证切页后边界状态重置 */}
+          <ErrorBoundary key={page}>
+            {page === 'master' ? (
+              <MasterPage />
+            ) : page === 'slave' ? (
+              <SlavePage />
+            ) : page === 'multi' ? (
+              <MultiPage />
+            ) : page === 'logs' ? (
+              <LogsPage />
+            ) : page === 'history' ? (
+              <HistoryPage />
+            ) : (
+              <StatusPage />
+            )}
+          </ErrorBoundary>
+        </Suspense>
+      </AppLayout>
+    </AuthGate>
   )
 }

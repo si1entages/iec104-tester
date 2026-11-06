@@ -142,12 +142,13 @@ class TestBackwardCompatibleApi:
     def test_existing_positional_calls_still_valid(self):
         """旧调用位置参数不变：role/host/port/point_table/connection.
 
-        D3 在尾部新增 ``app_config``（默认 None，纯关键字参数），
-        既有位置参数调用不受影响。
+        D3 在尾部新增 ``app_config``，B7 再新增 ``auth_token``（均默认 None，
+        纯关键字参数），既有位置参数调用不受影响。
         """
         params = list(inspect.signature(run_server).parameters)
         assert params == ["role", "host", "port", "point_table",
-                          "connection", "history_db", "app_config"]
+                          "connection", "history_db", "app_config",
+                          "auth_token"]
 
 
 class TestWebModeEndToEnd:

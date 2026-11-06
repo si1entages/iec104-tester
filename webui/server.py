@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import hmac
 import io
 import json
 import logging
@@ -44,8 +45,38 @@ async def no_cache_pages(request: web.Request, handler) -> web.Response:
     return resp
 
 
-def create_app(bridge: EngineBridge) -> web.Application:
-    app = web.Application(middlewares=[no_cache_pages])
+def _extract_token(request: web.Request) -> str:
+    """从请求中提取访问令牌：Bearer 头 > X-Auth-Token 头 > ?token= 查询参数.
+
+    WS 无法自定义请求头，浏览器侧必须用 query 形态；REST 优先用请求头。
+    """
+    header = request.headers.get("Authorization", "")
+    if header.lower().startswith("bearer "):
+        return header[7:].strip()
+    return request.headers.get("X-Auth-Token", "") or request.query.get("token", "")
+
+
+def create_app(bridge: EngineBridge, auth_token: str | None = None) -> web.Application:
+    @web.middleware
+    async def token_auth(request: web.Request, handler) -> web.Response:
+        """可选访问令牌（B7）：保护 /api/* 与 /ws；静态页放行供前端令牌提示.
+
+        - 未配置 ``auth_token`` 时整体直通（默认行为，兼容旧用法）；
+        - ``GET /api/auth`` 公开，供前端探测「是否需要令牌 / 当前令牌是否有效」；
+        - 令牌比较用 ``hmac.compare_digest``（常数时间）。
+        """
+        if not auth_token:
+            return await handler(request)
+        if not (request.path.startswith("/api/") or request.path == "/ws"):
+            return await handler(request)
+        if request.path == "/api/auth":
+            return await handler(request)
+        provided = _extract_token(request)
+        if provided and hmac.compare_digest(provided, auth_token):
+            return await handler(request)
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+
+    app = web.Application(middlewares=[no_cache_pages, token_auth])
 
     async def index(request: web.Request) -> web.Response:
         """旧原生页（master.html/slave.html）已退役（T19）：一律进新前端 /app/."""
@@ -105,6 +136,15 @@ def create_app(bridge: EngineBridge) -> web.Application:
             "wsKinds": ["snapshot", "frame", "event", "log"],
             "wsSchemaKey": "schemaVersion",
         })
+
+    async def api_auth(request: web.Request) -> web.Response:
+        """认证探测（公开）：是否需要令牌、本次请求携带的令牌是否有效（B7）."""
+        required = auth_token is not None
+        valid = True
+        if required:
+            provided = _extract_token(request)
+            valid = bool(provided) and hmac.compare_digest(provided, auth_token)
+        return web.json_response({"ok": True, "required": required, "valid": valid})
 
     async def api_points(request: web.Request) -> web.Response:
         return web.json_response({"points": bridge.snapshot_points()})
@@ -841,6 +881,7 @@ def create_app(bridge: EngineBridge) -> web.Application:
 
     app.router.add_get("/", index)
     app.router.add_get("/api/schema", api_schema)
+    app.router.add_get("/api/auth", api_auth)
     app.router.add_get("/api/status", api_status)
     app.router.add_get("/api/points", api_points)
     app.router.add_get("/api/recent", api_recent)
@@ -905,11 +946,17 @@ def create_app(bridge: EngineBridge) -> web.Application:
 
 async def _run(role: str, host: str = "127.0.0.1", port: int = 8765,
                point_table=None, connection: dict | None = None,
-               history_db=None, app_config=None) -> None:
+               history_db=None, app_config=None,
+               auth_token: str | None = None) -> None:
+    if auth_token is None and host not in ("127.0.0.1", "localhost", "::1"):
+        logger.warning(
+            "Web UI 监听 %s 且未启用访问令牌：局域网内任何主机都可能调用 REST/WS"
+            "（含遥控、点表下发）。请用 --auth-token <token> 启用认证，"
+            "或改回 --http-host 127.0.0.1。", host)
     bridge = EngineBridge(role, point_table=point_table, connection=connection,
                           history_db=history_db, app_config=app_config)
     bridge.ensure_demo_points()
-    app = create_app(bridge)
+    app = create_app(bridge, auth_token=auth_token)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, host, port)
@@ -924,7 +971,8 @@ async def _run(role: str, host: str = "127.0.0.1", port: int = 8765,
 
 def run_server(role: str, host: str = "127.0.0.1", port: int = 8765,
                point_table=None, connection: dict | None = None,
-               history_db=None, app_config=None) -> None:
+               history_db=None, app_config=None,
+               auth_token: str | None = None) -> None:
     """启动 Web 服务（阻塞）.
 
     Args:
@@ -937,11 +985,13 @@ def run_server(role: str, host: str = "127.0.0.1", port: int = 8765,
         app_config: CLI / ``--config`` 解析出的 ``AppConfig``（D3 接线）；
             提供 TLS、冗余等配置经 EngineBridge → EngineSession 生效。
             None 时使用默认配置（与改动前行为一致）。
+        auth_token: 可选访问令牌；设置后 /api/* 与 /ws 需携带
+            ``Authorization: Bearer <token>`` / ``X-Auth-Token`` / ``?token=``。
     """
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     try:
         asyncio.run(_run(role, host, port, point_table=point_table,
                          connection=connection, history_db=history_db,
-                         app_config=app_config))
+                         app_config=app_config, auth_token=auth_token))
     except KeyboardInterrupt:
         pass

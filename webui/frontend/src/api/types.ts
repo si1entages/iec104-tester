@@ -569,6 +569,13 @@ export interface SimulationRequest {
   condition?: Partial<NetworkCondition>
 }
 
+/** 认证探测（契约 §2.13）：是否需要令牌、本次携带的令牌是否有效 */
+export interface AuthProbeResponse {
+  ok: boolean
+  required: boolean
+  valid: boolean
+}
+
 // ── WebSocket ──────────────────────────────────────────────────────────
 
 /** WS 信封：`{kind, schemaVersion, ts, data}` */

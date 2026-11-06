@@ -233,6 +233,18 @@
 | POST | `/api/simulation/reset` | — | `{ok}`（清零统计计数） |
 | POST | `/api/simulation/disconnect` | `duration?: number=5 (0<d≤600)` | `{ok, error?}`（仅已安装引擎时有效） |
 
+### 2.13 访问认证探测（B7）
+
+> 服务端以 `--auth-token`（或环境变量 `IEC104_AUTH_TOKEN`）启动时，**除本端点外**
+> 所有 `/api/*` 与 `/ws` 均需携带令牌，缺失/错误返回 **401** `{ok:false, error:"unauthorized"}`。
+> 三种携带形态：`Authorization: Bearer <token>`、`X-Auth-Token: <token>`、`?token=<token>`
+> （WS 无法自定义头，浏览器必须用 query）。静态页 `/app/*` 不拦截，供前端弹出令牌输入框。
+> 未配置令牌时本端点返回 `required=false, valid=true`，其余行为与旧版一致。
+
+| 方法 | 路径 | 请求 | 响应 |
+|------|------|------|------|
+| GET | `/api/auth` | 可带令牌（上述三种形态之一） | `{ok, required: bool, valid: bool}` |
+
 ---
 
 ## 3. WebSocket `/ws`

@@ -16,6 +16,18 @@ export class ApiError extends Error {
 
 export type QueryValue = string | number | boolean | null | undefined
 
+/** 访问令牌在 localStorage 的键（B7：服务端 --auth-token 启用时使用） */
+export const TOKEN_KEY = 'iec104_token'
+
+/** 读取本地保存的访问令牌（无 / 存储不可用时返回空串） */
+export function getToken(): string {
+  try {
+    return localStorage.getItem(TOKEN_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
 /** 拼接查询串；空值（undefined/null/空串）自动跳过。 */
 export function buildUrl(path: string, params?: Record<string, QueryValue>): string {
   const url = path.startsWith('/') ? path : `/${path}`
@@ -63,6 +75,8 @@ interface RequestOptions {
 
 async function send(method: string, path: string, options: RequestOptions = {}): Promise<Response> {
   const headers: Record<string, string> = {}
+  const token = getToken()
+  if (token) headers['Authorization'] = `Bearer ${token}`
   const init: RequestInit = { method, headers }
   if (options.text !== undefined) {
     headers['Content-Type'] = options.contentType ?? 'text/plain;charset=utf-8'
