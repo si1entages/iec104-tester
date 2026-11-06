@@ -26,7 +26,7 @@ tests/
   python -m pytest tests/test_asdu.py -q   # 单文件
   ```
 
-- 当前基线：**1308 passed**（`tests/` 全量，`perf` 默认排除）。
+- 当前基线：**1381 passed**（`tests/` 全量，`perf` 默认排除）。
 
 ### 覆盖率
 
@@ -36,9 +36,9 @@ tests/
 python -m pytest tests/ -q --cov=core --cov-branch --cov-report=term-missing
 ```
 
-- **当前实测分支覆盖率：88.8%**。
-- **CI 门禁**：`--cov-fail-under=88`（低于实测约 1 个点，避免跨 Python 版本/环境的正常抖动导致误红）。
-- **提升目标：已达 85%**（当前 88.8%）。**注意：总数字会掩盖分布问题**，故下面把全部未达
+- **当前实测分支覆盖率：92.08%**。
+- **CI 门禁**：`--cov-fail-under=91`（低于实测约 1 个点，避免跨 Python 版本/环境的正常抖动导致误红）。
+- **提升目标：已达 85%**（当前 92.1%）。**注意：总数字会掩盖分布问题**，故下面把全部未达
   85% 的单模块列成**待后续补测清单**（覆盖率与缺口为测量时点值，精确行号见
   `python -m pytest tests/ -q --cov=core --cov-branch --cov-report=term-missing` 的 `Missing` 列）。
 
@@ -161,7 +161,7 @@ python -m pytest tests/ -q --cov=core --cov-branch --cov-report=term-missing
 # 静态检查 + 单元/集成测试（提交前必跑）
 python -m ruff check .
 python -m pytest tests/ -q --basetemp=.pytest-tmp
-python -m pytest tests/ -q --cov=core --cov-branch --cov-report=term-missing --cov-fail-under=88
+python -m pytest tests/ -q --cov=core --cov-branch --cov-report=term-missing --cov-fail-under=91
 
 # 发版前可选：性能基准 + 变异冒烟
 python -m pytest tests/perf -m perf -q

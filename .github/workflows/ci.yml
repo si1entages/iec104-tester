@@ -38,7 +38,7 @@ jobs:
         # 清空重建），避免默认的共享临时根（如 %TEMP%/pytest-of-<user>）无界累积
         # pytest-N / garbage-* 目录。累积到一定数量会拖慢收集，并在带「批量删除
         # 需确认」类安全钩子的环境里截断输出、把退出码变成 1（假失败）。
-        run: pytest tests/ -q --cov=core --cov-branch --cov-report=term-missing --cov-fail-under=88 --basetemp=.pytest-tmp
+        run: pytest tests/ -q --cov=core --cov-branch --cov-report=term-missing --cov-fail-under=91 --basetemp=.pytest-tmp
 
   # 协议层变异冒烟（12 个高价值变异，约 10s）：防止测试对编解码边界“假绿”。
   mutation-smoke:

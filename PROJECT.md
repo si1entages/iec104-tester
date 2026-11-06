@@ -78,7 +78,7 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - 协议完整性: `TypeID` 枚举里**每个类型都必须同时有解码注册与 ASDUBuilder 构造器**（否则就是"能解不能发"的半实现）；新增类型时用 `tests/test_protocol_type_coverage.py` 的护栏用例兜底
 
 ### 测试
-- 单元测试: tests/test_*.py（**1308 例**；`tests/perf/` 由 `-m "not perf"` 默认排除）
+- 单元测试: tests/test_*.py（**1381 例**；`tests/perf/` 由 `-m "not perf"` 默认排除）
 - 协议 fuzz: tests/test_protocol_fuzz.py（Hypothesis；解码器只允许 `ValueError`）
 - 互操作回放: tests/test_frame_corpus_replay.py + tests/fixtures/frames/（golden + MasterEngine 回放）
 - 性能/长稳: `pytest tests/ -m perf`（解码吞吐 / 10 万点快照 / 环回 soak，时长由 `IEC104_SOAK_SECONDS` 控制）
@@ -133,11 +133,12 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - [x] 性能/长稳基准：`tests/perf/`（解码吞吐、10 万点快照、**20 客户端并发约 2.9k 帧/秒**、主站↔子站环回 soak；默认 `-m "not perf"`；**2h soak 实跑通过：7200s / 34,765 GI / 内存 +0.64 MB**）
 - [x] 一键诊断包：`GET /api/diagnostics/export`（状态/配置脱敏/日志/报文/事件/点表/历史统计）+ 状态页按钮
 - [x] 一键环回 Demo：`python app.py --demo`（子站+主站独立子进程、自动监听/连接/总召，Ctrl+C 统一回收）
-- [x] 分支覆盖率门禁（CI `--cov-branch`，当前 88.8%）+ 协议层变异冒烟 `tools/mutation_smoke.py`（12/12 killed）
+- [x] 分支覆盖率门禁（CI `--cov-branch`，当前 92.1%）+ 协议层变异冒烟 `tools/mutation_smoke.py`（12/12 killed）
 - [x] 历史库查询 UI：`GET /api/history/{stats,data,frames,export}`（§2.11/§4.9）+ Web「历史」页（数据/报文双页签，时间/类型/IOA/方向过滤，CSV 导出；未启用提示）；`tests/test_webui_history_endpoints.py` 4 例 + `HistoryPage.test.tsx` 3 例；全量 1288 passed
 - [x] 网络异常模拟接入 Web UI：`/api/simulation`（GET/POST + reset/disconnect，§2.12/§4.10）+ 状态页卡片（预设/自定义/手动断线/统计）；**核心修复**：`SimulationManager.install` 原二次包装 raw 回调会覆盖代理 `_original_rx`，导致 RX 帧绕过协议处理——改为在传输层回调（`_client/_server._on_frame`）拦截并提供 `uninstall_from_engine` 精确恢复；新增 4 后端 + 3 前端用例；全量 1293 passed
 - [x] Web 访问安全（B7）：`--http-host`（默认 127.0.0.1）+ `--auth-token`（或 `IEC104_AUTH_TOKEN`）；令牌保护 `/api/*` 与 `/ws`（Bearer / X-Auth-Token / `?token=`），`GET /api/auth` 公开探测；前端 AuthGate 令牌输入 + URL `?token=` 导入；非回环监听且无令牌时启动告警；新增 4 后端 + 2 前端用例；全量 1297 passed
 - [x] 一致性套件接入 pytest：`tests/test_conformance_suite.py` 按套件 `_test_*` 方法参数化（失败输出具体 case id）+ 汇总用例锁死 42 case/零 FAIL/ERROR/SKIP；独立 runner 保留；全量 1308 passed
+- [x] 分支覆盖率 88.86%→92.08%：补 `scheduler`（47%→97%）、`data_store`（83.6%→95%）、`master_session`（77.5%→92%）、`multi_station`（80.6%→98%）及协议层零散分支（types/asdu 负数编码、短报文异常、时标变体、自定义类型校验、APDU 编解码）；新增 73 例；CI 门禁 88→91（保留约 1 点抖动余量）；全量 1381 passed
 
 ## 双应用入口（纯 Web UI）
 

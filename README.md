@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/WebUI-aiohttp-41CD52" alt="Web UI">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/IEC--104-72%20TypeIDs-brightgreen.svg" alt="IEC 104">
-  <img src="https://img.shields.io/badge/Tests-1308-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-1381-brightgreen.svg" alt="Tests">
 </p>
 
 ---
@@ -62,7 +62,7 @@
 - **报文导出**：`.i104` / `.json` / **pcap / pcapng**（Wireshark 可直接打开）
 - **一键诊断包**：状态/配置（私钥脱敏）/日志/报文/事件/点表/历史统计打包下载（状态页按钮或 `GET /api/diagnostics/export`）
 - **一键环回演示**：`python app.py --demo`（本机子站+主站自动监听/连接/总召）
-- 质量门禁：互操作语料库回放、Hypothesis fuzz、20 客户端并发、2h 环回 soak、分支覆盖 88.82%、协议层变异 12/12
+- 质量门禁：互操作语料库回放、Hypothesis fuzz、20 客户端并发、2h 环回 soak、分支覆盖 92.08%、协议层变异 12/12
 - 多站并发（`run_multi_station.py`）、网络异常模拟（**Web 状态页卡片** / `sim_tool.py`）、YAML 自动化测试（`run_tests.py`）
 
 ### 打包与发布
@@ -218,8 +218,8 @@ custom_types: []   # 非标厂商私有 TypeID 注册
 ## 🧪 测试
 
 ```bash
-python -m pytest tests/ -q              # 单元 + 集成（1308 例；性能基准默认排除）
-python -m pytest tests/ -q --cov=core --cov-branch --cov-report=term-missing --cov-fail-under=88
+python -m pytest tests/ -q              # 单元 + 集成（1381 例；性能基准默认排除）
+python -m pytest tests/ -q --cov=core --cov-branch --cov-report=term-missing --cov-fail-under=91
 python -m pytest tests/ -m perf -q      # 性能基准（解码/10 万点/20 客户端并发/环回 soak）
 IEC104_SOAK_SECONDS=7200 python -m pytest tests/perf/test_soak_loopback.py -m perf -q
 python run_tests.py tests/scripts/      # YAML 脚本
@@ -228,7 +228,7 @@ python tests/e2e/qa_full_flow.py        # 全流程验收
 python tools/mutation_smoke.py          # 协议层变异冒烟（12/12 必须被杀死）
 ```
 
-- 当前基线：**1308 passed，4 deselected**；`core/` 分支覆盖率 **88.82%**（门禁 88%）
+- 当前基线：**1381 passed，4 deselected**；`core/` 分支覆盖率 **92.08%**（门禁 91%）
 - 20 客户端并发实测约 **2.9k 帧/秒**；2h soak 实测 **7200s / 34,765 次 GI / 内存 +0.64 MB**
 - 互操作语料库：`tests/fixtures/frames/`（合成基线 + `real/` 真机目录），
   `tests/test_frame_corpus_replay.py` 做 golden 解码与主站回放回归；

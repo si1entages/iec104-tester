@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/WebUI-aiohttp-41CD52" alt="Web UI">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/IEC--104-72%20TypeIDs-brightgreen.svg" alt="IEC 104">
-  <img src="https://img.shields.io/badge/Tests-1308-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-1381-brightgreen.svg" alt="Tests">
 </p>
 
 ---
@@ -160,8 +160,8 @@ python run_multi_station.py --stations 3
 ## Tests
 
 ```bash
-python -m pytest tests/ -q              # unit + integration (1308; perf excluded)
-python -m pytest tests/ -q --cov=core --cov-branch --cov-report=term-missing --cov-fail-under=88
+python -m pytest tests/ -q              # unit + integration (1381; perf excluded)
+python -m pytest tests/ -q --cov=core --cov-branch --cov-report=term-missing --cov-fail-under=91
 python -m pytest tests/ -m perf -q      # decode / 100k snapshot / 20 clients / soak
 IEC104_SOAK_SECONDS=7200 python -m pytest tests/perf/test_soak_loopback.py -m perf -q
 python run_tests.py tests/scripts/
@@ -171,7 +171,7 @@ python tests/e2e/qa_real_device.py
 python tools/mutation_smoke.py
 ```
 
-- Baseline: **1308 passed, 4 deselected**; `core/` branch coverage **88.82%** (gate 88%)
+- Baseline: **1381 passed, 4 deselected**; `core/` branch coverage **92.08%** (gate 91%)
 - 20-client concurrency: about **2.9k frames/s**; 2-hour soak: **7200s / 34,765 GI /
   +0.64 MB memory**
 - Interop corpus: `tests/fixtures/frames/` (synthetic baseline + `real/` for user-provided
