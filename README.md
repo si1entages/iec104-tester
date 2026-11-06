@@ -84,7 +84,16 @@ python app.py --mode master --no-browser --http-port 8765
 服务启动后会在默认浏览器自动打开对应页面；用 `--no-browser` 可关闭自动打开。
 联调：开两个终端分别启动主站与子站 → 子站页「启动监听」→ 主站页「连本地」→「立即总召」。
 
-### 最小联调示例（一条命令起子站 + 主站连接总召）
+### 一键环回演示（推荐首次体验）
+
+```bash
+python app.py --demo
+```
+
+一条命令在本机同时启动子站与主站（不同 HTTP 端口），自动完成「子站监听 → 主站连接 →
+总召」，并打开主站页面；历史库自动关闭，Ctrl+C 停止全部进程。
+
+### 手动联调示例（两个终端）
 
 ```bash
 # 终端 1：子站（默认生成演示点表，历史库开启）
@@ -116,6 +125,10 @@ pip install -r requirements.txt
 # 兼容入口（启动 Web 服务）
 python app.py --mode master
 python app.py --mode slave --port 2404
+
+# 一键环回演示（本机子站+主站，自动连接并总召）
+python app.py --demo
+python app.py --demo --demo-seconds 30 --no-browser   # 30s 后自动停止
 
 # 无界面引擎
 python app.py --mode slave --no-gui --log-level DEBUG
@@ -156,6 +169,8 @@ python sim_tool.py --preset poor_wifi --mode master --host 127.0.0.1
 | `--test` | 运行自动化测试脚本 (YAML 文件或目录) | — |
 | `--http-port` | Web UI HTTP 端口 | 主站 8765 / 子站 8766 |
 | `--no-browser` | 启动 Web 服务时不自动打开浏览器 | false |
+| `--demo` | 一键环回演示：本机子站+主站并自动连接 | false |
+| `--demo-seconds` | 演示运行 N 秒后自动停止（0=直到 Ctrl+C） | 0 |
 | `--tls` | 启用 TLS 传输加密 | false |
 | `--tls-cert` / `--tls-key` | 本端证书 / 私钥 (PEM) | — |
 | `--tls-ca` | 受信 CA (PEM) | — |
@@ -163,7 +178,7 @@ python sim_tool.py --preset poor_wifi --mode master --host 127.0.0.1
 | `--verify-client` | 子站要求并校验客户端证书（mTLS） | false |
 | `--tls-hostname` | 主站 TLS 主机名校验域名 | — |
 
-> 共 23 个参数，与 `python app.py --help` 一致。`--http-port` / `--no-browser` 仅 Web UI 入口生效。
+> 共 22 个参数，与 `python app.py --help` 一致。`--http-port` / `--no-browser` / `--demo` 仅 Web UI 入口生效。
 
 ## ⚙️ 配置
 
@@ -186,10 +201,17 @@ custom_types: []   # 非标厂商私有 TypeID 注册
 ## 🧪 测试
 
 ```bash
-python -m pytest tests/ -q          # 单元 + 集成（1151 例，含 Web API、协议符合性、TLS、类型覆盖）
-python run_tests.py tests/scripts/  # YAML 脚本
-python tests/e2e/qa_full_flow.py    # 全流程验收
+python -m pytest tests/ -q              # 单元 + 集成（1281 例；性能基准默认排除）
+python -m pytest tests/ -m perf -q      # 性能基准（解码/10 万点/20 客户端并发/环回 soak）
+python run_tests.py tests/scripts/      # YAML 脚本
+python tests/e2e/qa_full_flow.py        # 全流程验收
+python tools/mutation_smoke.py          # 协议层变异冒烟（12/12 必须被杀死）
 ```
+
+- 互操作语料库：`tests/fixtures/frames/`（合成基线 + `real/` 真机目录），
+  `tests/test_frame_corpus_replay.py` 做 golden 解码与主站回放回归；
+- 协议 fuzz：`tests/test_protocol_fuzz.py`（Hypothesis；畸形输入只允许 `ValueError`）；
+- 诊断包：Web 状态页「导出诊断包」或 `GET /api/diagnostics/export`。
 
 ## 🏗 项目结构
 

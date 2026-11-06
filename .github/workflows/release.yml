@@ -1,0 +1,154 @@
+name: Release
+
+# 打 tag（v*）即发布：校验 tag 与 pyproject.version 一致 → 双平台打包 →
+# 真实启动冒烟 → 生成 SHA256SUMS → GitHub Release（自动生成 release notes）。
+#
+# 手工补发：Actions → Release → Run workflow，填写已存在的 tag。
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要发布的已存在 tag（例如 v1.0.0）"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  meta:
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - id: meta
+        name: Validate tag matches pyproject version
+        shell: bash
+        run: |
+          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          python -c 'import sys,tomllib; v=tomllib.load(open("pyproject.toml","rb"))["project"]["version"]; t=sys.argv[1].lstrip("v"); raise SystemExit(f"tag {t} != pyproject {v}" if t != v else 0)' "$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: meta
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: release-windows-x64
+            archive: "iec104-tester-${{ needs.meta.outputs.tag }}-windows-x64.zip"
+          - os: ubuntu-24.04
+            artifact: release-linux-x64
+            archive: "iec104-tester-${{ needs.meta.outputs.tag }}-linux-x64.tar.gz"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.meta.outputs.tag }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: webui/frontend/package-lock.json
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+      - name: Build frontend
+        working-directory: webui/frontend
+        run: |
+          npm ci
+          npm run build
+      - name: Build one-file executables
+        run: python build/build_all.py --skip-frontend --onefile
+
+      # ── 打包产物真实启动冒烟（不是只看文件存在）────────────────
+      - name: Smoke packaged master (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $proc = Start-Process -FilePath "dist/iec104-master.exe" -ArgumentList @("--no-browser", "--no-history", "--http-port", "18765") -PassThru
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 90; $i++) {
+              Start-Sleep -Seconds 1
+              try {
+                $status = Invoke-RestMethod -Uri "http://127.0.0.1:18765/api/status" -TimeoutSec 2
+                if ($status.role -eq "master") { $ready = $true; break }
+              } catch {}
+            }
+            if (-not $ready) { throw "packaged master did not become ready" }
+            $app = Invoke-WebRequest -Uri "http://127.0.0.1:18765/app/" -UseBasicParsing -TimeoutSec 5
+            if ($app.StatusCode -ne 200) { throw "SPA /app/ returned $($app.StatusCode)" }
+          } finally {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          }
+      - name: Smoke packaged master (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          ./dist/iec104-master --no-browser --no-history --http-port 18765 &
+          PID=$!
+          trap "kill $PID 2>/dev/null || true" EXIT
+          ready=0
+          for i in $(seq 1 90); do
+            sleep 1
+            if python -c 'import json,sys,urllib.request; d=json.load(urllib.request.urlopen("http://127.0.0.1:18765/api/status", timeout=2)); sys.exit(0 if d.get("role")=="master" else 1)' 2>/dev/null; then
+              ready=1; break
+            fi
+          done
+          if [ "$ready" != "1" ]; then echo "packaged master did not become ready"; exit 1; fi
+          curl -fsS -o /dev/null "http://127.0.0.1:18765/app/"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist/iec104-master.exe", "dist/iec104-slave.exe" -DestinationPath "${{ matrix.archive }}"
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          tar -czf "${{ matrix.archive }}" -C dist iec104-master iec104-slave
+      - name: Upload release archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.archive }}
+          if-no-files-found: error
+
+  release:
+    needs: [meta, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download release archives
+        uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Generate checksums
+        working-directory: artifacts
+        run: sha256sum *.zip *.tar.gz > SHA256SUMS.txt
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.meta.outputs.tag }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" artifacts/*.zip artifacts/*.tar.gz artifacts/SHA256SUMS.txt --clobber
+          else
+            gh release create "$TAG" \
+              artifacts/*.zip artifacts/*.tar.gz artifacts/SHA256SUMS.txt \
+              --title "$TAG" --generate-notes
+          fi

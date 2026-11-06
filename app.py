@@ -8,11 +8,14 @@
 """
 
 import argparse
+import json
 import logging
 import socket
+import subprocess
 import sys
 import threading
 import time
+import urllib.request
 import webbrowser
 from pathlib import Path
 
@@ -147,6 +150,203 @@ def run_web(role: str, http_port: int | None = None, open_browser: bool = True,
         pass
 
 
+# ═══════════════════════════════════════════════════════════════════
+#  一键环回演示（--demo）
+# ═══════════════════════════════════════════════════════════════════
+
+def _port_free(port: int, host: str = "127.0.0.1") -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        try:
+            sock.bind((host, port))
+            return True
+        except OSError:
+            return False
+
+
+def _pick_port(preferred: int | None = None,
+               exclude: set[int] | None = None) -> int:
+    """优先用 preferred；被占用时退回系统分配的空闲端口."""
+    exclude = exclude or set()
+    if preferred and preferred not in exclude and _port_free(preferred):
+        return preferred
+    for _ in range(50):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = int(sock.getsockname()[1])
+        if port not in exclude:
+            return port
+    raise RuntimeError("无法分配空闲端口")
+
+
+def _http_json(port: int, path: str = "/api/status", timeout: float = 1.0):
+    """GET 一个本地 Web 端点；不可达时返回 None."""
+    try:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}{path}", timeout=timeout
+        ) as resp:
+            return json.loads(resp.read().decode("utf-8") or "{}")
+    except Exception:
+        return None
+
+
+def _post_json(port: int, path: str, payload: dict | None = None) -> dict:
+    """POST JSON；失败时返回 ``{ok: False, error}`` 而不是抛异常."""
+    body = json.dumps(payload or {}).encode("utf-8")
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}{path}", data=body,
+        headers={"Content-Type": "application/json"}, method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            return json.loads(resp.read().decode("utf-8") or "{}")
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
+def _wait_http(ports: list[int], timeout: float = 45.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if all(_http_json(port) is not None for port in ports):
+            return True
+        time.sleep(0.2)
+    return False
+
+
+def _wait_master_running(port: int, timeout: float = 15.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        status = _http_json(port)
+        if status and status.get("started") and status.get("running"):
+            return True
+        time.sleep(0.2)
+    return False
+
+
+def _demo_commands(args, master_http: int, slave_http: int,
+                   iec_port: int) -> tuple[list[str], list[str]]:
+    """构造两个角色的子进程命令（独立测试用）."""
+    root = Path(__file__).resolve().parent
+    if getattr(sys, "frozen", False):
+        base = [sys.executable]
+    else:
+        base = [sys.executable, str(root / "app.py")]
+    common = ["--no-browser", "--no-history", "--log-level", args.log_level]
+    if args.config:
+        common += ["--config", args.config]
+    if args.point_table:
+        common += ["--point-table", args.point_table]
+    slave = base + [
+        "--mode", "slave", "--host", "127.0.0.1",
+        "--http-port", str(slave_http), "--port", str(iec_port),
+    ] + common
+    master = base + [
+        "--mode", "master", "--host", "127.0.0.1",
+        "--http-port", str(master_http), "--port", str(iec_port),
+    ] + common
+    return slave, master
+
+
+def _demo_connect(slave_http: int, master_http: int,
+                  iec_port: int) -> tuple[bool, str]:
+    """让演示子站监听、主站连接并总召；返回 (成功, 错误信息)."""
+    slave = _post_json(slave_http, "/api/slave/start",
+                       {"host": "127.0.0.1", "port": iec_port, "addr": 1})
+    if not slave.get("ok"):
+        return False, f"子站监听失败：{slave.get('error', '未知错误')}"
+
+    master = _post_json(master_http, "/api/master/start",
+                        {"host": "127.0.0.1", "port": iec_port, "addr": 1})
+    if not master.get("ok"):
+        return False, f"主站连接失败：{master.get('error', '未知错误')}"
+    if not _wait_master_running(master_http):
+        return False, "主站未进入运行态"
+    _post_json(master_http, "/api/master/gi", {"qoi": 20})
+    return True, ""
+
+
+def _run_demo(args) -> int:
+    """启动本地子站 + 主站，自动连接并总召，打开主站页面.
+
+    父进程只负责编排与回收；两个角色各自独立进程/事件循环，避免共享状态。
+    """
+    master_http = _pick_port(args.http_port or _DEFAULT_HTTP_PORT["master"])
+    slave_preferred = master_http + 1 if master_http < 65535 else None
+    slave_http = _pick_port(slave_preferred, exclude={master_http})
+    iec_port = _pick_port(args.port or 2404, exclude={master_http, slave_http})
+
+    slave_cmd, master_cmd = _demo_commands(args, master_http, slave_http, iec_port)
+    procs: list[subprocess.Popen] = []
+    master_url = f"http://127.0.0.1:{master_http}/"
+    slave_url = f"http://127.0.0.1:{slave_http}/"
+
+    print("启动演示环境（子站 + 主站）...", flush=True)
+    try:
+        procs.append(subprocess.Popen(slave_cmd))
+        procs.append(subprocess.Popen(master_cmd))
+
+        if not _wait_http([slave_http, master_http]):
+            print("演示启动超时：请检查端口/依赖是否正常", flush=True)
+            return 1
+        dead = [p for p in procs if p.poll() is not None]
+        if dead:
+            print(f"演示进程提前退出（退出码 {dead[0].returncode}）", flush=True)
+            return 1
+
+        # 端口检查与实际 bind 之间存在竞态；失败时换一个 IEC 端口重试一次，
+        # 避免演示因本机临时端口占用而永久停在"未连接"。
+        connected = False
+        last_error = ""
+        for attempt in range(2):
+            connected, last_error = _demo_connect(slave_http, master_http, iec_port)
+            if connected:
+                break
+            print(f"演示连接失败（第 {attempt + 1} 次）：{last_error}", flush=True)
+            _post_json(master_http, "/api/master/stop")
+            _post_json(slave_http, "/api/slave/stop")
+            time.sleep(0.5)
+            iec_port = _pick_port(
+                None, exclude={master_http, slave_http},
+            )
+
+        if not connected:
+            print(f"自动连接失败：{last_error}（可在页面手动连接）", flush=True)
+
+        banner = "演示环境已就绪：" if connected else "演示环境已启动（自动连接失败）："
+        print(
+            f"\n{banner}\n"
+            f"  主站 UI: {master_url}\n"
+            f"  子站 UI: {slave_url}\n"
+            f"  IEC 104: 127.0.0.1:{iec_port}（公共地址 1）\n"
+            "按 Ctrl+C 停止全部进程\n",
+            flush=True,
+        )
+        if not args.no_browser:
+            webbrowser.open(master_url)
+
+        deadline = (time.monotonic() + args.demo_seconds
+                    if args.demo_seconds > 0 else None)
+        while all(p.poll() is None for p in procs):
+            if deadline is not None and time.monotonic() >= deadline:
+                print(f"演示时间到（{args.demo_seconds:.0f}s），停止 ...", flush=True)
+                break
+            time.sleep(0.5)
+        return 0
+    except KeyboardInterrupt:
+        print("\n正在停止演示环境 ...", flush=True)
+        return 0
+    finally:
+        for proc in procs:
+            if proc.poll() is None:
+                proc.terminate()
+        deadline = time.monotonic() + 8
+        for proc in procs:
+            try:
+                proc.wait(timeout=max(0.1, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=3)
+
+
 def cli(default_role: str | None = None) -> int:
     """解析命令行参数并分派到对应的运行模式.
 
@@ -210,6 +410,14 @@ def cli(default_role: str | None = None) -> int:
     parser.add_argument(
         "--no-browser", action="store_true",
         help="启动 Web 服务时不自动打开浏览器"
+    )
+    parser.add_argument(
+        "--demo", action="store_true",
+        help="一键环回演示：本机同时启动子站+主站并自动连接（Ctrl+C 停止全部）"
+    )
+    parser.add_argument(
+        "--demo-seconds", type=float, default=0.0,
+        help="演示运行 N 秒后自动停止（默认 0=一直运行到 Ctrl+C；CI/演示录制用）"
     )
     parser.add_argument(
         "--tls", action="store_true",
@@ -297,6 +505,11 @@ def cli(default_role: str | None = None) -> int:
             logger.info(f"Registered {count} custom TypeID(s): {CUSTOM_TYPES.ids()}")
         except Exception as e:
             logger.error(f"Failed to register custom TypeIDs: {e}")
+
+    # 一键环回演示：父进程只做编排，两个 Web 角色各起独立子进程，
+    # 避免共享事件循环/全局日志/端口状态；Ctrl+C 时统一回收。
+    if args.demo:
+        return _run_demo(args)
 
     # 点表
     from core.data.point_table import PointTable

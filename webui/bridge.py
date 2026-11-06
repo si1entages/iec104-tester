@@ -83,6 +83,11 @@ class EngineBridge:
     def recent_logs(self, limit: int = 50) -> list[dict]:
         return [e.to_dict() for e in self.logs.query(limit=limit, newest_first=False)]
 
+    @property
+    def history_db(self):
+        """历史库引用（未启用时为 None）；诊断包/状态页只读使用."""
+        return self._history
+
     # ── 兼容旧属性 ────────────────────────────────────────────────
 
     @property

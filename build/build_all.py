@@ -26,6 +26,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 FRONTEND = ROOT / "webui" / "frontend"
 
+# Windows CI/控制台的默认编码可能是 cp1252/cp936，中文提示会触发
+# UnicodeEncodeError（GitHub Actions windows runner 实测）。仅统一**控制台输出**
+# 为 UTF-8，不影响文件读写与 PyInstaller 产物。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 # 需要随包分发的数据目录：源目录(相对 ROOT) -> 包内目标路径
 ADD_DATA = [
     ("webui/static", "webui/static"),

@@ -1,0 +1,1063 @@
+{
+  "version": 1,
+  "description": "IEC 104 互操作语料库（合成基线）。TX=主站发出，RX=主站收到。manifest 为解码后的 golden 快照 + 回放应看到的点值。",
+  "generated_by": "tests/fixtures/frames/generate_corpus.py",
+  "created": 1767225600.0,
+  "scenarios": [
+    {
+      "file": "gi_basic.i104",
+      "name": "gi_basic",
+      "description": "STARTDT → 总召唤 → 单点/双点/归一化/标度化/短浮点/累计量 → 总召结束",
+      "frames": [
+        {
+          "direction": "TX",
+          "frame_type": "U",
+          "tx_seq": 0,
+          "rx_seq": 0,
+          "u_func": 7
+        },
+        {
+          "direction": "RX",
+          "frame_type": "U",
+          "tx_seq": 0,
+          "rx_seq": 0,
+          "u_func": 11
+        },
+        {
+          "direction": "TX",
+          "frame_type": "I",
+          "tx_seq": 0,
+          "rx_seq": 0,
+          "type_id": 100,
+          "type_name": "C_IC_NA_1",
+          "cot": 6,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 0
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 0,
+          "rx_seq": 1,
+          "type_id": 100,
+          "type_name": "C_IC_NA_1",
+          "cot": 7,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 0
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 1,
+          "rx_seq": 1,
+          "type_id": 1,
+          "type_name": "M_SP_NA_1",
+          "cot": 20,
+          "common_addr": 1,
+          "sq": true,
+          "num": 3,
+          "objects": [
+            {
+              "ioa": 100,
+              "value": true
+            },
+            {
+              "ioa": 101,
+              "value": false
+            },
+            {
+              "ioa": 102,
+              "value": true
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 2,
+          "rx_seq": 1,
+          "type_id": 3,
+          "type_name": "M_DP_NA_1",
+          "cot": 20,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 110,
+              "value": 1
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 3,
+          "rx_seq": 1,
+          "type_id": 3,
+          "type_name": "M_DP_NA_1",
+          "cot": 20,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 111,
+              "value": 2
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 4,
+          "rx_seq": 1,
+          "type_id": 9,
+          "type_name": "M_ME_NA_1",
+          "cot": 20,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 200,
+              "value": 0.499984740745262
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 5,
+          "rx_seq": 1,
+          "type_id": 9,
+          "type_name": "M_ME_NA_1",
+          "cot": 20,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 201,
+              "value": -0.249977111117893
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 6,
+          "rx_seq": 1,
+          "type_id": 11,
+          "type_name": "M_ME_NB_1",
+          "cot": 20,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 210,
+              "value": 1234
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 7,
+          "rx_seq": 1,
+          "type_id": 13,
+          "type_name": "M_ME_NC_1",
+          "cot": 20,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 220,
+              "value": 3.5
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 8,
+          "rx_seq": 1,
+          "type_id": 15,
+          "type_name": "M_IT_NA_1",
+          "cot": 20,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 300,
+              "value": 42
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "S",
+          "tx_seq": 0,
+          "rx_seq": 1
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 9,
+          "rx_seq": 1,
+          "type_id": 100,
+          "type_name": "C_IC_NA_1",
+          "cot": 10,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 0
+            }
+          ]
+        }
+      ],
+      "master_checks": [
+        {
+          "kind": "yx",
+          "ioa": 100,
+          "value": true
+        },
+        {
+          "kind": "yx",
+          "ioa": 101,
+          "value": false
+        },
+        {
+          "kind": "yx",
+          "ioa": 102,
+          "value": true
+        },
+        {
+          "kind": "yx",
+          "ioa": 110,
+          "value": false
+        },
+        {
+          "kind": "yx",
+          "ioa": 111,
+          "value": true
+        },
+        {
+          "kind": "yc",
+          "ioa": 200,
+          "value": 0.5
+        },
+        {
+          "kind": "yc",
+          "ioa": 201,
+          "value": -0.25
+        },
+        {
+          "kind": "yc",
+          "ioa": 210,
+          "value": 1234.0
+        },
+        {
+          "kind": "yc",
+          "ioa": 220,
+          "value": 3.5
+        },
+        {
+          "kind": "ym",
+          "ioa": 300,
+          "value": 42
+        }
+      ]
+    },
+    {
+      "file": "soe_burst.i104",
+      "name": "soe_burst",
+      "description": "SOE 突发：带 CP56 时标的遥信/遥测连续变位",
+      "frames": [
+        {
+          "direction": "TX",
+          "frame_type": "U",
+          "tx_seq": 0,
+          "rx_seq": 0,
+          "u_func": 7
+        },
+        {
+          "direction": "RX",
+          "frame_type": "U",
+          "tx_seq": 0,
+          "rx_seq": 0,
+          "u_func": 11
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 0,
+          "rx_seq": 0,
+          "type_id": 30,
+          "type_name": "M_SP_TB_1",
+          "cot": 3,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 400,
+              "value": true
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 1,
+          "rx_seq": 0,
+          "type_id": 31,
+          "type_name": "M_DP_TB_1",
+          "cot": 3,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 401,
+              "value": 2
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 2,
+          "rx_seq": 0,
+          "type_id": 36,
+          "type_name": "M_ME_TF_1",
+          "cot": 3,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 402,
+              "value": 12.5
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 3,
+          "rx_seq": 0,
+          "type_id": 30,
+          "type_name": "M_SP_TB_1",
+          "cot": 3,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 400,
+              "value": false
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 4,
+          "rx_seq": 0,
+          "type_id": 36,
+          "type_name": "M_ME_TF_1",
+          "cot": 3,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 402,
+              "value": 13.5
+            }
+          ]
+        }
+      ],
+      "master_checks": [
+        {
+          "kind": "yx",
+          "ioa": 400,
+          "value": false
+        },
+        {
+          "kind": "yx",
+          "ioa": 401,
+          "value": true
+        },
+        {
+          "kind": "yc",
+          "ioa": 402,
+          "value": 13.5
+        }
+      ]
+    },
+    {
+      "file": "cp24_variants.i104",
+      "name": "cp24_variants",
+      "description": "CP24/CP56 时标变体：累计量/归一化/标度化/短浮点/步位置",
+      "frames": [
+        {
+          "direction": "TX",
+          "frame_type": "U",
+          "tx_seq": 0,
+          "rx_seq": 0,
+          "u_func": 7
+        },
+        {
+          "direction": "RX",
+          "frame_type": "U",
+          "tx_seq": 0,
+          "rx_seq": 0,
+          "u_func": 11
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 0,
+          "rx_seq": 0,
+          "type_id": 16,
+          "type_name": "M_IT_TA_1",
+          "cot": 3,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 500,
+              "value": 100
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 1,
+          "rx_seq": 0,
+          "type_id": 10,
+          "type_name": "M_ME_TA_1",
+          "cot": 3,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 501,
+              "value": 0.249977111117893
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 2,
+          "rx_seq": 0,
+          "type_id": 12,
+          "type_name": "M_ME_TB_1",
+          "cot": 3,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 502,
+              "value": -12
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 3,
+          "rx_seq": 0,
+          "type_id": 14,
+          "type_name": "M_ME_TC_1",
+          "cot": 3,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 503,
+              "value": 1.25
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 4,
+          "rx_seq": 0,
+          "type_id": 37,
+          "type_name": "M_IT_TB_1",
+          "cot": 3,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 504,
+              "value": 200
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 5,
+          "rx_seq": 0,
+          "type_id": 32,
+          "type_name": "M_ST_TB_1",
+          "cot": 3,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 505,
+              "value": 3
+            }
+          ]
+        }
+      ],
+      "master_checks": [
+        {
+          "kind": "ym",
+          "ioa": 500,
+          "value": 100
+        },
+        {
+          "kind": "yc",
+          "ioa": 501,
+          "value": 0.25
+        },
+        {
+          "kind": "yc",
+          "ioa": 502,
+          "value": -12.0
+        },
+        {
+          "kind": "yc",
+          "ioa": 503,
+          "value": 1.25
+        },
+        {
+          "kind": "ym",
+          "ioa": 504,
+          "value": 200
+        }
+      ]
+    },
+    {
+      "file": "silent_device.i104",
+      "name": "silent_device",
+      "description": "只发 EI、不主动上送数据的静默装置（需周期总召）",
+      "frames": [
+        {
+          "direction": "TX",
+          "frame_type": "U",
+          "tx_seq": 0,
+          "rx_seq": 0,
+          "u_func": 7
+        },
+        {
+          "direction": "RX",
+          "frame_type": "U",
+          "tx_seq": 0,
+          "rx_seq": 0,
+          "u_func": 11
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 0,
+          "rx_seq": 0,
+          "type_id": 70,
+          "type_name": "M_EI_NA_1",
+          "cot": 4,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 0
+            }
+          ]
+        },
+        {
+          "direction": "TX",
+          "frame_type": "U",
+          "tx_seq": 0,
+          "rx_seq": 0,
+          "u_func": 67
+        },
+        {
+          "direction": "RX",
+          "frame_type": "U",
+          "tx_seq": 0,
+          "rx_seq": 0,
+          "u_func": 131
+        }
+      ],
+      "master_checks": []
+    },
+    {
+      "file": "sbo_command.i104",
+      "name": "sbo_command",
+      "description": "SBO 选择-执行-终止 + 同 IOA 遥信变位",
+      "frames": [
+        {
+          "direction": "TX",
+          "frame_type": "U",
+          "tx_seq": 0,
+          "rx_seq": 0,
+          "u_func": 7
+        },
+        {
+          "direction": "RX",
+          "frame_type": "U",
+          "tx_seq": 0,
+          "rx_seq": 0,
+          "u_func": 11
+        },
+        {
+          "direction": "TX",
+          "frame_type": "I",
+          "tx_seq": 0,
+          "rx_seq": 0,
+          "type_id": 45,
+          "type_name": "C_SC_NA_1",
+          "cot": 6,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 600,
+              "state": true,
+              "select": true
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 0,
+          "rx_seq": 1,
+          "type_id": 45,
+          "type_name": "C_SC_NA_1",
+          "cot": 7,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 600,
+              "state": true,
+              "select": true
+            }
+          ]
+        },
+        {
+          "direction": "TX",
+          "frame_type": "I",
+          "tx_seq": 1,
+          "rx_seq": 1,
+          "type_id": 45,
+          "type_name": "C_SC_NA_1",
+          "cot": 6,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 600,
+              "state": true,
+              "select": false
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 1,
+          "rx_seq": 2,
+          "type_id": 45,
+          "type_name": "C_SC_NA_1",
+          "cot": 7,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 600,
+              "state": true,
+              "select": false
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 2,
+          "rx_seq": 2,
+          "type_id": 45,
+          "type_name": "C_SC_NA_1",
+          "cot": 10,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 600,
+              "state": true,
+              "select": false
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 3,
+          "rx_seq": 2,
+          "type_id": 30,
+          "type_name": "M_SP_TB_1",
+          "cot": 3,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 600,
+              "value": true
+            }
+          ]
+        }
+      ],
+      "master_checks": [
+        {
+          "kind": "yx",
+          "ioa": 600,
+          "value": true
+        }
+      ]
+    },
+    {
+      "file": "param_file.i104",
+      "name": "param_file",
+      "description": "参数装载/激活确认 + 文件传输握手（目录/节/段/最后节）",
+      "frames": [
+        {
+          "direction": "TX",
+          "frame_type": "U",
+          "tx_seq": 0,
+          "rx_seq": 0,
+          "u_func": 7
+        },
+        {
+          "direction": "RX",
+          "frame_type": "U",
+          "tx_seq": 0,
+          "rx_seq": 0,
+          "u_func": 11
+        },
+        {
+          "direction": "TX",
+          "frame_type": "I",
+          "tx_seq": 0,
+          "rx_seq": 0,
+          "type_id": 110,
+          "type_name": "P_ME_NA_1",
+          "cot": 6,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 700,
+              "value": 0.499984740745262
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 0,
+          "rx_seq": 1,
+          "type_id": 110,
+          "type_name": "P_ME_NA_1",
+          "cot": 7,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 700,
+              "value": 0.499984740745262
+            }
+          ]
+        },
+        {
+          "direction": "TX",
+          "frame_type": "I",
+          "tx_seq": 1,
+          "rx_seq": 1,
+          "type_id": 113,
+          "type_name": "P_AC_NA_1",
+          "cot": 6,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 700,
+              "qualifier": 1
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 1,
+          "rx_seq": 2,
+          "type_id": 113,
+          "type_name": "P_AC_NA_1",
+          "cot": 7,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 700,
+              "qualifier": 0
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 2,
+          "rx_seq": 2,
+          "type_id": 120,
+          "type_name": "F_FR_NA_1",
+          "cot": 6,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 0,
+              "file_name": 1
+            }
+          ]
+        },
+        {
+          "direction": "TX",
+          "frame_type": "I",
+          "tx_seq": 2,
+          "rx_seq": 3,
+          "type_id": 128,
+          "type_name": "F_FR_NB_1",
+          "cot": 6,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 0,
+              "file_name": 1
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 3,
+          "rx_seq": 3,
+          "type_id": 121,
+          "type_name": "F_SR_NA_1",
+          "cot": 6,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 0,
+              "file_name": 1,
+              "section_name": 0
+            }
+          ]
+        },
+        {
+          "direction": "TX",
+          "frame_type": "I",
+          "tx_seq": 3,
+          "rx_seq": 4,
+          "type_id": 124,
+          "type_name": "F_AF_NA_1",
+          "cot": 6,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 0,
+              "qualifier": 0,
+              "file_name": 1,
+              "section_name": 0
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 4,
+          "rx_seq": 4,
+          "type_id": 125,
+          "type_name": "F_SG_NA_1",
+          "cot": 6,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 0,
+              "file_name": 1,
+              "section_name": 0
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 5,
+          "rx_seq": 4,
+          "type_id": 123,
+          "type_name": "F_LS_NA_1",
+          "cot": 6,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 0,
+              "file_name": 1,
+              "section_name": 0
+            }
+          ]
+        }
+      ],
+      "master_checks": []
+    },
+    {
+      "file": "malformed.i104",
+      "name": "malformed",
+      "description": "畸形帧鲁棒性：截断/未知类型/长度不符后仍能恢复",
+      "frames": [
+        {
+          "direction": "TX",
+          "frame_type": "U",
+          "tx_seq": 0,
+          "rx_seq": 0,
+          "u_func": 7
+        },
+        {
+          "direction": "RX",
+          "frame_type": "U",
+          "tx_seq": 0,
+          "rx_seq": 0,
+          "u_func": 11
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 0,
+          "rx_seq": 0,
+          "type_id": 1,
+          "type_name": "M_SP_NA_1",
+          "cot": 3,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 800,
+              "value": true
+            }
+          ]
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "decode_error": "ValueError"
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 1,
+          "rx_seq": 0,
+          "asdu_decode_error": "ValueError"
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 2,
+          "rx_seq": 0,
+          "asdu_decode_error": "ValueError"
+        },
+        {
+          "direction": "RX",
+          "frame_type": "I",
+          "tx_seq": 3,
+          "rx_seq": 0,
+          "type_id": 1,
+          "type_name": "M_SP_NA_1",
+          "cot": 3,
+          "common_addr": 1,
+          "sq": false,
+          "num": 1,
+          "objects": [
+            {
+              "ioa": 801,
+              "value": true
+            }
+          ]
+        }
+      ],
+      "master_checks": [
+        {
+          "kind": "yx",
+          "ioa": 800,
+          "value": true
+        },
+        {
+          "kind": "yx",
+          "ioa": 801,
+          "value": true
+        }
+      ]
+    }
+  ]
+}

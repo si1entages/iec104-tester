@@ -288,6 +288,7 @@ graph TD
 ## 4. 任务分解方案
 
 > v1.2 **重做任务表**：已完成任务移入「✅ 已完成（归档）」，不再占用工作量；失效任务删除/改写；新增 Q6/Q7/Q9 相关任务。
+> **2026-11-06 进度核对**：T01~T24 全部完成（待办 0）；核对依据为代码、测试与文档现状。T04/T05 拆分后 `master.py` 711 行、`slave.py` 723 行，略超原 ≤700 行验收线，但 God Class 拆分目标已达成。
 > 优先级：P0 必须、P1 重要、P2 增强。工作量单位为「人日」（单人投入估算）。角色代号见 §8。
 
 ### ✅ 已完成（归档，不再计入待办工作量）
@@ -306,52 +307,69 @@ graph TD
 
 | 任务ID | 任务名称 | 描述与验收标准 | 优先级 | 工作量 | 前置依赖 | 承担角色 | 涉及文件 |
 |--------|---------|---------------|--------|--------|---------|---------|---------|
-| **T01** | 工程基线收口（Python 版本对齐 + CI 矩阵 + 覆盖率） | ① `pyproject.toml`：`requires-python=">=3.11"`、`[tool.ruff] target-version="py311"`；② CI 矩阵改 `["3.11","3.13"]`；③ 引入 `pytest-cov` 输出覆盖率并对 `core/` 设门槛（≥85%）；④ 补 `tests/README.md` 说明分层策略。**验收**：CI 双版本绿、489 passed、ruff 0 告警、覆盖率报告达标 | P0 | 2 | — | DevOps+架构师 | `pyproject.toml`, `.github/workflows/ci.yml`, `tests/README.md` |
-| **T02** | 遗留工程卫生收尾 + `qa_verify/` 处置 | ① 删除 `apps/venv/` 误提交虚拟环境；② **`qa_verify/` 处置（结论见 §7-Q11）**：将耐用 E2E 脚本（`qa_full_flow.py`/`qa_shutdown.py`/`qa_real_device.py`）**择优提升**至 `tests/e2e/`（纳入 git），其余 ad-hoc/探针脚本继续 ignore；③ 核对 `app.py` 参数与文档一致。**验收**：`apps/venv` 不存在；`git ls-files tests/e2e` 非空；CLI 帮助与文档一致 | P1 | 1.5 | — | 后端工程师 | `apps/venv/`(删), `tests/e2e/*`(新), `app.py`, `PROJECT.md` |
-| **T03** | 文档与代码对齐收尾 | ① README 徽章 `Python-3.10+` → `3.11+`（`Tests-489` 已正确）；② 核验 `docs/api_reference.md`/`user_guide.md` 无 Qt/gui 残留并补 Web UI + 日志面板说明；③ 链接本文档 v1.2。**验收**：全仓 `grep -ri "pyside6\|pyqt\|pywebview\|gui/"` 无残留描述（源码已零命中） | P1 | 1 | — | 文档工程师 | `README.md`, `README_eng.md`, `docs/api_reference.md`, `docs/user_guide.md` |
+| ✅ **T01** | 工程基线收口（Python 版本对齐 + CI 矩阵 + 覆盖率） | ① `pyproject.toml`：`requires-python=">=3.11"`、`[tool.ruff] target-version="py311"`；② CI 矩阵改 `["3.11","3.13"]`；③ 引入 `pytest-cov` 输出覆盖率并对 `core/` 设门槛（≥85%）；④ 补 `tests/README.md` 说明分层策略。**验收**：CI 双版本绿、489 passed、ruff 0 告警、覆盖率报告达标 | P0 | 2 | — | DevOps+架构师 | `pyproject.toml`, `.github/workflows/ci.yml`, `tests/README.md` |
+| ✅ **T02** | 遗留工程卫生收尾 + `qa_verify/` 处置 | ① 删除 `apps/venv/` 误提交虚拟环境；② **`qa_verify/` 处置（结论见 §7-Q11）**：将耐用 E2E 脚本（`qa_full_flow.py`/`qa_shutdown.py`/`qa_real_device.py`）**择优提升**至 `tests/e2e/`（纳入 git），其余 ad-hoc/探针脚本继续 ignore；③ 核对 `app.py` 参数与文档一致。**验收**：`apps/venv` 不存在；`git ls-files tests/e2e` 非空；CLI 帮助与文档一致 | P1 | 1.5 | — | 后端工程师 | `apps/venv/`(删), `tests/e2e/*`(新), `app.py`, `PROJECT.md` |
+| ✅ **T03** | 文档与代码对齐收尾 | ① README 徽章 `Python-3.10+` → `3.11+`（`Tests-489` 已正确）；② 核验 `docs/api_reference.md`/`user_guide.md` 无 Qt/gui 残留并补 Web UI + 日志面板说明；③ 链接本文档 v1.2。**验收**：全仓 `grep -ri "pyside6\|pyqt\|pywebview\|gui/"` 无残留描述（源码已零命中） | P1 | 1 | — | 文档工程师 | `README.md`, `README_eng.md`, `docs/api_reference.md`, `docs/user_guide.md` |
 
 ### Phase 1 — 架构收敛（God Class / 生命周期）
 
 | 任务ID | 任务名称 | 描述与验收标准 | 优先级 | 工作量 | 前置依赖 | 承担角色 | 涉及文件 |
 |--------|---------|---------------|--------|--------|---------|---------|---------|
-| **T04** | 拆分 `MasterEngine`（God Class） | 从 **1745 行**中抽出 `MasterSession`（连接/状态/重连）与 `MasterProtocolHandler`（帧编解码分发、命令构建），`MasterEngine` 保留编排与公开 API。**验收**：单文件 ≤ 700 行；公开接口签名不变；`test_master_engine.py`(635 行) 全绿；每抽一模块单独提交 | P0 | 4 | — | 后端工程师 | `core/engine/master.py`, 新增 `master_session.py`/`master_protocol.py` |
-| **T05** | 拆分 `SlaveEngine`（God Class） | 从 **1950 行**中抽出 `SlaveSession`（每客户端状态）、`SlaveResponseBuilder`（应答/品质/COT 构建）、`SlaveSimulator`（手动/随机/脚本模拟）。**验收**：单文件 ≤ 700 行；`test_slave_engine.py`(854 行) 全绿 | P0 | 4 | — | 后端工程师 | `core/engine/slave.py`, 新增 `slave_session.py`/`slave_response.py`/`slave_sim.py` |
-| **T06** | 传输层职责边界收敛 | 明确 `connection.py` 为唯一实现，`client.py`/`server.py` shim 加 `# DEPRECATED` 注释并锁定兼容期；统一 `close()` 幂等与超时语义；补传输层设计说明。**验收**：`grep` 无新增对 shim 的 import；文档描述清晰 | P1 | 2 | — | 后端工程师 | `core/transport/connection.py`, `client.py`, `server.py`, `docs/` |
-| **T07** | 生命周期与资源清理加固（含多站回收） | 加固 `EngineBridge.shutdown()` / 引擎 `stop()` / `MultiStationManager.stop_all()`：完整取消 `_background_tasks`、关闭 socket（`wait_closed` 带超时）、清空 subscriber、停调度器；**补多站 Web 会话关停的显式回收路径**（PROJECT.md 待办 #3）；兼容 asyncio 3.13 关停语义。**验收**：新增关停泄漏测试；`tests/e2e/qa_shutdown.py` 通过；无 "Task was destroyed but it is pending" 告警 | P0 | 3 | — | 后端+测试 | `webui/bridge.py`, `webui/session.py`, `core/engine/*.py`, `tests/test_shutdown.py`(新) |
-| **T08** | 参数命令主站侧状态跟踪 | 主站侧跟踪参数装载/激活结果（当前仅记录日志，未跟踪）；`P_ME_NA/NB/NC`/`P_AC_NA` 激活确认/终止状态入库并可经 REST 查询。**验收**：参数激活流程有状态可查；新增用例覆盖 | P1 | 2 | T04 | 后端+测试 | `core/engine/master.py`, `master_protocol.py`, `webui/session.py`, `tests/` |
-| **T09** | 升降命令步位置点建模与联动 | 点表新增步位置点类型（真机为 `M_ST_NA_1` 档位），升降命令（`C_RC_NA_1`）执行后联动更新档位点并上送。**验收**：步位点可建模/上送；新增用例 | P2 | 2 | — | 后端+测试 | `core/data/point_table.py`, `core/protocol/types.py`, `core/engine/slave.py`, `tests/` |
+| ✅ **T04** | 拆分 `MasterEngine`（God Class） | 从 **1745 行**中抽出 `MasterSession`（连接/状态/重连）与 `MasterProtocolHandler`（帧编解码分发、命令构建），`MasterEngine` 保留编排与公开 API。**验收**：单文件 ≤ 700 行；公开接口签名不变；`test_master_engine.py`(635 行) 全绿；每抽一模块单独提交 | P0 | 4 | — | 后端工程师 | `core/engine/master.py`, 新增 `master_session.py`/`master_protocol.py` |
+| ✅ **T05** | 拆分 `SlaveEngine`（God Class） | 从 **1950 行**中抽出 `SlaveSession`（每客户端状态）、`SlaveResponseBuilder`（应答/品质/COT 构建）、`SlaveSimulator`（手动/随机/脚本模拟）。**验收**：单文件 ≤ 700 行；`test_slave_engine.py`(854 行) 全绿 | P0 | 4 | — | 后端工程师 | `core/engine/slave.py`, 新增 `slave_session.py`/`slave_response.py`/`slave_sim.py` |
+| ✅ **T06** | 传输层职责边界收敛 | 明确 `connection.py` 为唯一实现，`client.py`/`server.py` shim 加 `# DEPRECATED` 注释并锁定兼容期；统一 `close()` 幂等与超时语义；补传输层设计说明。**验收**：`grep` 无新增对 shim 的 import；文档描述清晰 | P1 | 2 | — | 后端工程师 | `core/transport/connection.py`, `client.py`, `server.py`, `docs/` |
+| ✅ **T07** | 生命周期与资源清理加固（含多站回收） | 加固 `EngineBridge.shutdown()` / 引擎 `stop()` / `MultiStationManager.stop_all()`：完整取消 `_background_tasks`、关闭 socket（`wait_closed` 带超时）、清空 subscriber、停调度器；**补多站 Web 会话关停的显式回收路径**（PROJECT.md 待办 #3）；兼容 asyncio 3.13 关停语义。**验收**：新增关停泄漏测试；`tests/e2e/qa_shutdown.py` 通过；无 "Task was destroyed but it is pending" 告警 | P0 | 3 | — | 后端+测试 | `webui/bridge.py`, `webui/session.py`, `core/engine/*.py`, `tests/test_shutdown.py`(新) |
+| ✅ **T08** | 参数命令主站侧状态跟踪 | 主站侧跟踪参数装载/激活结果（当前仅记录日志，未跟踪）；`P_ME_NA/NB/NC`/`P_AC_NA` 激活确认/终止状态入库并可经 REST 查询。**验收**：参数激活流程有状态可查；新增用例覆盖 | P1 | 2 | T04 | 后端+测试 | `core/engine/master.py`, `master_protocol.py`, `webui/session.py`, `tests/` |
+| ✅ **T09** | 升降命令步位置点建模与联动 | 点表新增步位置点类型（真机为 `M_ST_NA_1` 档位），升降命令（`C_RC_NA_1`）执行后联动更新档位点并上送。**验收**：步位点可建模/上送；新增用例 | P2 | 2 | — | 后端+测试 | `core/data/point_table.py`, `core/protocol/types.py`, `core/engine/slave.py`, `tests/` |
 
 ### Phase 2 — 前端工程重写（Q7）
 
 | 任务ID | 任务名称 | 描述与验收标准 | 优先级 | 工作量 | 前置依赖 | 承担角色 | 涉及文件 |
 |--------|---------|---------------|--------|--------|---------|---------|---------|
-| **T10** | 前端工程脚手架 + Node 构建链 + 打包/CI 接入 | 初始化 `webui/frontend/`（Vite + React18 + TS + AntD5 + React Query + Zustand + ECharts + Vitest/Playwright）；`vite build` 产物输出到 `webui/static/`；`build_all.py` 增前端构建步骤并打包 `dist`；CI 增 node 构建 job；`package.json` 锁版本。**验收**：`npm ci && npm run build` 产出静态页；CI 双 job 绿；打包产物含前端 | P0 | 4 | — | 前端+DevOps | `webui/frontend/**`(新), `webui/static/**`(产物), `build/build_all.py`, `.github/workflows/ci.yml`, `package.json` |
-| **T11** | 前端数据层：REST/WS 客户端 + 状态管理 + 契约适配 | 封装 `api()`（REST，~35 端点）+ WS 客户端（断线重连、背压提示、snapshot 先行）；React Query 管理服务端状态，Zustand 管理 UI 状态；**按 `schemaVersion` 适配**（依赖 T18 契约）。**验收**：类型化 API 层；断线重连恢复快照；`tsc` 零错误 | P0 | 3 | T10 | 前端工程师 | `webui/frontend/src/api/**`, `src/store/**`, `src/ws/**` |
-| **T12** | 主站页面重写 | 连接/状态栏、**选中行 + 右侧命令面板**（YK 单/双/SBO、设点、总召、步/比特串/延时/参数/文件）、点表（十万行虚拟滚动）、报文查看器（HEX + 解析 + 过滤）、趋势图。**验收**：`qa_full_flow.py` 主站项通过；双击命令点值直接下发须经确认弹窗且不绕过 SBO（T21）；10 万点不卡顿 | P0 | 5 | T11 | 前端工程师 | `webui/frontend/src/pages/master/**`, `src/components/**` |
-| **T13** | 子站页面重写 | 监听/多客户端状态、响应配置面板（延迟/错误注入 drop·corrupt·no_response·wrong_cot/品质 IV·NT·SB·OV/连接行为）、模拟（手动/随机/脚本）、点表编辑与 YAML/CSV 导入导出、自发上送。**验收**：面板改动实时生效；端到端脚本验证 | P0 | 4 | T11 | 前端工程师 | `webui/frontend/src/pages/slave/**`, `src/components/**` |
-| **T14** | 日志面板与全局外壳 | 全局导航/主题（antd `darkAlgorithm`）/错误边界；「日志」面板：分级/分类/来源过滤 + 搜索 + JSONL 导出（对接 `GET /api/logs`、`/api/logs/export`、WS `log`）。**验收**：日志实时流可视、过滤/导出可用 | P1 | 2.5 | T11 | 前端工程师 | `webui/frontend/src/pages/logs/**`, `src/layout/**` |
-| **T15** | 前端自动化测试纳入 CI | Vitest + RTL 单测 + Playwright 无头端到端（替代旧 `qa_verify/*.mjs` DOM 探针）；纳入 CI 并产出报告。**验收**：CI 中前端用例自动执行并产出报告 | P1 | 3 | T10 | 测试工程师 | `webui/frontend/**/*.test.tsx`, `webui/frontend/e2e/**`, `.github/workflows/ci.yml` |
+| ✅ **T10** | 前端工程脚手架 + Node 构建链 + 打包/CI 接入 | 初始化 `webui/frontend/`（Vite + React18 + TS + AntD5 + React Query + Zustand + ECharts + Vitest/Playwright）；`vite build` 产物输出到 `webui/static/`；`build_all.py` 增前端构建步骤并打包 `dist`；CI 增 node 构建 job；`package.json` 锁版本。**验收**：`npm ci && npm run build` 产出静态页；CI 双 job 绿；打包产物含前端 | P0 | 4 | — | 前端+DevOps | `webui/frontend/**`(新), `webui/static/**`(产物), `build/build_all.py`, `.github/workflows/ci.yml`, `package.json` |
+| ✅ **T11** | 前端数据层：REST/WS 客户端 + 状态管理 + 契约适配 | 封装 `api()`（REST，~35 端点）+ WS 客户端（断线重连、背压提示、snapshot 先行）；React Query 管理服务端状态，Zustand 管理 UI 状态；**按 `schemaVersion` 适配**（依赖 T18 契约）。**验收**：类型化 API 层；断线重连恢复快照；`tsc` 零错误 | P0 | 3 | T10 | 前端工程师 | `webui/frontend/src/api/**`, `src/store/**`, `src/ws/**` |
+| ✅ **T12** | 主站页面重写 | 连接/状态栏、**选中行 + 右侧命令面板**（YK 单/双/SBO、设点、总召、步/比特串/延时/参数/文件）、点表（十万行虚拟滚动）、报文查看器（HEX + 解析 + 过滤）、趋势图。**验收**：`qa_full_flow.py` 主站项通过；双击命令点值直接下发须经确认弹窗且不绕过 SBO（T21）；10 万点不卡顿 | P0 | 5 | T11 | 前端工程师 | `webui/frontend/src/pages/master/**`, `src/components/**` |
+| ✅ **T13** | 子站页面重写 | 监听/多客户端状态、响应配置面板（延迟/错误注入 drop·corrupt·no_response·wrong_cot/品质 IV·NT·SB·OV/连接行为）、模拟（手动/随机/脚本）、点表编辑与 YAML/CSV 导入导出、自发上送。**验收**：面板改动实时生效；端到端脚本验证 | P0 | 4 | T11 | 前端工程师 | `webui/frontend/src/pages/slave/**`, `src/components/**` |
+| ✅ **T14** | 日志面板与全局外壳 | 全局导航/主题（antd `darkAlgorithm`）/错误边界；「日志」面板：分级/分类/来源过滤 + 搜索 + JSONL 导出（对接 `GET /api/logs`、`/api/logs/export`、WS `log`）。**验收**：日志实时流可视、过滤/导出可用 | P1 | 2.5 | T11 | 前端工程师 | `webui/frontend/src/pages/logs/**`, `src/layout/**` |
+| ✅ **T15** | 前端自动化测试纳入 CI | Vitest + RTL 单测 + Playwright 无头端到端（替代旧 `qa_verify/*.mjs` DOM 探针）；纳入 CI 并产出报告。**验收**：CI 中前端用例自动执行并产出报告 | P1 | 3 | T10 | 测试工程师 | `webui/frontend/**/*.test.tsx`, `webui/frontend/e2e/**`, `.github/workflows/ci.yml` |
 
 ### Phase 3 — 功能与数据集成
 
 | 任务ID | 任务名称 | 描述与验收标准 | 优先级 | 工作量 | 前置依赖 | 承担角色 | 涉及文件 |
 |--------|---------|---------------|--------|--------|---------|---------|---------|
-| **T16** | 多站管理器接入 Web UI（Q6） | 新增「多站」页 + `/api/multi/*`（start/stop/status/summary）+ 多站桥（`EngineBridge` 扩展）；`MultiStationManager` 生命周期接入 Web 会话（**与 T07 关停回收耦合**）。**验收**：Web 端可增删/启停多站并看聚合状态；关停无泄漏 | P0 | 4 | T07, T11 | 前端+后端 | `core/engine/multi_station.py`, `webui/server.py`, `webui/session.py`, `webui/bridge.py`, `webui/frontend/src/pages/multi/**` |
-| **T17** | 历史库默认开启（Q9） | `core/config.py` 新增 `HistoryConfig`（`enabled=True` 默认、`dir` 默认数据目录、`retention_days`、`max_size_mb`、`flush_interval`）；`app.py` 默认建库 + 新增 `--no-history` 开关；实现保留期/容量上限/清理策略；评估并记录**写放大**。**验收**：默认启动即建库；`--no-history` 可关；超限自动清理；文档记录容量/写放大 | P0 | 3 | — | 后端工程师 | `core/config.py`, `app.py`, `core/data/history.py`, `docs/`, `configs/*.yaml` |
-| **T18** | WS/REST 契约版本化与校验（Q10） | `webui/api_contract.md` 补 `schemaVersion` 字段与版本策略；WS `snapshot`/`frame`/`event`/`log` 消息带版本；后端出契约自检；前端按版本适配。**验收**：契约文档化含版本；不匹配时前端告警不崩 | P1 | 2 | — | 前端+后端 | `webui/api_contract.md`, `webui/server.py`, `webui/events.py`, `webui/frontend/src/ws/**` |
-| **T19** | 旧静态页退役与前端回归收尾 | 新前端全功能对齐后删除 `webui/static/{master.html,slave.html,js/app.js,css/app.css}`（改由 `dist` 产物托管）；全流程端到端回归。**验收**：`qa_full_flow.py`/Playwright 全绿；旧原生页无残留 | P1 | 2 | T12, T13, T14, T15 | 前端+测试 | `webui/static/**`(退役), `webui/frontend/**`, `tests/e2e/**` |
+| ✅ **T16** | 多站管理器接入 Web UI（Q6） | 新增「多站」页 + `/api/multi/*`（start/stop/status/summary）+ 多站桥（`EngineBridge` 扩展）；`MultiStationManager` 生命周期接入 Web 会话（**与 T07 关停回收耦合**）。**验收**：Web 端可增删/启停多站并看聚合状态；关停无泄漏 | P0 | 4 | T07, T11 | 前端+后端 | `core/engine/multi_station.py`, `webui/server.py`, `webui/session.py`, `webui/bridge.py`, `webui/frontend/src/pages/multi/**` |
+| ✅ **T17** | 历史库默认开启（Q9） | `core/config.py` 新增 `HistoryConfig`（`enabled=True` 默认、`dir` 默认数据目录、`retention_days`、`max_size_mb`、`flush_interval`）；`app.py` 默认建库 + 新增 `--no-history` 开关；实现保留期/容量上限/清理策略；评估并记录**写放大**。**验收**：默认启动即建库；`--no-history` 可关；超限自动清理；文档记录容量/写放大 | P0 | 3 | — | 后端工程师 | `core/config.py`, `app.py`, `core/data/history.py`, `docs/`, `configs/*.yaml` |
+| ✅ **T18** | WS/REST 契约版本化与校验（Q10） | `webui/api_contract.md` 补 `schemaVersion` 字段与版本策略；WS `snapshot`/`frame`/`event`/`log` 消息带版本；后端出契约自检；前端按版本适配。**验收**：契约文档化含版本；不匹配时前端告警不崩 | P1 | 2 | — | 前端+后端 | `webui/api_contract.md`, `webui/server.py`, `webui/events.py`, `webui/frontend/src/ws/**` |
+| ✅ **T19** | 旧静态页退役与前端回归收尾 | 新前端全功能对齐后删除 `webui/static/{master.html,slave.html,js/app.js,css/app.css}`（改由 `dist` 产物托管）；全流程端到端回归。**验收**：`qa_full_flow.py`/Playwright 全绿；旧原生页无残留 | P1 | 2 | T12, T13, T14, T15 | 前端+测试 | `webui/static/**`(退役), `webui/frontend/**`, `tests/e2e/**` |
 
 ### Phase 4 — 安全与协议增强（按需）
 
 | 任务ID | 任务名称 | 描述与验收标准 | 优先级 | 工作量 | 前置依赖 | 承担角色 | 涉及文件 |
 |--------|---------|---------------|--------|--------|---------|---------|---------|
-| **T20** | TLS / IEC 62351 安全传输 | 传输层新增 TLS 选项（`ssl.SSLContext`）与证书/密钥配置；主子站/多站支持 `tls.enabled`。**验收**：自签证书下主子站握手成功；配置文档化 | P2 | 4 | T06 | 安全工程师 | `core/transport/connection.py`, `core/config.py`, `configs/*.yaml`, `docs/` |
-| **T21** | 冗余双通道 | 主站支持双连接（主备），通道切换与去重逻辑。**验收**：断主用备切换 < 阈值；新增切换测试 | P2 | 5 | T04 | 后端工程师 | `core/engine/master.py`, `master_session.py`, `core/transport/connection.py` |
-| **T22** | 非标准 TypeID 支持 | 扩展 `types.py`/`asdu.py` 支持厂商私有类型（可配置解析器）。**验收**：编解码往返正确；补用例 | P2 | 3 | — | 后端+测试 | `core/protocol/types.py`, `asdu.py`, `tests/` |
-| **T23** | pcap / pcapng 导出 | `capture/format.py` 新增 pcap/pcapng 写出（含正确链路类型与时间戳）。**验收**：Wireshark 可打开并解析 | P2 | 3 | — | 后端工程师 | `core/capture/format.py`, `recorder.py`, `capture_tool.py` |
-| **T24** | 文件传输 F_LS 八位组语义核实 | 对照 IEC 60870-5-104 与真机/标准，核实 F_LS（目录/段/文件就绪）八位组语义并修正实现。**验收**：真机联调或标准比对结论落地；补用例 | P2 | 3 | — | 后端+测试 | `core/protocol/file_transfer.py`, `tests/` |
+| ✅ **T20** | TLS / IEC 62351 安全传输 | 传输层新增 TLS 选项（`ssl.SSLContext`）与证书/密钥配置；主子站/多站支持 `tls.enabled`。**验收**：自签证书下主子站握手成功；配置文档化 | P2 | 4 | T06 | 安全工程师 | `core/transport/connection.py`, `core/config.py`, `configs/*.yaml`, `docs/` |
+| ✅ **T21** | 冗余双通道 | 主站支持双连接（主备），通道切换与去重逻辑。**验收**：断主用备切换 < 阈值；新增切换测试 | P2 | 5 | T04 | 后端工程师 | `core/engine/master.py`, `master_session.py`, `core/transport/connection.py` |
+| ✅ **T22** | 非标准 TypeID 支持 | 扩展 `types.py`/`asdu.py` 支持厂商私有类型（可配置解析器）。**验收**：编解码往返正确；补用例 | P2 | 3 | — | 后端+测试 | `core/protocol/types.py`, `asdu.py`, `tests/` |
+| ✅ **T23** | pcap / pcapng 导出 | `capture/format.py` 新增 pcap/pcapng 写出（含正确链路类型与时间戳）。**验收**：Wireshark 可打开并解析 | P2 | 3 | — | 后端工程师 | `core/capture/format.py`, `recorder.py`, `capture_tool.py` |
+| ✅ **T24** | 文件传输 F_LS 八位组语义核实 | 对照 IEC 60870-5-104 与真机/标准，核实 F_LS（目录/段/文件就绪）八位组语义并修正实现。**验收**：真机联调或标准比对结论落地；补用例 | P2 | 3 | — | 后端+测试 | `core/protocol/file_transfer.py`, `tests/` |
 
-> **任务统计**：待办 **24** 条（T01~T24），归档 **7** 条。Phase 0=3、Phase 1=6、Phase 2=6、Phase 3=4、Phase 4=5。
+> **任务统计**：**已完成 24/24，待办 0**（T01~T24），归档 **7** 条。Phase 0=3、Phase 1=6、Phase 2=6、Phase 3=4、Phase 4=5。
+
+### 2026-11-06 增强批次（T25~T31，全部完成）
+
+> 原 24 项交付完成后，按“先补可信度、再补交付链、最后补体验”的顺序新增 7 项；
+> 均已完成并纳入 CI/文档，故不再计入待办。
+
+| 任务ID | 任务名称 | 交付物 / 验收证据 |
+|--------|---------|------------------|
+| **T25** | 互操作语料库 + 回放回归 | `tests/fixtures/frames/`（7 场景合成基线 + golden manifest + `real/` 真机目录）；`tests/test_frame_corpus_replay.py` 逐帧解码 + MasterEngine 回放；支持导出 pcap |
+| **T26** | 解码器 fuzz / 属性测试 | `tests/test_protocol_fuzz.py`（Hypothesis）；APCI/ASDU/文件传输信息体畸形输入只抛 `ValueError`；截断 ASDU 严格拒绝（对象数量校验）、F_SG 段长度不足报错 |
+| **T27** | Windows CI + 发布流水线 | `.github/workflows/ci.yml` `windows-build` job（onedir exe 真实启动冒烟）；`.github/workflows/release.yml`（tag 校验 → 双平台 onefile → 冒烟 → SHA256SUMS → Release） |
+| **T28** | 性能 / 长稳基准 | `tests/perf/`（解码吞吐、10 万点快照、20 客户端并发约 2.9k 帧/秒、主站↔子站环回 soak）；**2h soak 实跑通过：7200s / 34,765 GI / 内存 +0.64 MB**；`-m "not perf"` 默认排除 |
+| **T29** | 一键诊断包 | `webui/diagnostics.py` + `GET /api/diagnostics/export` + 状态页按钮；配置私钥路径脱敏；契约文档 §2.10 |
+| **T30** | 一键环回 Demo | `python app.py --demo`：两个角色独立子进程、自动监听/连接/总召、Ctrl+C 统一回收；`--demo-seconds` 用于定时演示 |
+| **T31** | 分支覆盖 + 变异冒烟 | CI `--cov-branch`（当前 88.8%）；`tools/mutation_smoke.py` 12 个高价值变异全部被杀死，CI 独立 job |
+
+> **累计统计**：T01~T31 **全部完成，待办 0**。
 
 ---
 

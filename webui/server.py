@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from pathlib import Path
 
 from aiohttp import WSMsgType, web
@@ -461,6 +462,17 @@ def create_app(bridge: EngineBridge) -> web.Application:
             body=payload, content_type="application/json",
             headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
+    async def api_diagnostics_export(request: web.Request) -> web.Response:
+        """一键诊断包：状态/配置/日志/报文/事件/点表/历史库统计打包下载."""
+        from .diagnostics import build_diagnostics_zip
+
+        body = build_diagnostics_zip(bridge)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        name = f"iec104_{bridge.role}_diagnostics_{stamp}.zip"
+        return web.Response(
+            body=body, content_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
     async def api_slave_sim(request: web.Request) -> web.Response:
         try:
             body = await request.json()
@@ -666,6 +678,7 @@ def create_app(bridge: EngineBridge) -> web.Application:
     app.router.add_get("/api/export/session.json", api_export_session)
     app.router.add_get("/api/logs", api_logs)
     app.router.add_get("/api/logs/export", api_logs_export)
+    app.router.add_get("/api/diagnostics/export", api_diagnostics_export)
     app.router.add_post("/api/points/batch", api_points_batch)
     app.router.add_post("/api/slave/start", api_slave_start)
     app.router.add_post("/api/slave/stop", api_slave_stop)

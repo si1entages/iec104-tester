@@ -1165,6 +1165,17 @@ def _decode_u24le(data: bytes, offset: int) -> int:
     return data[offset] | (data[offset + 1] << 8) | (data[offset + 2] << 16)
 
 
+def _require_len(data: bytes, offset: int, size: int, name: str) -> None:
+    """信息体解析前的长度护栏：不足时抛 ``ValueError`` 而不是 ``IndexError``.
+
+    协议解析器面对截断/脏帧必须给出可诊断的 ``ValueError``（上层据此回
+    COT=42 或记录解码错误）；直接下标访问会让异常类型随实现细节漂移。
+    """
+    if offset < 0 or len(data) - offset < size:
+        available = max(0, len(data) - max(offset, 0))
+        raise ValueError(f"{name}: need {size} bytes at offset {offset}, have {available}")
+
+
 @dataclass
 class FileReady:
     """文件准备就绪 (F_FR_NA_1 = 120).
@@ -1179,6 +1190,7 @@ class FileReady:
 
     @classmethod
     def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> FileReady:
+        _require_len(data, offset, 6, "FileReady")
         fn = data[offset] | (data[offset + 1] << 8)
         fl = _decode_u24le(data, offset + 2)
         st = data[offset + 5]
@@ -1209,6 +1221,7 @@ class SectionReady:
 
     @classmethod
     def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> SectionReady:
+        _require_len(data, offset, 7, "SectionReady")
         fn = data[offset] | (data[offset + 1] << 8)
         sn = data[offset + 2]
         sl = _decode_u24le(data, offset + 3)
@@ -1249,6 +1262,7 @@ class CallDirectory:
 
     @classmethod
     def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> CallDirectory:
+        _require_len(data, offset, 4, "CallDirectory")
         fn = data[offset] | (data[offset + 1] << 8)
         sn = data[offset + 2]
         q = data[offset + 3]
@@ -1291,6 +1305,7 @@ class LastSection:
 
     @classmethod
     def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> LastSection:
+        _require_len(data, offset, 5, "LastSection")
         fn = data[offset] | (data[offset + 1] << 8)
         sn = data[offset + 2]
         lsq = data[offset + 3]
@@ -1316,6 +1331,7 @@ class AckFileSection:
 
     @classmethod
     def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> AckFileSection:
+        _require_len(data, offset, 4, "AckFileSection")
         fn = data[offset] | (data[offset + 1] << 8)
         sn = data[offset + 2]
         q = data[offset + 3]
@@ -1343,9 +1359,12 @@ class FileSegment:
 
     @classmethod
     def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0, length: int = 0) -> FileSegment:
+        _require_len(data, offset, 4, "FileSegment")
         fn = data[offset] | (data[offset + 1] << 8)
         sn = data[offset + 2]
         los = data[offset + 3]
+        # LOS 声明的段长度必须完整存在：截断帧不得静默返回半段数据
+        _require_len(data, offset + 4, los, "FileSegment")
         seg_data = data[offset + 4:offset + 4 + los]
         return cls(ioa=ioa, file_name=fn, section_name=sn, data=seg_data)
 
@@ -1369,10 +1388,11 @@ class DirectoryEntry:
 
     @classmethod
     def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> DirectoryEntry:
+        _require_len(data, offset, 13, "DirectoryEntry")
         fn = data[offset] | (data[offset + 1] << 8)
         fl = _decode_u24le(data, offset + 2)
         st = data[offset + 5]
-        tt = CP56Time2a.from_bytes(data, offset + 6) if len(data) >= offset + 13 else CP56Time2a()
+        tt = CP56Time2a.from_bytes(data, offset + 6)
         return cls(ioa=ioa, file_name=fn, file_length=fl, status=st, time_tag=tt)
 
     def to_bytes(self) -> bytes:
@@ -1395,6 +1415,7 @@ class FileSelectCallGet:
 
     @classmethod
     def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> FileSelectCallGet:
+        _require_len(data, offset, 4, "FileSelectCallGet")
         fn = data[offset] | (data[offset + 1] << 8)
         sn = data[offset + 2]
         q = data[offset + 3]
@@ -1421,6 +1442,7 @@ class FileReadyAck:
 
     @classmethod
     def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> FileReadyAck:
+        _require_len(data, offset, 6, "FileReadyAck")
         fn = data[offset] | (data[offset + 1] << 8)
         fl = _decode_u24le(data, offset + 2)
         st = data[offset + 5]
@@ -1446,6 +1468,7 @@ class SectionReadyAck:
 
     @classmethod
     def from_bytes(cls, data: bytes, offset: int = 0, ioa: int = 0) -> SectionReadyAck:
+        _require_len(data, offset, 7, "SectionReadyAck")
         fn = data[offset] | (data[offset + 1] << 8)
         sn = data[offset + 2]
         sl = _decode_u24le(data, offset + 3)

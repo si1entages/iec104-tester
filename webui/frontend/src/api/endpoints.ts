@@ -47,6 +47,7 @@ import type {
 
 export const LOGS_EXPORT_URL = '/api/logs/export'
 export const POINTS_CSV_URL = '/api/export/points.csv'
+export const DIAGNOSTICS_EXPORT_URL = '/api/diagnostics/export'
 
 function logsQuery(params: LogQueryParams): Record<string, string | number | undefined> {
   return {
