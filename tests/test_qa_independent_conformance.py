@@ -310,8 +310,9 @@ async def test_e2e_unknown_type_ca_cot_replies():
 
         cases = [
             (ASDU(type_id=55, sq=False, num=0, cot=COT.SPONT, common_addr=1).encode(), 42),
-            (ASDU(type_id=TypeID.C_IC_NA_1, sq=False, num=1, cot=COT.ACT,
-                  common_addr=99).encode(), 44),
+            # 未知 CA 用例必须是**结构合法**的帧（含 1 个对象）：否则严格解码
+            # 会先以“截断 ASDU”失败并回 COT=42，测不到 CA 分支。
+            (ASDUBuilder.build_general_interrogation(99, qoi=20), 44),
             (ASDU(type_id=TypeID.M_SP_NA_1, sq=False, num=0, cot=60,
                   common_addr=1).encode(), 43),
         ]

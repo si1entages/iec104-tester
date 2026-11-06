@@ -624,6 +624,11 @@ class ASDU:
             ))
             remaining = remaining[consumed:]
 
+        if len(asdu.objects) != num:
+            raise ValueError(
+                f"Truncated ASDU: expected {num} objects, decoded {len(asdu.objects)}"
+            )
+
         return asdu
 
     @classmethod
@@ -713,7 +718,11 @@ class ASDU:
                 consumed = len(data)
         else:
             if len(data) < data_size:
-                return None, None, 0
+                # 固定长度对象数据不足：显式报错，避免截断帧被静默吞掉
+                raise ValueError(
+                    f"Insufficient data for {type_id}: need {data_size}B, "
+                    f"have {len(data)}B"
+                )
             obj_data = decoder(data[:data_size])
             consumed = data_size
 

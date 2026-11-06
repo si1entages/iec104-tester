@@ -1,5 +1,7 @@
 """APCI帧编解码测试."""
 
+import pytest
+
 from core.protocol.apci import APCICodec
 from core.protocol.constants import (
     START_BYTE,
@@ -10,6 +12,13 @@ from core.protocol.constants import (
     U_TESTFR_ACT,
     U_TESTFR_CON,
 )
+
+
+def test_apci_rejects_length_below_control_field():
+    """长度域 0-3 不可能容纳 4 字节控制域，必须拒绝."""
+    for length in (0, 1, 2, 3):
+        with pytest.raises(ValueError, match="length too small"):
+            APCICodec.decode(bytes([START_BYTE, length, 0, 0, 0, 0]))
 
 
 def test_apci_u_frame():
