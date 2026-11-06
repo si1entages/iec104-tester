@@ -205,7 +205,7 @@ SlaveEngine 检测到数据变化 → send_spontaneous_*() → ASDU(COT=3 突发
 | 数据-point_table | `core/data/point_table.py` | 438 | 点表模型 + YAML | `PointTable` | 被引擎/桥依赖 | 中 |
 | 数据-history | `core/data/history.py` | 439 | SQLite 历史库 | `HistoryDB` | 被引擎依赖 | 低 |
 | **日志** | `core/logging_manager.py` | **246** | **结构化日志：内存环形缓冲 + JSONL 轮转 + Python logging 桥 + 订阅推送** | `LogManager`, `LogEntry` | 被 webui 依赖；经桥收纳 `iec104.*` | 中 |
-| Web-服务 | `webui/server.py` | **947** | aiohttp REST（**54 个 `/api/*` 端点**，含历史查询 §2.11、网络模拟 §2.12）+ WS | `create_app`, `run_server` | 依赖 bridge | 中 |
+| Web-服务 | `webui/server.py` | **997** | aiohttp REST（**55 个 `/api/*` 端点**，含历史查询 §2.11、网络模拟 §2.12、认证探测 §2.13）+ WS | `create_app`, `run_server` | 依赖 bridge | 中 |
 | Web-桥 | `webui/bridge.py` | **286** | Web 后端门面（组合下述三者，保持旧 API 形状） | `EngineBridge` | 依赖 session/points/events | 高 |
 | Web-会话 | `webui/session.py` | **339** | master/slave 启停与协议命令门面 | `EngineSession` | 依赖 engine/config | 高 |
 | Web-点表 | `webui/points.py` | **260** | 点表快照/批量/导入导出，同步引擎 | `PointService` | 依赖 data.point_table | 中 |
@@ -370,8 +370,9 @@ graph TD
 | **T31** | 分支覆盖 + 变异冒烟 | CI `--cov-branch`（当前 88.8%）；`tools/mutation_smoke.py` 12 个高价值变异全部被杀死，CI 独立 job |
 | **T32** | 历史查询页（2026-11-06 第二批） | `GET /api/history/{stats,data,frames,export}`（契约 §2.11/§4.9）+ Web「历史」页（数据/报文双页签、时间/类型/IOA/方向过滤、CSV 导出、未启用提示）；`tests/test_webui_history_endpoints.py`（4 例）+ `HistoryPage.test.tsx`（3 例）；全量 1288 passed |
 | **T33** | 网络异常模拟接入 Web UI（2026-11-06 第三批） | `/api/simulation`（GET/POST + reset/disconnect，契约 §2.12/§4.10）+ 状态页卡片（预设/自定义/手动断线/统计）；核心修复 `SimulationManager` 覆盖 raw 回调致 RX 绕过协议处理（改为传输层回调拦截 + 卸载恢复）；4 后端 + 3 前端用例；全量 1293 passed |
+| **T34** | Web 访问认证（2026-11-06 第三批） | `--http-host` + `--auth-token`（/`IEC104_AUTH_TOKEN`）；令牌保护 `/api/*` 与 `/ws`（Bearer / X-Auth-Token / `?token=`），`GET /api/auth` 公开探测（契约 §2.13）；前端 AuthGate + URL 令牌导入；非回环无令牌启动告警；4 后端 + 2 前端用例；全量 1297 passed |
 
-> **累计统计**：T01~T33 **全部完成，待办 0**。
+> **累计统计**：T01~T34 **全部完成，待办 0**。
 
 ---
 

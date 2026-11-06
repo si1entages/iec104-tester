@@ -182,6 +182,8 @@ python sim_tool.py --preset poor_wifi --mode master --host 127.0.0.1
 | `--no-gui` | headless CLI 模式（仅日志输出） | false |
 | `--test` | 运行自动化测试脚本 (YAML 文件或目录) | — |
 | `--http-port` | Web UI HTTP 端口 | 主站 8765 / 子站 8766 |
+| `--http-host` | Web UI 监听地址（0.0.0.0 会暴露到局域网） | 127.0.0.1 |
+| `--auth-token` | Web API 访问令牌（可选；亦可读环境变量 `IEC104_AUTH_TOKEN`） | — |
 | `--no-browser` | 启动 Web 服务时不自动打开浏览器 | false |
 | `--demo` | 一键环回演示：本机子站+主站并自动连接 | false |
 | `--demo-seconds` | 演示运行 N 秒后自动停止（0=直到 Ctrl+C） | 0 |
@@ -192,7 +194,8 @@ python sim_tool.py --preset poor_wifi --mode master --host 127.0.0.1
 | `--verify-client` | 子站要求并校验客户端证书（mTLS） | false |
 | `--tls-hostname` | 主站 TLS 主机名校验域名 | — |
 
-> 共 22 个参数，与 `python app.py --help` 一致。`--http-port` / `--no-browser` / `--demo` 仅 Web UI 入口生效。
+> 共 24 个参数，与 `python app.py --help` 一致。`--http-port` / `--http-host` / `--no-browser` / `--demo` 仅 Web UI 入口生效。
+> 监听非回环地址（`--http-host 0.0.0.0`）时请同时设置 `--auth-token`；未设置会打印醒目告警。
 
 ## ⚙️ 配置
 

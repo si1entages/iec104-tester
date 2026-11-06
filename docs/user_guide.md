@@ -149,6 +149,29 @@ python app.py --mode slave --point-table configs/demo_points.yaml
 python app.py --mode slave --no-gui --log-level DEBUG --log-file slave.log
 ```
 
+### 场景4：局域网访问与访问令牌（可选）
+
+Web UI 默认只监听 `127.0.0.1`（仅本机可访问）。需要从其它主机（如平板/同事电脑）
+打开时，显式改监听地址并**同时设置访问令牌**：
+
+```bash
+python app.py --mode master --http-host 0.0.0.0 --auth-token "change-me"
+# 也可以用环境变量，避免令牌进入命令行历史：
+set IEC104_AUTH_TOKEN=change-me        # Windows
+export IEC104_AUTH_TOKEN=change-me     # Linux/macOS
+python app.py --mode master --http-host 0.0.0.0
+```
+
+- 启用令牌后，除 `GET /api/auth` 外的所有 `/api/*` 与 `/ws` 都需要携带令牌；
+  浏览器首次打开会弹出令牌输入框，也可用
+  `http://<host>:<port>/app/?token=<token>` 一次性导入（随后令牌从地址栏移除，
+  保存在浏览器 localStorage）。
+- 令牌携带形态：`Authorization: Bearer <token>`、`X-Auth-Token: <token>`、
+  `?token=<token>`（WS 必须用 query）。缺失/错误返回 401。
+- **未设置令牌却监听非回环地址**时，启动日志会打印醒目告警：局域网内任何主机
+  都能调用遥控/点表下发等接口。生产网络请勿如此部署。
+- `--demo` 一键演示始终只监听 127.0.0.1，忽略 `--auth-token` / `--http-host`。
+
 ---
 
 ## 4. 主站模式
