@@ -376,8 +376,9 @@ graph TD
 | **T37** | 全流程验收进 CI（2026-11-07） | `.github/workflows/ci.yml` 新增 `e2e-full-flow` job：job 内拉起主站(8765)/子站(8766)/IEC 24040 → 等就绪（40s 上限）→ `tests/e2e/qa_full_flow.py` 12 阶段 → trap 回收；失败上传 `master.log`/`slave.log`；本机实测 12/12、exit 0 |
 | **T38** | 前端 i18n 阶段一（2026-11-07） | 零依赖 `src/i18n`（zh/en 词典、`t()`/`useT()`/`tNow()`、占位符）+ 头部「中 / EN」（localStorage 记忆、antd locale 联动）；覆盖外壳/认证/状态/日志/历史/模拟卡片/共享列宽/运行时告警；`i18n:inventory` 清单剩余 20 文件/535 行（工作台内部，后续批次）；5 用例；前端 123 passed |
 | **T39** | 文件传输真机核实准备（2026-11-07） | `docs/file_transfer_open_items.md`（5 项开放清单：NOF/SCQ/WITH_DEACT/多节/FRQ-SRQ + 步骤/判定/回填模板）+ `tests/e2e/qa_file_transfer_probe.py`（只读探针，默认目录召唤；本机模拟器跑通）；文档互链；**结论待真机窗口**，代码未臆测改动 |
+| **T40** | 前端 i18n 阶段二（2026-11-07） | 主站/子站/多站工作台、报文解析与查看器（lib/frame.ts 双语对照表）、共享点表组件全部迁入词典；`npm run i18n:inventory` = **0 文件 / 0 行**；zh 文案逐字保留；前端 123 passed |
 
-> **累计统计**：T01~T39 **全部完成，待办 0**（T38 为阶段一，T39 结论待真机窗口回填）。
+> **累计统计**：T01~T40 **全部完成，待办 0**（T39 结论待真机窗口回填）。
 
 ---
 
