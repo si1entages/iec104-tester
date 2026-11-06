@@ -207,6 +207,19 @@
 > `config.tls.keyfile` 脱敏为 `<redacted>`；日志/报文/点表可能含现场业务值，
 > 转发前请确认接收方。前端「运行状态」卡片提供下载按钮。
 
+### 2.11 历史库查询（历史查询页）
+
+> 历史库按角色分库（SQLite，默认开启；`--no-history` 关闭）。未启用时
+> `/api/history/stats|data|frames` 返回 `{ok: true, enabled: false, ...}`（`rows` 为空数组），
+> `/api/history/export` 返回 400。时间参数均为 **epoch 秒**；查询按时间戳**新→旧**返回。
+
+| 方法 | 路径 | 请求 | 响应 |
+|------|------|------|------|
+| GET | `/api/history/stats` | — | `{ok, enabled, stats}`（stats 字段见 `HistoryDB.get_stats()`：`data_records`/`frame_records`/`buffered_data`/`buffered_frames`/`oldest_data`/`newest_data`/`db_size_bytes`/`dropped_records`） |
+| GET | `/api/history/data` | query：`point_type?: str`（yx/yc/ym，空=全部）, `ioa?: int (≥0)` , `start?: number`, `end?: number`（epoch 秒）, `limit: int=500 (≤10000)` | `{ok, enabled, rows: HistoryDataRecord[]}` |
+| GET | `/api/history/frames` | query：`direction?: "rx"\|"tx"`（空=全部）, `start?: number`, `end?: number`, `limit: int=500 (≤10000)` | `{ok, enabled, rows: HistoryFrameRecord[]}` |
+| GET | `/api/history/export` | query：`type: "data"\|"frames"="data"`, 其余过滤参数同上（`limit` ≤200000） | `text/csv` 附件（`Content-Disposition`） |
+
 ---
 
 ## 3. WebSocket `/ws`
@@ -354,6 +367,19 @@ ResponseBehavior = {
 
 > 取值语义与后端默认值见 `core/engine/slave_response.py::ResponseBehavior.from_dict`。
 > `GET` 为**纯新增端点**，按 §1.2「兼容性变更」策略**不递增** `schemaVersion`。
+
+### 4.9 `HistoryDataRecord` / `HistoryFrameRecord` / `HistoryStats`
+
+```ts
+HistoryDataRecord   = { id: number, ts: number, point_type: "yx"|"yc"|"ym"|string,
+                        ioa: number, value: string, quality: string, source: string }
+HistoryFrameRecord  = { id: number, ts: number, direction: "rx"|"tx"|string,
+                        frame_type: string, hex: string, parsed: string, client: string }
+HistoryStats        = { data_records: number, frame_records: number,
+                        buffered_data: number, buffered_frames: number,
+                        oldest_data: number, newest_data: number,
+                        db_size_bytes: number, dropped_records: number }
+```
 
 ---
 

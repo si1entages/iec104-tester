@@ -4,6 +4,7 @@ import {
   ApiOutlined,
   CloudServerOutlined,
   DashboardOutlined,
+  DatabaseOutlined,
   DeploymentUnitOutlined,
   FileTextOutlined,
   ThunderboltOutlined,
@@ -25,6 +26,7 @@ const MENU_ITEMS: { key: PageKey; icon: ReactNode; label: string; roles: Role[] 
   { key: 'multi', icon: <CloudServerOutlined />, label: '多站', roles: ['master', 'slave'] },
   { key: 'status', icon: <DashboardOutlined />, label: '状态总览', roles: ['master', 'slave'] },
   { key: 'logs', icon: <FileTextOutlined />, label: '日志', roles: ['master', 'slave'] },
+  { key: 'history', icon: <DatabaseOutlined />, label: '历史', roles: ['master', 'slave'] },
 ]
 
 const WS_BADGE: Record<WsStatus, { status: 'processing' | 'warning' | 'error' | 'default'; text: string }> = {

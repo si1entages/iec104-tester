@@ -7,6 +7,12 @@ import type { PointPatch } from '../lib/pointValue'
 import type {
   EngineEvent,
   Frame,
+  HistoryDataParams,
+  HistoryDataRecord,
+  HistoryFramesParams,
+  HistoryFrameRecord,
+  HistoryRowsResponse,
+  HistoryStatsResponse,
   LogQueryParams,
   LogRow,
   MultiStatusResponse,
@@ -36,6 +42,9 @@ export const queryKeys = {
   liveEvents: ['events', 'live'] as const,
   multiStatus: ['multi', 'status'] as const,
   multiSummary: ['multi', 'summary'] as const,
+  historyStats: ['history', 'stats'] as const,
+  historyData: (params: HistoryDataParams) => ['history', 'data', params] as const,
+  historyFrames: (params: HistoryFramesParams) => ['history', 'frames', params] as const,
 }
 
 // ── 查询 ───────────────────────────────────────────────────────────────
@@ -102,6 +111,41 @@ export function useLogsQuery(params: LogQueryParams) {
     queryKey: queryKeys.logs(params),
     queryFn: () => api.logs({ ...params, limit: params.limit ?? 200 }),
     refetchInterval: 10000,
+  })
+}
+
+/** 历史库统计（轻量，页面挂载期间低频轮询即可） */
+export function useHistoryStatsQuery() {
+  return useQuery<HistoryStatsResponse>({
+    queryKey: queryKeys.historyStats,
+    queryFn: api.history.stats,
+    staleTime: 5000,
+    refetchInterval: 15000,
+  })
+}
+
+/**
+ * 数据历史查询。不做自动轮询——历史是静态存量数据，
+ * 由页面「查询」按钮变更 params（queryKey 含 params）触发请求。
+ */
+export function useHistoryDataQuery(params: HistoryDataParams, enabled = true) {
+  return useQuery<HistoryRowsResponse<HistoryDataRecord>>({
+    queryKey: queryKeys.historyData(params),
+    queryFn: () => api.history.data(params),
+    enabled,
+    refetchOnWindowFocus: false,
+    staleTime: 0,
+  })
+}
+
+/** 报文历史查询，同 useHistoryDataQuery。 */
+export function useHistoryFramesQuery(params: HistoryFramesParams, enabled = true) {
+  return useQuery<HistoryRowsResponse<HistoryFrameRecord>>({
+    queryKey: queryKeys.historyFrames(params),
+    queryFn: () => api.history.frames(params),
+    enabled,
+    refetchOnWindowFocus: false,
+    staleTime: 0,
   })
 }
 

@@ -472,6 +472,66 @@ export interface MultiSummaryResponse {
   stations: StationSummary[]
 }
 
+// ── 历史库查询（契约 §2.11 / §4.9）──────────────────────────────────────
+
+export interface HistoryDataRecord {
+  id: number
+  ts: number
+  point_type: string
+  ioa: number
+  value: string
+  quality: string
+  source: string
+}
+
+export interface HistoryFrameRecord {
+  id: number
+  ts: number
+  direction: string
+  frame_type: string
+  hex: string
+  parsed: string
+  client: string
+}
+
+export interface HistoryStats {
+  data_records: number
+  frame_records: number
+  buffered_data: number
+  buffered_frames: number
+  oldest_data: number
+  newest_data: number
+  db_size_bytes: number
+  dropped_records: number
+}
+
+export interface HistoryDataParams {
+  point_type?: string
+  ioa?: number
+  start?: number
+  end?: number
+  limit?: number
+}
+
+export interface HistoryFramesParams {
+  direction?: string
+  start?: number
+  end?: number
+  limit?: number
+}
+
+export interface HistoryRowsResponse<T> {
+  ok: boolean
+  enabled: boolean
+  rows: T[]
+}
+
+export interface HistoryStatsResponse {
+  ok: boolean
+  enabled: boolean
+  stats: HistoryStats
+}
+
 // ── WebSocket ──────────────────────────────────────────────────────────
 
 /** WS 信封：`{kind, schemaVersion, ts, data}` */

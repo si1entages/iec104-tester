@@ -4,7 +4,7 @@ import { applyThemeToDom, resolveInitialTheme, saveThemePreference } from '../li
 import type { ThemeMode } from '../lib/themePreference'
 import type { WsStatus } from '../ws/client'
 
-export type PageKey = 'status' | 'master' | 'slave' | 'multi' | 'logs'
+export type PageKey = 'status' | 'master' | 'slave' | 'multi' | 'logs' | 'history'
 
 /**
  * 纯 UI 状态（T11）。

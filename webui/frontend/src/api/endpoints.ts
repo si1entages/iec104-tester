@@ -1,6 +1,6 @@
 /**
- * 全部 REST 端点（T11/T08/T09/T16）——与 `webui/api_contract.md` §2 一一对应
- * （42 个 + /api/schema，合计 43）。
+ * 全部 REST 端点（T11/T08/T09/T16 + 历史查询页）——与 `webui/api_contract.md` §2 一一对应
+ * （50 个 /api/* 端点，含 /api/schema）。
  * 端点集合由 `webui/contract_check.py` 与 `src/api/endpoints.test.ts` 双向自检，防止契约漂移。
  */
 
@@ -14,6 +14,12 @@ import type {
   FileRequest,
   FrameDecodeResponse,
   GiRequest,
+  HistoryDataParams,
+  HistoryDataRecord,
+  HistoryFramesParams,
+  HistoryFrameRecord,
+  HistoryRowsResponse,
+  HistoryStatsResponse,
   ImportFormat,
   LogQueryParams,
   LogsResponse,
@@ -48,6 +54,7 @@ import type {
 export const LOGS_EXPORT_URL = '/api/logs/export'
 export const POINTS_CSV_URL = '/api/export/points.csv'
 export const DIAGNOSTICS_EXPORT_URL = '/api/diagnostics/export'
+export const HISTORY_EXPORT_URL = '/api/history/export'
 
 function logsQuery(params: LogQueryParams): Record<string, string | number | undefined> {
   return {
@@ -55,6 +62,19 @@ function logsQuery(params: LogQueryParams): Record<string, string | number | und
     category: params.category,
     source: params.source,
     q: params.q,
+    limit: params.limit,
+  }
+}
+
+function historyQuery(
+  params: HistoryDataParams & HistoryFramesParams,
+): Record<string, string | number | undefined> {
+  return {
+    point_type: params.point_type,
+    ioa: params.ioa,
+    direction: params.direction,
+    start: params.start,
+    end: params.end,
     limit: params.limit,
   }
 }
@@ -137,4 +157,13 @@ export const api = {
   // ── 日志 ─────────────────────────────────────────────────────────────
   logs: (params: LogQueryParams = {}) =>
     apiGet<LogsResponse>('/api/logs', logsQuery(params)),
+
+  // ── 历史库查询（契约 §2.11）──────────────────────────────────────────
+  history: {
+    stats: () => apiGet<HistoryStatsResponse>('/api/history/stats'),
+    data: (params: HistoryDataParams = {}) =>
+      apiGet<HistoryRowsResponse<HistoryDataRecord>>('/api/history/data', historyQuery(params)),
+    frames: (params: HistoryFramesParams = {}) =>
+      apiGet<HistoryRowsResponse<HistoryFrameRecord>>('/api/history/frames', historyQuery(params)),
+  },
 }

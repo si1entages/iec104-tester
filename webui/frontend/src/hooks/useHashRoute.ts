@@ -3,7 +3,7 @@ import { useEffect } from 'react'
 import { useUiStore } from '../store/uiStore'
 import type { PageKey } from '../store/uiStore'
 
-const PAGES: PageKey[] = ['status', 'master', 'slave', 'multi', 'logs']
+const PAGES: PageKey[] = ['status', 'master', 'slave', 'multi', 'logs', 'history']
 
 /** 解析当前 hash → 页面 key；不认识的 hash 返回 null（保持现状） */
 export function pageFromHash(hash: string = window.location.hash): PageKey | null {

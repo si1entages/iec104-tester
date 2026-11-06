@@ -17,6 +17,7 @@ const SlavePage = lazy(() => import('./pages/slave/SlavePage'))
 const MultiPage = lazy(() => import('./pages/multi/MultiPage'))
 const StatusPage = lazy(() => import('./pages/StatusPage').then((m) => ({ default: m.StatusPage })))
 const LogsPage = lazy(() => import('./pages/LogsPage').then((m) => ({ default: m.LogsPage })))
+const HistoryPage = lazy(() => import('./pages/HistoryPage').then((m) => ({ default: m.HistoryPage })))
 
 function PageFallback() {
   return (
@@ -60,6 +61,8 @@ export default function App() {
             <MultiPage />
           ) : page === 'logs' ? (
             <LogsPage />
+          ) : page === 'history' ? (
+            <HistoryPage />
           ) : (
             <StatusPage />
           )}

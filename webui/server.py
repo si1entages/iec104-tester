@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import json
 import logging
 import time
@@ -21,6 +23,11 @@ STATIC = Path(__file__).parent / "static"
 APP_STATIC = STATIC / "app"
 # 项目资源目录（图标等）：webui/ 的上一级 resources/
 RESOURCES = Path(__file__).parent.parent / "resources"
+
+# 历史查询页参数上限：单次查询 1 万行（表格分页足够），CSV 导出 20 万行
+# （更大导出请用 CLI capture_tool / 诊断包，避免浏览器内存压力）
+HISTORY_QUERY_MAX_LIMIT = 10000
+HISTORY_EXPORT_MAX_ROWS = 200000
 
 
 @web.middleware
@@ -462,6 +469,146 @@ def create_app(bridge: EngineBridge) -> web.Application:
             body=payload, content_type="application/json",
             headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
+    # ── 历史库查询（历史查询页，api_contract.md §2.11）─────────────────
+
+    def _parse_history_query(request: web.Request, max_limit: int) -> tuple[dict, str | None]:
+        """解析历史查询公共参数（start/end/limit）；返回 (kwargs, 错误信息)."""
+        kwargs: dict = {"limit": 500}
+        for key, field in (("start", "start_time"), ("end", "end_time")):
+            raw = request.query.get(key, "")
+            if not raw:
+                continue
+            try:
+                value = float(raw)
+            except ValueError:
+                return {}, f"invalid {key}"
+            if value < 0:
+                return {}, f"invalid {key}"
+            kwargs[field] = value
+        raw_limit = request.query.get("limit", "")
+        if raw_limit:
+            try:
+                limit = int(raw_limit)
+            except ValueError:
+                return {}, "invalid limit"
+            if limit <= 0:
+                return {}, "invalid limit"
+            kwargs["limit"] = min(limit, max_limit)
+        return kwargs, None
+
+    def _parse_history_ioa(request: web.Request) -> tuple[int, web.Response | None]:
+        """解析可选 ioa 参数；返回 (ioa, 错误响应)（无参数时 ioa=-1 表示不过滤）."""
+        raw = request.query.get("ioa", "")
+        if not raw:
+            return -1, None
+        try:
+            ioa = int(raw)
+        except ValueError:
+            return -1, web.json_response({"ok": False, "error": "invalid ioa"}, status=400)
+        if ioa < 0:
+            return -1, web.json_response({"ok": False, "error": "invalid ioa"}, status=400)
+        return ioa, None
+
+    async def api_history_stats(request: web.Request) -> web.Response:
+        """历史库统计（未启用时 enabled=false）."""
+        db = bridge.history_db
+        if db is None:
+            return web.json_response({"ok": True, "enabled": False, "stats": {}})
+        try:
+            stats = db.get_stats()
+        except Exception as e:
+            return web.json_response(
+                {"ok": False, "error": f"history stats failed: {e}"}, status=500)
+        return web.json_response({"ok": True, "enabled": True, "stats": stats})
+
+    async def api_history_data(request: web.Request) -> web.Response:
+        """数据历史查询: ?point_type=yx&ioa=100&start=<epoch秒>&end=<epoch秒>&limit=500."""
+        db = bridge.history_db
+        if db is None:
+            return web.json_response({"ok": True, "enabled": False, "rows": []})
+        kwargs, err = _parse_history_query(request, HISTORY_QUERY_MAX_LIMIT)
+        if err:
+            return web.json_response({"ok": False, "error": err}, status=400)
+        ioa, err_resp = _parse_history_ioa(request)
+        if err_resp is not None:
+            return err_resp
+        rows = db.query_data(
+            point_type=request.query.get("point_type") or "",
+            ioa=ioa,
+            **kwargs,
+        )
+        return web.json_response({"ok": True, "enabled": True, "rows": [
+            {"id": r.id, "ts": r.timestamp, "point_type": r.point_type,
+             "ioa": r.ioa, "value": r.value, "quality": r.quality, "source": r.source}
+            for r in rows
+        ]})
+
+    async def api_history_frames(request: web.Request) -> web.Response:
+        """报文历史查询: ?direction=rx&start=<epoch秒>&end=<epoch秒>&limit=500."""
+        db = bridge.history_db
+        if db is None:
+            return web.json_response({"ok": True, "enabled": False, "rows": []})
+        kwargs, err = _parse_history_query(request, HISTORY_QUERY_MAX_LIMIT)
+        if err:
+            return web.json_response({"ok": False, "error": err}, status=400)
+        rows = db.query_frames(
+            direction=request.query.get("direction") or "",
+            **kwargs,
+        )
+        return web.json_response({"ok": True, "enabled": True, "rows": [
+            {"id": r.id, "ts": r.timestamp, "direction": r.direction,
+             "frame_type": r.frame_type, "hex": r.hex_data, "parsed": r.parsed,
+             "client": r.client_id}
+            for r in rows
+        ]})
+
+    async def api_history_export(request: web.Request) -> web.Response:
+        """历史记录导出 CSV 下载: ?type=data|frames&（同查询过滤参数）."""
+        db = bridge.history_db
+        if db is None:
+            return web.json_response(
+                {"ok": False, "error": "history disabled (--no-history)"}, status=400)
+        kind = request.query.get("type", "data")
+        if kind not in ("data", "frames"):
+            return web.json_response({"ok": False, "error": "invalid type"}, status=400)
+        kwargs, err = _parse_history_query(request, HISTORY_EXPORT_MAX_ROWS)
+        if err:
+            return web.json_response({"ok": False, "error": err}, status=400)
+
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        if kind == "data":
+            ioa, err_resp = _parse_history_ioa(request)
+            if err_resp is not None:
+                return err_resp
+            rows = db.query_data(
+                point_type=request.query.get("point_type") or "",
+                ioa=ioa,
+                **kwargs,
+            )
+            writer.writerow(["时间戳", "类型", "IOA", "值", "品质", "来源"])
+            for r in rows:
+                writer.writerow([
+                    time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r.timestamp)),
+                    r.point_type, r.ioa, r.value, r.quality, r.source,
+                ])
+        else:
+            rows = db.query_frames(
+                direction=request.query.get("direction") or "",
+                **kwargs,
+            )
+            writer.writerow(["时间戳", "方向", "帧类型", "HEX数据", "解析", "客户端"])
+            for r in rows:
+                writer.writerow([
+                    time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r.timestamp)),
+                    r.direction, r.frame_type, r.hex_data, r.parsed, r.client_id,
+                ])
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        name = f"iec104_{bridge.role}_history_{kind}_{stamp}.csv"
+        return web.Response(
+            body=buf.getvalue(), content_type="text/csv", charset="utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
     async def api_diagnostics_export(request: web.Request) -> web.Response:
         """一键诊断包：状态/配置/日志/报文/事件/点表/历史库统计打包下载."""
         from .diagnostics import build_diagnostics_zip
@@ -679,6 +826,10 @@ def create_app(bridge: EngineBridge) -> web.Application:
     app.router.add_get("/api/logs", api_logs)
     app.router.add_get("/api/logs/export", api_logs_export)
     app.router.add_get("/api/diagnostics/export", api_diagnostics_export)
+    app.router.add_get("/api/history/stats", api_history_stats)
+    app.router.add_get("/api/history/data", api_history_data)
+    app.router.add_get("/api/history/frames", api_history_frames)
+    app.router.add_get("/api/history/export", api_history_export)
     app.router.add_post("/api/points/batch", api_points_batch)
     app.router.add_post("/api/slave/start", api_slave_start)
     app.router.add_post("/api/slave/stop", api_slave_stop)

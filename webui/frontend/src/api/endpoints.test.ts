@@ -62,6 +62,9 @@ describe('REST 端点覆盖（与 api_contract.md 对齐）', () => {
     ]) {
       expect(typeof fn).toBe('function')
     }
+    for (const fn of [api.history.stats, api.history.data, api.history.frames]) {
+      expect(typeof fn).toBe('function')
+    }
   })
 })
 
