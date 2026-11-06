@@ -29,7 +29,8 @@ test.beforeAll(async ({ request }) => {
   const res = await request.post(`${SLAVE}/api/slave/start`, {
     data: { host: '0.0.0.0', port: IEC_PORT, addr: 1 },
   })
-  expect((await res.json()).ok).toBeTruthy()
+  const body = await res.json()
+  expect(body.ok, `slave/start 失败：${JSON.stringify(body)}`).toBeTruthy()
 })
 
 test.afterAll(async ({ request }) => {

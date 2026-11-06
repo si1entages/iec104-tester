@@ -23,6 +23,8 @@ import pytest
 
 from tests.conformance.test_conformance import (
     ConformanceTestSuite,
+)
+from tests.conformance.test_conformance import (
     TestResult as SuiteResult,
 )
 
