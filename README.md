@@ -12,8 +12,8 @@
   <img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/WebUI-aiohttp-41CD52" alt="Web UI">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
-  <img src="https://img.shields.io/badge/IEC--104-Complete-brightgreen.svg" alt="IEC 104">
-  <img src="https://img.shields.io/badge/Tests-1151-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/IEC--104-72%20TypeIDs-brightgreen.svg" alt="IEC 104">
+  <img src="https://img.shields.io/badge/Tests-1284-brightgreen.svg" alt="Tests">
 </p>
 
 ---
@@ -24,26 +24,28 @@
 
 ### 协议实现（`core/protocol`）
 
-- 59 种标准 ASDU 类型标识 + **非标厂商私有 TypeID 注册**（YAML 声明字段即可编解码往返，未注册仍按标准回 COT=42）
+- 72 个已定义 TypeID 全部可构造/可解码（标准类型 + CP24/继保事件/成组单点/无品质/位模式等变体）+ **非标厂商私有 TypeID 注册**（YAML 声明字段即可编解码往返，未注册仍按标准回 COT=42）
 - APCI I/S/U 帧；k-w 流控；t0/t1/t2/t3 定时器；STARTDT/STOPDT/TESTFR 状态机
 - CP24Time2a / CP56Time2a；品质描述词
-- **文件传输**（F_FR/F_SR/F_SC/F_LS/F_AF/F_SG/F_DR）字节级语义已按多个独立参考实现逐字节核实（详见 [`docs/file_transfer_fls.md`](docs/file_transfer_fls.md)）
+- **文件传输**（F_FR/F_SR/F_SC/F_LS/F_AF/F_SG/F_DR 及 F_*_NB 确认）字节级语义已按多个独立参考实现逐字节核实（详见 [`docs/file_transfer_fls.md`](docs/file_transfer_fls.md)）
 - **TLS 传输层加密**（证书/CA 校验、双向认证 mTLS；⚠ 仅传输层加密，**不等于 IEC 62351 合规**，边界见 [`docs/tls.md`](docs/tls.md)）
 
-### Web UI（浅色工业风，按 ISA-101 高性能 HMI 惯例设计）
+### Web UI（ISA-101 浅色工业风，支持深色/浅色主题切换）
 
-- **主站工作台**：十万行点表虚拟滚动（只渲染可视窗口）、命令面板（系统命令/遥控/设点/文件命令）、实时报文查看器、点位趋势图（只采样被订阅点位）
-- **子站工作台**：手动置数、**应答行为配置**（延迟/丢帧/损坏/不响应/品质/错误 COT）、数据模拟（手动/自动）
+- **主站工作台**：十万行点表虚拟滚动（只渲染可视窗口）、命令面板（系统命令/遥控/设点/步/比特串/延时/参数/文件命令）、实时报文查看器（悬停 HEX 逐段翻译）、点位趋势图（只采样被订阅点位）
+- **子站工作台**：点表编辑与手动置数、**应答行为配置**（延迟/丢帧/损坏/不响应/品质/错误 COT）、数据模拟（手动/自动、YX/YC 范围模式）
 - **多站页**：多子站卡片管理与聚合状态
-- **日志页**：历史库报文查询（含过滤与订阅）
+- **日志页**：结构化日志分级/分类/来源过滤、关键字搜索、暂停/清空、JSONL 导出
+- 深色/浅色主题切换（首次跟随系统偏好，手动切换后记忆）
 - 点值经 WebSocket 实时刷新；按钮可用性由服务端状态驱动；数据表表头吸顶、数值等宽（tabular-nums）
 
 ### 主站（`core/engine/master.py`）
 
 - 连接管理、断线重连；**冗余双通道**（主备自动切换 + 切换窗口去重，见 `docs/redundancy.md`）
-- 总召唤 / **组召唤（QOI 0–23）**、累计量召唤、时钟同步、复位进程、测试命令
+- 总召唤 / **组召唤（1–16 组；20=站召唤）**、累计量召唤、时钟同步、复位进程、测试命令
 - 单/双命令（SBO 两段式/直发）、设点（短浮点/归一化/标度化）、读命令、参数命令、文件目录/选择/请求/确认
 - 点位自学习（报文中出现而定义表没有的 IOA 自动补点）、周期总召唤、定义表批量改组/启用禁用、YAML 导入导出、CSV/会话 JSON 导出
+- 定义表双击值直接下发命令（YK/YC/STEP 经确认弹窗；SBO 仍走选择-执行，不绕过）
 - 实时报文列表（U/S/I + TypeID 摘要）、事件日志
 
 ### 子站（`core/engine/slave.py`）
@@ -51,18 +53,22 @@
 - TCP 多客户端监听；系统命令响应；DEACT；SOE/自发上送
 - 可编辑点表（点 YX 切换、改 YC 自发上送）
 - **响应注入**（延迟、丢帧、损坏、不响应、品质、错误 COT）
-- **命令联动**（真机语义：遥控→同 IOA 遥信变位、遥调→同 IOA 遥测更新，带时标 COT=3 上送）
-- 数据模拟（手动/自动）；YAML 点表
+- **命令联动**（真机语义：遥控→同 IOA 遥信变位、遥调→同 IOA 遥测更新、升降→档位点更新，带时标 COT=3 上送）
+- 数据模拟（手动/自动、YX/YC 范围模式）；YAML 点表；步位置（STEP）点建模
 
-### 数据与运维
+### 数据、运维与质量
 
 - **历史库默认开启**（SQLite，按角色分库），`--no-history` 可关闭；保留期/条数/容量三重清理
 - **报文导出**：`.i104` / `.json` / **pcap / pcapng**（Wireshark 可直接打开）
+- **一键诊断包**：状态/配置（私钥脱敏）/日志/报文/事件/点表/历史统计打包下载（状态页按钮或 `GET /api/diagnostics/export`）
+- **一键环回演示**：`python app.py --demo`（本机子站+主站自动监听/连接/总召）
+- 质量门禁：互操作语料库回放、Hypothesis fuzz、20 客户端并发、2h 环回 soak、分支覆盖 88.82%、协议层变异 12/12
 - 多站并发（`run_multi_station.py`）、网络异常模拟（`sim_tool.py`）、YAML 自动化测试（`run_tests.py`）
 
-### 打包产物
+### 打包与发布
 
-- `python build/build_all.py` 一键产出 **`dist/iec104-master` / `dist/iec104-slave`** 两个免安装目录（含 Web 前端、配置、资源），双击 exe 即用（详见 [`docs/user_guide.md`](docs/user_guide.md)）
+- `python build/build_all.py` 一键产出 **`dist/iec104-master` / `dist/iec104-slave`** 两个免安装目录（含 Web 前端、配置、资源），双击 exe 即用；`--onefile` 可产出单文件 exe
+- 打 `v*` tag 触发双平台发布流水线：版本校验 → Windows/Linux onefile → 启动冒烟 → `SHA256SUMS` → GitHub Release（详见 [`docs/user_guide.md`](docs/user_guide.md)）
 
 ## 🚀 快速开始
 
@@ -108,16 +114,24 @@ python app.py --mode master --host 127.0.0.1 --port 2404 --no-browser
 ## 📦 安装
 
 ```bash
-git clone https://github.com/yourname/iec104-tester.git
+git clone https://github.com/si1entages/iec104-tester.git
 cd iec104-tester
 python -m venv venv
 # Windows:
 venv\Scripts\pip install -r requirements.txt
 # Linux/macOS:
-pip install -r requirements.txt
+venv/bin/pip install -r requirements.txt
 ```
 
-运行依赖：`PyYAML`、`aiohttp`。开发测试另需 `pytest`、`pytest-asyncio`、`ruff`；打包另需 `pyinstaller>=6.0`（见 `pyproject.toml` 可选依赖组）。
+运行依赖：`PyYAML`、`aiohttp`。
+
+```bash
+# 开发/测试（pytest、pytest-asyncio、pytest-cov、hypothesis、psutil、ruff）
+pip install -e ".[dev]"
+
+# 打包（pyinstaller）
+pip install -e ".[build]"
+```
 
 ## 💻 命令行
 
@@ -201,26 +215,31 @@ custom_types: []   # 非标厂商私有 TypeID 注册
 ## 🧪 测试
 
 ```bash
-python -m pytest tests/ -q              # 单元 + 集成（1281 例；性能基准默认排除）
+python -m pytest tests/ -q              # 单元 + 集成（1284 例；性能基准默认排除）
+python -m pytest tests/ -q --cov=core --cov-branch --cov-report=term-missing --cov-fail-under=88
 python -m pytest tests/ -m perf -q      # 性能基准（解码/10 万点/20 客户端并发/环回 soak）
+IEC104_SOAK_SECONDS=7200 python -m pytest tests/perf/test_soak_loopback.py -m perf -q
 python run_tests.py tests/scripts/      # YAML 脚本
 python tests/e2e/qa_full_flow.py        # 全流程验收
 python tools/mutation_smoke.py          # 协议层变异冒烟（12/12 必须被杀死）
 ```
 
+- 当前基线：**1284 passed，4 deselected**；`core/` 分支覆盖率 **88.82%**（门禁 88%）
+- 20 客户端并发实测约 **2.9k 帧/秒**；2h soak 实测 **7200s / 34,765 次 GI / 内存 +0.64 MB**
 - 互操作语料库：`tests/fixtures/frames/`（合成基线 + `real/` 真机目录），
   `tests/test_frame_corpus_replay.py` 做 golden 解码与主站回放回归；
-- 协议 fuzz：`tests/test_protocol_fuzz.py`（Hypothesis；畸形输入只允许 `ValueError`）；
+- 协议 fuzz：`tests/test_protocol_fuzz.py`（Hypothesis；APCI/ASDU/文件传输畸形输入只允许 `ValueError`）；
 - 诊断包：Web 状态页「导出诊断包」或 `GET /api/diagnostics/export`。
 
 ## 🏗 项目结构
 
 ```
 iec104-tester/
-├── app.py                 # CLI/Web 兼容入口
+├── app.py                 # CLI/Web 兼容入口（含 --demo 一键环回）
 ├── apps/                  # 瘦入口 web_master / web_slave（打包入口）
 ├── webui/                 # aiohttp REST+WS + React 前端（构建产物在 webui/static/app/）
 │   ├── bridge.py          # 引擎桥
+│   ├── diagnostics.py     # 一键诊断包
 │   ├── server.py
 │   └── static/
 ├── core/
@@ -231,19 +250,27 @@ iec104-tester/
 │   ├── capture/           # 录制回放（.i104/.json/pcap/pcapng）
 │   ├── simulation/        # 网络异常
 │   └── testing/           # YAML 脚本引擎
-├── build/build_all.py     # PyInstaller 打包（产出 dist/iec104-master|slave）
+├── build/build_all.py     # PyInstaller 打包（onedir / --onefile）
+├── tools/mutation_smoke.py
+├── tests/
+│   ├── fixtures/frames/   # 互操作语料库（合成基线 + real/）
+│   ├── perf/              # 性能/长稳基准（-m perf）
+│   └── e2e/               # 真实 socket 验收脚本
+├── .github/workflows/     # CI + tag 发布流水线
 ├── run_tests.py / run_multi_station.py / capture_tool.py / sim_tool.py
-├── configs/ resources/ tests/ docs/
+├── configs/ resources/ docs/
 └── requirements.txt
 ```
 
 ## 📖 文档
 
-- 用户手册：[`docs/user_guide.md`](docs/user_guide.md)（含 Web UI 各工作台、TLS、历史库、配置参考、已知限制）
+- 用户手册：[`docs/user_guide.md`](docs/user_guide.md)（含 Web UI 各工作台、一键演示、诊断包、TLS、历史库、配置参考、已知限制）
 - TLS 边界与排查：[`docs/tls.md`](docs/tls.md)
 - 文件传输字节语义核实：[`docs/file_transfer_fls.md`](docs/file_transfer_fls.md)
 - pcap 导出：[`docs/pcap_export.md`](docs/pcap_export.md)
 - 历史库实测数据：[`docs/history.md`](docs/history.md)
+- 互操作语料库：[`tests/fixtures/frames/README.md`](tests/fixtures/frames/README.md)
+- 性能/长稳基准：[`tests/perf/README.md`](tests/perf/README.md)
 
 ## 🤝 贡献 / 许可
 
@@ -252,7 +279,7 @@ MIT — 见 [LICENSE](LICENSE)。
 ## 🙏 致谢
 
 - [IEC 60870-5-104](https://webstore.iec.ch/en/publication/6270)
-- [aiohttp](https://docs.aiojs.org/)
+- [aiohttp](https://docs.aiohttp.org/)
 
 ---
 
