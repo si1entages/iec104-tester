@@ -43,6 +43,11 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 | core/capture/ | 报文录制/回放 | 低 |
 | core/simulation/ | 网络异常模拟（丢包/延迟/乱序） | 低 |
 | core/config.py | 配置管理（JSON/YAML） | 低 |
+| webui/diagnostics.py | 一键诊断包（状态/配置脱敏/日志/帧/事件/点表/历史统计） | 低 |
+| tests/fixtures/frames/ | 互操作语料库 + golden manifest（合成基线 + `real/` 真机目录） | 中 |
+| tests/perf/ | 性能/长稳基准（默认 `-m "not perf"` 排除） | 低 |
+| tools/mutation_smoke.py | 协议层变异冒烟（CI job；当前 12/12 killed） | 低 |
+| .github/workflows/release.yml | tag → 双平台打包/启动冒烟/SHA256/GitHub Release | 低 |
 
 ## 关键设计约定
 
@@ -54,6 +59,7 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 
 ### 编码风格
 - 协议层: 纯同步 struct.pack/unpack，无 async，无 GUI 依赖
+- 解码严格性: `APCICodec.decode` / `ASDU.decode` 对畸形/截断输入只抛 `ValueError`；ASDU 信息体数量与 VSQ 不符、对象数据不足时**显式报错**，不再静默返回空对象（fuzz 用例 `tests/test_protocol_fuzz.py` 兜底）
 - 引擎层: asyncio，通过 core/transport 管理 TCP 连接
 - GUI 层已移除（原桌面框架）；界面为 webui/（HTML/CSS + aiohttp），纯 web 形态——浏览器是唯一 UI，无桌面壳
 - 入口层 app.py 提供统一 Web 入口 `run_web()`：启动服务后台线程轮询端口就绪后再打开浏览器；`--no-browser` 关闭自动打开
@@ -71,7 +77,11 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - 协议完整性: `TypeID` 枚举里**每个类型都必须同时有解码注册与 ASDUBuilder 构造器**（否则就是"能解不能发"的半实现）；新增类型时用 `tests/test_protocol_type_coverage.py` 的护栏用例兜底
 
 ### 测试
-- 单元测试: tests/test_*.py（协议各层）
+- 单元测试: tests/test_*.py（**1281 例**；`tests/perf/` 由 `-m "not perf"` 默认排除）
+- 协议 fuzz: tests/test_protocol_fuzz.py（Hypothesis；解码器只允许 `ValueError`）
+- 互操作回放: tests/test_frame_corpus_replay.py + tests/fixtures/frames/（golden + MasterEngine 回放）
+- 性能/长稳: `pytest tests/ -m perf`（解码吞吐 / 10 万点快照 / 环回 soak，时长由 `IEC104_SOAK_SECONDS` 控制）
+- 变异冒烟: `python tools/mutation_smoke.py`（协议层 12 个高价值变异必须全部被杀死）
 - 一致性测试: tests/conformance/test_conformance.py（42 个用例）
 - 脚本测试: tests/scripts/（YAML 定义的场景测试）
 - Mock 策略: 引擎层测试用 Mock 传输层，不建真连接
@@ -113,9 +123,16 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - [x] 协议类型覆盖补齐：**72/72 个已定义类型均可构造 + 可解码**（CP24 变体 8、继保事件 6、成组单点 2、无品质 2、位模式测试 1、对称性缺口 2）
 - [x] 机制层补齐：T 试验位（编码/解码/子站回显/主站不入库）、读未知 IOA 回 COT=45、C_CD 按请求延时、主站累计量 CP24 变体、ASDU 长度上限强制
 - [x] 参数命令主站侧状态跟踪（装载/激活两维：PENDING→OK/TERMINATED/REJECTED/TIMEOUT，记录 COT；`get_parameter_state` / `parameter_states` + REST `/api/master/param_state`、`/api/master/params`）
-- [ ] 升降命令（调节步）不做联动：点表未建模步位置点（真机为 M_ST_NA_1 档位），需要时应新增点类型
+- [x] 升降命令（调节步）联动：点表新增步位置点类型（真机为 M_ST_NA_1 档位）建模，C_RC_NA_1 执行后联动更新档位点并上送（`tests/test_step_position.py`）
 - [x] 多站管理器在 Web 会话关停时的资源清理（`stop()` 已无阻塞，仍缺显式回收路径）
 - [x] 主站定义表双击值直接发命令（YK/YC/STEP 经确认弹窗下发；SBO/选择-执行不绕过）
+- [x] 互操作语料库 + 回放回归：`tests/fixtures/frames/`（合成基线 golden + `real/` 真机目录），主站引擎逐帧回放断言点值
+- [x] 解码器 fuzz/属性测试（Hypothesis）：APCI/ASDU 畸形输入只允许 `ValueError`；截断 ASDU 不再被静默吞掉（严格校验对象数量）
+- [x] Windows CI 打包回归 + tag 发布流水线：onedir exe 真实启动冒烟；`v*` tag → 双平台 onefile + SHA256SUMS + GitHub Release
+- [x] 性能/长稳基准：`tests/perf/`（解码吞吐、10 万点快照、**20 客户端并发约 2.9k 帧/秒**、主站↔子站环回 soak；默认 `-m "not perf"`；**2h soak 实跑通过：7200s / 34,765 GI / 内存 +0.64 MB**）
+- [x] 一键诊断包：`GET /api/diagnostics/export`（状态/配置脱敏/日志/报文/事件/点表/历史统计）+ 状态页按钮
+- [x] 一键环回 Demo：`python app.py --demo`（子站+主站独立子进程、自动监听/连接/总召，Ctrl+C 统一回收）
+- [x] 分支覆盖率门禁（CI `--cov-branch`，当前 88.8%）+ 协议层变异冒烟 `tools/mutation_smoke.py`（12/12 killed）
 
 ## 双应用入口（纯 Web UI）
 

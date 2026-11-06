@@ -14,6 +14,7 @@
 10. [快捷键](#10-快捷键)
 11. [已知限制与待核实项](#11-已知限制与待核实项)
 12. [常见问题](#12-常见问题)
+13. [诊断包导出](#13-诊断包导出)
 
 ---
 
@@ -101,6 +102,21 @@ python -m pytest tests/ -v
 ---
 
 ## 3. 快速开始
+
+### 场景0：一键环回演示（推荐首次体验）
+
+```bash
+python app.py --demo
+```
+
+本机同时启动子站与主站两个 Web 角色（自动选空闲端口），自动完成
+「子站监听 → 主站连接 → 总召」，并打开主站页面。历史库在演示模式下关闭；
+`Ctrl+C` 停止全部进程。
+
+```bash
+# 30 秒后自动停止（适合录屏/CI）
+python app.py --demo --demo-seconds 30 --no-browser
+```
 
 ### 场景1：本地测试（主站+子站）
 
@@ -721,6 +737,32 @@ python sim_tool.py --preset poor_wifi --mode master
 ### Q: 测试脚本如何编写？
 
 A: 参考 `tests/scripts/` 目录下的示例，使用 YAML 格式定义测试步骤和断言。
+
+---
+
+## 13. 诊断包导出
+
+Web 页面「状态」页的「运行状态」卡片提供 **「导出诊断包」** 按钮，也可直接访问：
+
+```bash
+curl -OJ http://127.0.0.1:8765/api/diagnostics/export
+```
+
+生成一个 zip（`iec104_<角色>_diagnostics_<时间>.zip`），包含：
+
+| 文件 | 内容 |
+|------|------|
+| `manifest.json` | 版本、角色、平台、生成时间、条数、脱敏说明 |
+| `status.json` | 当前 `/api/status` 快照 |
+| `config.json` | 生效配置；`tls.keyfile` 脱敏为 `<redacted>` |
+| `logs.json` | 最近 2000 条结构化日志 |
+| `frames.json` / `events.json` | 最近收发帧 / 引擎事件 |
+| `points.json` | 点表定义 + 实时值 |
+| `history.json` | 历史库统计（未启用时 `enabled=false`） |
+| `README.txt` | 文件说明与隐私提示 |
+
+> ⚠ 诊断包可能包含现场 IOA/公共地址/业务值/文件路径；转发前请确认接收方，
+> 不要上传到公开仓库或公共工单附件。
 
 ---
 

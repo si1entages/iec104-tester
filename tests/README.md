@@ -6,8 +6,10 @@
 tests/
 ├── conftest.py          # 共享 fixtures（协议编解码、Mock 传输层等）
 ├── test_*.py            # ① 单元 / 集成测试（Mock 传输层，快速回归）
+├── fixtures/frames/     # ⑤ 互操作报文语料库（*.i104 + golden manifest + real/ 真机目录）
+├── perf/                # ⑦ 性能/长稳基准（默认 -m "not perf" 排除）
 ├── conformance/         # ③ 一致性测试（对照 IEC 60870-5-104 标准）
-├── scripts/             # YAML 场景脚本（由 run_tests.py 驱动）
+├── scripts/             # ④ YAML 场景脚本（由 run_tests.py 驱动）
 └── e2e/                 # ② 真实 socket 端到端脚本（人工/联调触发，不进 pytest）
 ```
 
@@ -24,21 +26,21 @@ tests/
   python -m pytest tests/test_asdu.py -q   # 单文件
   ```
 
-- 当前基线：**1049 passed**。
+- 当前基线：**1281 passed**（`tests/` 全量，`perf` 默认排除）。
 
 ### 覆盖率
 
-测试带覆盖率门禁（针对 `core/`）：
+测试带覆盖率门禁（针对 `core/`，**分支覆盖口径**）：
 
 ```bash
-python -m pytest tests/ -q --cov=core --cov-report=term-missing
+python -m pytest tests/ -q --cov=core --cov-branch --cov-report=term-missing
 ```
 
-- **当前实测覆盖率：90%**（`core/` 未覆盖约 900 条语句；语句总数随并行开发小幅漂移，此处只锚定百分比）。
-- **CI 门禁**：`--cov-fail-under=88`（低于实测约 2 个点，避免跨 Python 版本/环境的正常抖动导致误红）。
-- **提升目标：已达 85%**（当前 90%）。**注意：总数字会掩盖分布问题**，故下面把全部未达
+- **当前实测分支覆盖率：88.8%**。
+- **CI 门禁**：`--cov-fail-under=88`（低于实测约 1 个点，避免跨 Python 版本/环境的正常抖动导致误红）。
+- **提升目标：已达 85%**（当前 88.8%）。**注意：总数字会掩盖分布问题**，故下面把全部未达
   85% 的单模块列成**待后续补测清单**（覆盖率与缺口为测量时点值，精确行号见
-  `python -m pytest tests/ -q --cov=core --cov-report=term-missing` 的 `Missing` 列）。
+  `python -m pytest tests/ -q --cov=core --cov-branch --cov-report=term-missing` 的 `Missing` 列）。
 
 #### 待后续补测清单（单模块 < 85%，尚未完成）
 
@@ -91,12 +93,74 @@ python -m pytest tests/ -q --cov=core --cov-report=term-missing
 
 ---
 
+## ⑤ 互操作语料库回放（`tests/fixtures/frames/`）
+
+- **目的**：把现场/真机报文变成可重复执行的回归资产。每个 `.i104` 配一份
+  `manifest.json` golden 快照（逐帧 `type_id/cot/ioa/值`），测试同时做：
+  ① 逐帧解码对照；② 把 RX 帧喂给 `MasterEngine` 断言点表入库。
+- **合成基线**由 `generate_corpus.py` 生成（总召、SOE、CP24/CP56、SBO、参数/文件、
+  畸形帧）；**真机抓包**放入 `real/` 即自动参与「逐帧可解码」冒烟。
+- 运行：
+
+  ```bash
+  python -m pytest tests/test_frame_corpus_replay.py -q
+  python tests/fixtures/frames/generate_corpus.py   # 修改生成器后重建基线
+  ```
+
+- 详细说明（脱敏、pcap 转换）：[`fixtures/frames/README.md`](fixtures/frames/README.md)。
+
+---
+
+## ⑥ 协议 fuzz / 属性测试（`tests/test_protocol_fuzz.py`）
+
+- **目的**：连接任意第三方装置/接受脏抓包时，畸形输入不得抛出未约定异常。
+- **约定**：`APCICodec.decode` / `ASDU.decode` 对非法输入只抛 `ValueError`；
+  文件传输信息体（F_FR/F_SR/F_SC/F_LS/F_AF/F_SG/F_DR/F_*_NB）直接解析同样只允许
+  `ValueError`（截断的 F_SG 段数据必须报错）；合法 ASDU 编码→解码可往返
+  （浮点按 IEC 104 量化精度比较）；Web 报文翻译对任意 HEX 不 500。
+- 依赖 `hypothesis`（`pip install -e .[dev]`），单文件约 2s。
+
+---
+
+## ⑦ 性能 / 长稳基准（`tests/perf/`）
+
+- 默认**不跑**（`pyproject.toml` 的 `addopts = -m "not perf"`）；显式：
+
+  ```bash
+  pytest tests/perf -m perf -q
+  IEC104_SOAK_SECONDS=7200 pytest tests/perf -m perf -q -k soak   # 2h 长稳
+  ```
+
+- 覆盖：2 万帧解码吞吐、10 万点快照、**20 客户端并发（约 2.9k 帧/秒）**、
+  主站↔子站真 TCP 环回 soak（2h 实跑：34,765 次 GI，内存 +0.64 MB）。门槛与说明见
+  [`perf/README.md`](perf/README.md)。
+
+---
+
+## ⑧ 协议层变异冒烟（`tools/mutation_smoke.py`）
+
+- **目的**：检查协议测试是否「假绿」——对 APCI/ASDU 注入 12 个典型变异
+  （边界取反、位掩码错误、序列号位移错误、字节序错误等），每个变异都必须让测试失败。
+- 在临时副本中执行，不污染工作区；CI 有独立 `mutation-smoke` job。
+
+  ```bash
+  python tools/mutation_smoke.py          # 期望：12/12 个变异被杀死
+  python tools/mutation_smoke.py --keep   # 保留临时副本到 build/mutation-smoke/
+  ```
+
+---
+
 ## 本地一键回归
 
 ```bash
 # 静态检查 + 单元/集成测试（提交前必跑）
 python -m ruff check .
 python -m pytest tests/ -q --basetemp=.pytest-tmp
+python -m pytest tests/ -q --cov=core --cov-branch --cov-report=term-missing --cov-fail-under=88
+
+# 发版前可选：性能基准 + 变异冒烟
+python -m pytest tests/perf -m perf -q
+python tools/mutation_smoke.py
 ```
 
 ---
