@@ -9,10 +9,12 @@ import {
   FileTextOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons'
-import { Alert, Badge, Layout, Menu, Switch, Tag, Typography, theme as antdTheme } from 'antd'
+import { Alert, Badge, Layout, Menu, Segmented, Switch, Tag, Typography, theme as antdTheme } from 'antd'
 
 import { useStatusQuery } from '../api/queries'
 import type { Role } from '../api/types'
+import { useT } from '../i18n'
+import type { Locale, MessageKey } from '../i18n'
 import { useUiStore } from '../store/uiStore'
 import type { PageKey } from '../store/uiStore'
 import type { WsStatus } from '../ws/client'
@@ -20,20 +22,20 @@ import type { WsStatus } from '../ws/client'
 const { Header, Sider, Content } = Layout
 
 /** 导航项按部署角色过滤：主站会话不出现子站页面入口（反之亦然） */
-const MENU_ITEMS: { key: PageKey; icon: ReactNode; label: string; roles: Role[] }[] = [
-  { key: 'master', icon: <ThunderboltOutlined />, label: '主站工作台', roles: ['master'] },
-  { key: 'slave', icon: <DeploymentUnitOutlined />, label: '子站工作台', roles: ['slave'] },
-  { key: 'multi', icon: <CloudServerOutlined />, label: '多站', roles: ['master', 'slave'] },
-  { key: 'status', icon: <DashboardOutlined />, label: '状态总览', roles: ['master', 'slave'] },
-  { key: 'logs', icon: <FileTextOutlined />, label: '日志', roles: ['master', 'slave'] },
-  { key: 'history', icon: <DatabaseOutlined />, label: '历史', roles: ['master', 'slave'] },
+const MENU_ITEMS: { key: PageKey; icon: ReactNode; labelKey: MessageKey; roles: Role[] }[] = [
+  { key: 'master', icon: <ThunderboltOutlined />, labelKey: 'menu.master', roles: ['master'] },
+  { key: 'slave', icon: <DeploymentUnitOutlined />, labelKey: 'menu.slave', roles: ['slave'] },
+  { key: 'multi', icon: <CloudServerOutlined />, labelKey: 'menu.multi', roles: ['master', 'slave'] },
+  { key: 'status', icon: <DashboardOutlined />, labelKey: 'menu.status', roles: ['master', 'slave'] },
+  { key: 'logs', icon: <FileTextOutlined />, labelKey: 'menu.logs', roles: ['master', 'slave'] },
+  { key: 'history', icon: <DatabaseOutlined />, labelKey: 'menu.history', roles: ['master', 'slave'] },
 ]
 
-const WS_BADGE: Record<WsStatus, { status: 'processing' | 'warning' | 'error' | 'default'; text: string }> = {
-  idle: { status: 'default', text: 'WS 未连接' },
-  connecting: { status: 'warning', text: 'WS 连接中' },
-  open: { status: 'processing', text: 'WS 已连接' },
-  closed: { status: 'error', text: 'WS 已断开（重连中）' },
+const WS_BADGE: Record<WsStatus, { status: 'processing' | 'warning' | 'error' | 'default'; textKey: MessageKey }> = {
+  idle: { status: 'default', textKey: 'header.ws.idle' },
+  connecting: { status: 'warning', textKey: 'header.ws.connecting' },
+  open: { status: 'processing', textKey: 'header.ws.open' },
+  closed: { status: 'error', textKey: 'header.ws.closed' },
 }
 
 interface Props {
@@ -41,6 +43,7 @@ interface Props {
 }
 
 export function AppLayout({ children }: Props) {
+  const t = useT()
   const page = useUiStore((s) => s.page)
   const setPage = useUiStore((s) => s.setPage)
   const wsStatus = useUiStore((s) => s.wsStatus)
@@ -51,6 +54,8 @@ export function AppLayout({ children }: Props) {
   const setSendBackpressure = useUiStore((s) => s.setSendBackpressure)
   const theme = useUiStore((s) => s.theme)
   const setTheme = useUiStore((s) => s.setTheme)
+  const locale = useUiStore((s) => s.locale)
+  const setLocale = useUiStore((s) => s.setLocale)
   const isDark = theme === 'dark'
 
   const { data: status } = useStatusQuery()
@@ -59,7 +64,7 @@ export function AppLayout({ children }: Props) {
   // 只把 key/icon/label 传给 Menu：roles 是自定义过滤字段，透传会漏成 DOM 属性
   const menuItems = (
     role ? MENU_ITEMS.filter((item) => item.roles.includes(role)) : MENU_ITEMS
-  ).map(({ key, icon, label }) => ({ key, icon, label }))
+  ).map(({ key, icon, labelKey }) => ({ key, icon, label: t(labelKey) }))
   const badge = WS_BADGE[wsStatus]
   // 颜色一律取自主题 token，禁止硬编码（亮暗一致）
   const { token } = antdTheme.useToken()
@@ -100,7 +105,7 @@ export function AppLayout({ children }: Props) {
           }}
         >
           <Typography.Text strong style={{ fontSize: 14 }}>
-            {MENU_ITEMS.find((i) => i.key === page)?.label}
+            {t(MENU_ITEMS.find((i) => i.key === page)?.labelKey ?? 'menu.status')}
           </Typography.Text>
           {status?.role ? (
             <Tag color={status.role === 'master' ? 'blue' : 'purple'}>{status.role}</Tag>
@@ -110,33 +115,43 @@ export function AppLayout({ children }: Props) {
               {status.running ? 'running' : 'stopped'}
             </Tag>
           ) : null}
-          {resyncing ? <Tag color="warning">同步快照中…</Tag> : null}
+          {resyncing ? <Tag color="warning">{t('header.syncing')}</Tag> : null}
           <span style={{ flex: 1 }} />
+          <Segmented
+            size="small"
+            aria-label={t('header.lang')}
+            value={locale}
+            onChange={(value) => setLocale(value as Locale)}
+            options={[
+              { label: '中', value: 'zh' }, // i18n-ignore 语言名按原生显示
+              { label: 'EN', value: 'en' },
+            ]}
+          />
           <Switch
             size="small"
-            aria-label="深色模式"
+            aria-label={t('header.theme.dark')}
             checked={isDark}
-            checkedChildren="深"
-            unCheckedChildren="浅"
+            checkedChildren={t('header.theme.on')}
+            unCheckedChildren={t('header.theme.off')}
             onChange={(checked) => setTheme(checked ? 'dark' : 'light')}
           />
           <Badge
             status={badge.status}
-            text={<span style={{ color: token.colorTextTertiary }}>{badge.text}</span>}
+            text={<span style={{ color: token.colorTextTertiary }}>{t(badge.textKey)}</span>}
           />
           <ApiOutlined style={{ color: token.colorTextTertiary }} />
         </Header>
         <Content style={{ padding: 16, overflow: 'auto' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {schemaWarning ? (
-              <Alert type="warning" showIcon message="契约版本不匹配（降级运行）" description={schemaWarning} />
+              <Alert type="warning" showIcon message={t('header.schemaWarning')} description={schemaWarning} />
             ) : null}
             {sendBackpressure ? (
               <Alert
                 type="warning"
                 showIcon
                 closable
-                message="WebSocket 发送积压"
+                message={t('header.backpressure')}
                 description={sendBackpressure}
                 onClose={() => setSendBackpressure(null)}
               />
@@ -145,8 +160,8 @@ export function AppLayout({ children }: Props) {
               <Alert
                 type="info"
                 showIcon
-                message={`后端背压丢帧 ${droppedFrames} 条`}
-                description="订阅队列（容量 256）写满时后端会丢最旧消息以保证界面跟得上；累积值来自 Status.dropped。"
+                message={t('header.dropped', { n: droppedFrames })}
+                description={t('header.droppedDesc')}
               />
             ) : null}
             {children}

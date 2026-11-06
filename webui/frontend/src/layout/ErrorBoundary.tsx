@@ -3,6 +3,8 @@ import type { ErrorInfo, ReactNode } from 'react'
 
 import { Button, Result, Typography } from 'antd'
 
+import { tNow } from '../i18n'
+
 interface Props {
   children: ReactNode
 }
@@ -34,16 +36,16 @@ export class ErrorBoundary extends Component<Props, State> {
     return (
       <Result
         status="error"
-        title="界面渲染出错"
+        title={tNow('error.title')}
         subTitle={error.message}
         extra={
           <Button type="primary" onClick={this.handleReset}>
-            重试
+            {tNow('error.retry')}
           </Button>
         }
       >
         <Typography.Paragraph type="secondary">
-          可先尝试重试或刷新页面；若持续复现，请在后端控制台查看日志。
+          {tNow('error.hint')}
         </Typography.Paragraph>
       </Result>
     )

@@ -12,6 +12,7 @@
  */
 
 import type { Point, SetpointKind, StepRequest, YkRequest } from '../api/types'
+import { tNow } from '../i18n'
 
 export type DirectCommandKind = 'yk' | 'setpoint' | 'step'
 
@@ -33,11 +34,11 @@ export function directCommandKind(point: Pick<Point, 'type'>): DirectCommandKind
 export function directCommandHint(point: Pick<Point, 'type'>): string | null {
   switch (directCommandKind(point)) {
     case 'yk':
-      return '双击下发遥控命令'
+      return tNow('pointCommand.yk')
     case 'setpoint':
-      return '双击下发设点命令'
+      return tNow('pointCommand.sp')
     case 'step':
-      return '双击下发升降命令'
+      return tNow('pointCommand.step')
     default:
       return null
   }

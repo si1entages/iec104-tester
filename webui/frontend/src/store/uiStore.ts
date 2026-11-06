@@ -1,10 +1,22 @@
 import { create } from 'zustand'
 
+import type { Locale } from '../i18n'
 import { applyThemeToDom, resolveInitialTheme, saveThemePreference } from '../lib/themePreference'
 import type { ThemeMode } from '../lib/themePreference'
 import type { WsStatus } from '../ws/client'
 
 export type PageKey = 'status' | 'master' | 'slave' | 'multi' | 'logs' | 'history'
+
+const LOCALE_KEY = 'iec104_locale'
+
+/** 语言偏好：默认中文；仅识别 en（其它值回落 zh） */
+function resolveInitialLocale(): Locale {
+  try {
+    return localStorage.getItem(LOCALE_KEY) === 'en' ? 'en' : 'zh'
+  } catch {
+    return 'zh'
+  }
+}
 
 /**
  * 纯 UI 状态（T11）。
@@ -18,6 +30,10 @@ interface UiState {
   /** 主题（深/浅）：初始值在模块加载时同步解析（渲染前，无闪屏）；切换即持久化 */
   theme: ThemeMode
   setTheme: (mode: ThemeMode) => void
+
+  /** 界面语言（C3 i18n）：默认 zh，切换即持久化 */
+  locale: Locale
+  setLocale: (locale: Locale) => void
 
   /** WS 连接状态（头部指示 + 日志页提示） */
   wsStatus: WsStatus
@@ -58,6 +74,16 @@ export const useUiStore = create<UiState>((set) => ({
     applyThemeToDom(mode)
     saveThemePreference(mode)
     set({ theme: mode })
+  },
+
+  locale: resolveInitialLocale(),
+  setLocale: (locale) => {
+    try {
+      localStorage.setItem(LOCALE_KEY, locale)
+    } catch {
+      // 存储不可用时仅当前会话生效
+    }
+    set({ locale })
   },
 
   wsStatus: 'idle',

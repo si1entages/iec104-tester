@@ -22,6 +22,7 @@ npm run build     # 类型检查 + 产物输出到 ../static/app/
 npm run preview   # 本地预览构建产物（注意 base=/app/）
 npm run typecheck # 仅 tsc --noEmit
 npm test          # Vitest 单测
+npm run i18n:inventory  # i18n 迁移清单（剩余硬编码中文的文件/行数）
 ```
 
 ### dev 代理目标
@@ -94,3 +95,17 @@ webui/frontend/
 
 `build/build_all.py` 在 PyInstaller 打包前会先跑前端构建（`--skip-frontend` 可跳过），
 产物随 `webui/static` 一并 `--add-data` 进包。
+
+## i18n（中/英）
+
+零依赖轻量实现（`src/i18n/`）：
+
+- 词典按界面域分 key（`menu.*` / `status.*` / `logs.*` / `history.*` / `sim.*` …），
+  `translate(locale, key, params)` 支持 `{name}` 占位符；en 缺 key 时回退 zh。
+- 组件内用 `useT()`，非组件代码（事件回调 / 类）用 `tNow()`；列定义等需要随语言
+  切换更新的结构用「工厂 hook」（如 `useLogColumns(t)`）避免模块加载期固化。
+- 语言存 `localStorage.iec104_locale`，头部「中 / EN」切换，并联动 antd
+  `ConfigProvider locale`（日期选择器等组件文案）。
+- **阶段一覆盖**：应用外壳、认证闸门、状态/日志/历史页、网络模拟卡片、共享列宽组件、
+  运行时告警；主站/子站/多站工作台内部文案尚未迁移，用
+  `npm run i18n:inventory` 查看剩余清单（迁移时保持 zh 文案逐字不变，既有测试即回归网）。

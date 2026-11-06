@@ -14,7 +14,11 @@ import type { TableColumnsType } from 'antd'
 import { LOGS_EXPORT_URL } from '../api/endpoints'
 import { MAX_LIVE_LOGS, clearLiveLogs, useLiveLogs, useLogsQuery } from '../api/queries'
 import type { LogLevel, LogRow } from '../api/types'
+import { useT } from '../i18n'
+import type { MessageKey } from '../i18n'
 import { useUiStore } from '../store/uiStore'
+
+type TFn = (key: MessageKey, params?: Record<string, string | number>) => string
 
 /** 视图上限：超出部分截断（UI 明示，不静默丢弃——导出仍可取全量） */
 const MAX_VIEW_ROWS = 1000
@@ -52,25 +56,32 @@ function matches(row: LogRow, levels: Set<string>, category?: string, keyword?: 
   return true
 }
 
-const columns: TableColumnsType<LogRow> = [
-  {
-    title: '时间',
-    dataIndex: 'ts',
-    width: 190,
-    render: (ts: number) => <span className="mono">{formatTime(ts)}</span>,
-  },
-  {
-    title: '级别',
-    dataIndex: 'level',
-    width: 100,
-    render: (level: string) => <Tag color={LEVEL_COLOR[level] ?? 'default'}>{level}</Tag>,
-  },
-  { title: '分类', dataIndex: 'category', width: 110 },
-  { title: '来源', dataIndex: 'source', width: 100 },
-  { title: '消息', dataIndex: 'message', ellipsis: true },
-]
+function useLogColumns(t: TFn): TableColumnsType<LogRow> {
+  return useMemo(
+    () => [
+      {
+        title: t('logs.col.time'),
+        dataIndex: 'ts',
+        width: 190,
+        render: (ts: number) => <span className="mono">{formatTime(ts)}</span>,
+      },
+      {
+        title: t('logs.col.level'),
+        dataIndex: 'level',
+        width: 100,
+        render: (level: string) => <Tag color={LEVEL_COLOR[level] ?? 'default'}>{level}</Tag>,
+      },
+      { title: t('logs.col.category'), dataIndex: 'category', width: 110 },
+      { title: t('logs.col.source'), dataIndex: 'source', width: 100 },
+      { title: t('logs.col.message'), dataIndex: 'message', ellipsis: true },
+    ],
+    [t],
+  )
+}
 
 export function LogsPage() {
+  const t = useT()
+  const columns = useLogColumns(t)
   const [levels, setLevels] = useState<string[]>(ALL_LEVELS)
   const [category, setCategory] = useState<string | undefined>(undefined)
   const [keyword, setKeyword] = useState<string>('')
@@ -131,42 +142,48 @@ export function LogsPage() {
       size="small"
       title={
         <Space size={4} wrap>
-          <span>日志</span>
-          <Tag color="blue">视图 {rows.length}</Tag>
-          <Tooltip title="前端实时缓冲上限 500 条（超出回卷丢弃最旧），历史日志由 GET /api/logs 提供">
-            <Tag>缓冲 {liveLogs.length}</Tag>
+          <span>{t('logs.title')}</span>
+          <Tag color="blue">{t('logs.view', { n: rows.length })}</Tag>
+          <Tooltip title={t('logs.bufferTip')}>
+            <Tag>{t('logs.buffer', { n: liveLogs.length })}</Tag>
           </Tooltip>
           {typeof logsQuery.data?.stats?.total === 'number' ? (
-            <Tooltip title="后端累计日志条数（LogStats.total）">
-              <Tag>后端累计 {logsQuery.data.stats.total}</Tag>
+            <Tooltip title={t('logs.backendTotalTip')}>
+              <Tag>{t('logs.backendTotal', { n: logsQuery.data.stats.total })}</Tag>
             </Tooltip>
           ) : null}
           {paused ? (
-            <Tag color="warning">已暂停{bufferedWhilePaused > 0 ? ` · 新缓冲 ${bufferedWhilePaused} 条` : ''}</Tag>
+            <Tag color="warning">
+              {bufferedWhilePaused > 0
+                ? t('logs.pausedBuffer', { n: bufferedWhilePaused })
+                : t('logs.paused')}
+            </Tag>
           ) : null}
-          {wsStatus !== 'open' ? <Tag color="orange">实时流已断开</Tag> : null}
-          {droppedFrames > 0 ? <Tag color="warning">后端丢帧 {droppedFrames}</Tag> : null}
+          {wsStatus !== 'open' ? <Tag color="orange">{t('logs.streamDown')}</Tag> : null}
+          {droppedFrames > 0 ? (
+            <Tag color="warning">{t('logs.dropped', { n: droppedFrames })}</Tag>
+          ) : null}
           {truncated ? (
-            <Tooltip title={`视图仅保留最近 ${MAX_VIEW_ROWS} 条；更早日志请缩小过滤范围或用「导出」获取全量`}>
-              <Tag color="warning">已截断（上限 {MAX_VIEW_ROWS}）</Tag>
+            <Tooltip title={t('logs.truncatedTip', { n: MAX_VIEW_ROWS })}>
+              <Tag color="warning">{t('logs.truncated', { n: MAX_VIEW_ROWS })}</Tag>
             </Tooltip>
           ) : null}
         </Space>
       }
       extra={
         <Space>
-          <Tooltip title="冻结当前视图；恢复后把暂停期间的实时日志一次性合入（不丢失）">
+          <Tooltip title={t('logs.pauseTip')}>
             <Button
               icon={paused ? <PlayCircleOutlined /> : <PauseCircleOutlined />}
               onClick={handlePause}
             >
-              {paused ? '恢复实时' : '暂停实时'}
+              {paused ? t('logs.resume') : t('logs.pause')}
             </Button>
           </Tooltip>
           <Button icon={<ReloadOutlined />} onClick={() => void logsQuery.refetch()}>
-            刷新
+            {t('common.refresh')}
           </Button>
-          <Tooltip title="仅清空前端实时缓冲与当前视图；后端日志文件与「导出」内容不受影响">
+          <Tooltip title={t('logs.clearTip')}>
             <Button
               icon={<ClearOutlined />}
               onClick={() => {
@@ -175,7 +192,7 @@ export function LogsPage() {
                 setPaused(false)
               }}
             >
-              清空视图
+              {t('logs.clear')}
             </Button>
           </Tooltip>
           <Button
@@ -183,7 +200,7 @@ export function LogsPage() {
             icon={<DownloadOutlined />}
             onClick={() => window.open(LOGS_EXPORT_URL, '_blank')}
           >
-            导出 JSONL
+            {t('logs.export')}
           </Button>
         </Space>
       }
@@ -195,7 +212,7 @@ export function LogsPage() {
           value={levels}
           options={LEVEL_OPTIONS}
           onChange={setLevels}
-          placeholder="级别（多选）"
+          placeholder={t('logs.levels')}
           maxTagCount="responsive"
         />
         <Select
@@ -204,12 +221,12 @@ export function LogsPage() {
           value={category}
           options={CATEGORY_OPTIONS}
           onChange={setCategory}
-          placeholder="分类"
+          placeholder={t('logs.category')}
         />
         <Input.Search
           style={{ width: 260 }}
           allowClear
-          placeholder="关键字搜索"
+          placeholder={t('logs.keyword')}
           onSearch={setKeyword}
         />
       </Space>
@@ -219,12 +236,11 @@ export function LogsPage() {
         loading={logsQuery.isLoading}
         columns={columns}
         dataSource={rows}
-        pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
+        pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (total) => t('common.total', { n: total }) }}
         scroll={{ x: 900, y: 420 }}
         footer={() => (
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            实时流经 250ms 批量合并写入（不逐条渲染）；视图上限 {MAX_VIEW_ROWS} 条、实时缓冲上限{' '}
-            {MAX_LIVE_LOGS} 条，超出部分截断/回卷（此处有标注，不静默丢弃）。
+            {t('logs.footer', { view: MAX_VIEW_ROWS, buffer: MAX_LIVE_LOGS })}
           </Typography.Text>
         )}
       />

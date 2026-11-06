@@ -14,6 +14,7 @@ import {
 import { describeSchemaMismatch } from '../api/schema'
 import type { LogRow, Point, WsMessage } from '../api/types'
 import { isLogRow, isPointsResponse, isStatus, isWsMessage, readSchemaVersion } from '../api/validate'
+import { tNow } from '../i18n'
 import { applyPatches, extractPatches, mergePointValues, pointKey } from '../lib/pointValue'
 import { normalizeEvent, normalizeEvents, normalizeFrame, normalizeFrames } from '../lib/records'
 import { trendBuffer } from '../lib/trendBuffer'
@@ -178,8 +179,11 @@ export function useWsBridge(): void {
       },
       onBackpressure: ({ bufferedBytes, threshold, streak }) => {
         setSendBackpressure(
-          `WebSocket 发送积压 ${(bufferedBytes / 1024).toFixed(0)} KiB` +
-            `（阈值 ${(threshold / 1024).toFixed(0)} KiB，连续 ${streak} 次）`,
+          tNow('ws.backpressure', {
+            kb: (bufferedBytes / 1024).toFixed(0),
+            thr: (threshold / 1024).toFixed(0),
+            n: streak,
+          }),
         )
       },
     })

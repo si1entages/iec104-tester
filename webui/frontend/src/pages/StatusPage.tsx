@@ -27,31 +27,44 @@ import {
 } from '../api/queries'
 import type { OkResponse, Point } from '../api/types'
 import { NetworkSimCard } from '../components/NetworkSimCard'
+import { useT } from '../i18n'
+import type { MessageKey } from '../i18n'
 
-const pointColumns: TableColumnsType<Point> = [
-  { title: 'IOA', dataIndex: 'ioa', width: 90, sorter: (a, b) => a.ioa - b.ioa },
-  { title: '类型', dataIndex: 'type', width: 110 },
-  { title: '名称', dataIndex: 'name', ellipsis: true },
-  { title: '组', dataIndex: 'group', width: 80 },
-  {
-    title: '使能',
-    dataIndex: 'enabled',
-    width: 90,
-    render: (enabled: boolean) => (
-      <Tag color={enabled ? 'green' : 'default'}>{enabled ? '启用' : '停用'}</Tag>
-    ),
-  },
-  {
-    title: '值',
-    dataIndex: 'value',
-    width: 160,
-    render: (value: Point['value']) => <span className="mono">{String(value ?? '-')}</span>,
-  },
-  { title: '品质', dataIndex: 'quality', width: 90 },
-]
+type TFn = (key: MessageKey, params?: Record<string, string | number>) => string
+
+function usePointColumns(t: TFn): TableColumnsType<Point> {
+  return useMemo(
+    () => [
+      { title: t('status.col.ioa'), dataIndex: 'ioa', width: 90, sorter: (a, b) => a.ioa - b.ioa },
+      { title: t('status.col.type'), dataIndex: 'type', width: 110 },
+      { title: t('status.col.name'), dataIndex: 'name', ellipsis: true },
+      { title: t('status.col.group'), dataIndex: 'group', width: 80 },
+      {
+        title: t('status.col.enabled'),
+        dataIndex: 'enabled',
+        width: 90,
+        render: (enabled: boolean) => (
+          <Tag color={enabled ? 'green' : 'default'}>
+            {enabled ? t('status.enabled') : t('status.disabled')}
+          </Tag>
+        ),
+      },
+      {
+        title: t('status.col.value'),
+        dataIndex: 'value',
+        width: 160,
+        render: (value: Point['value']) => <span className="mono">{String(value ?? '-')}</span>,
+      },
+      { title: t('status.col.quality'), dataIndex: 'quality', width: 90 },
+    ],
+    [t],
+  )
+}
 
 export function StatusPage() {
   const { message } = AntdApp.useApp()
+  const t = useT()
+  const pointColumns = usePointColumns(t)
   const statusQuery = useStatusQuery()
   const pointsQuery = usePointsQuery()
   const status = statusQuery.data
@@ -80,8 +93,8 @@ export function StatusPage() {
   const reset = useCommandNoArgs(api.master.reset)
 
   const report = (result: OkResponse): void => {
-    if (result.ok) message.success('命令已下发')
-    else message.error(result.error ?? '命令失败')
+    if (result.ok) message.success(t('common.cmdSent'))
+    else message.error(result.error ?? t('common.cmdFailed'))
   }
 
   const handleStart = async (): Promise<void> => {
@@ -106,16 +119,16 @@ export function StatusPage() {
   const items = useMemo(() => {
     if (!status) return []
     return [
-      { key: 'host', label: '主机', children: status.host ?? '-' },
-      { key: 'port', label: '端口', children: status.port ?? '-' },
-      { key: 'addr', label: '公共地址', children: status.addr ?? '-' },
-      { key: 'state', label: '链路状态', children: status.state ?? '-' },
-      { key: 'window', label: '发送窗口', children: status.window ?? '-' },
+      { key: 'host', label: t('status.host'), children: status.host ?? '-' },
+      { key: 'port', label: t('status.port'), children: status.port ?? '-' },
+      { key: 'addr', label: t('status.addr'), children: status.addr ?? '-' },
+      { key: 'state', label: t('status.state'), children: status.state ?? '-' },
+      { key: 'window', label: t('status.window'), children: status.window ?? '-' },
       { key: 'vs', label: 'Vs', children: status.vs ?? '-' },
       { key: 'vr', label: 'Vr', children: status.vr ?? '-' },
-      { key: 'clients', label: '客户端数', children: status.clients ?? '-' },
+      { key: 'clients', label: t('status.clients'), children: status.clients ?? '-' },
     ]
-  }, [status])
+  }, [status, t])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -123,52 +136,52 @@ export function StatusPage() {
         <Alert
           type="error"
           showIcon
-          message="读取 /api/status 失败"
+          message={t('status.loadStatusFailed')}
           description={String((statusQuery.error as Error)?.message ?? statusQuery.error)}
         />
       ) : null}
 
-      <Card title="连接与命令" size="small">
+      <Card title={t('status.connectionCard')} size="small">
         <Space wrap>
           <Input
-            prefix="主机"
+            prefix={t('status.host')}
             style={{ width: 220 }}
             value={host}
             onChange={(e) => setHost(e.target.value)}
           />
           <InputNumber
-            prefix="端口"
+            prefix={t('status.port')}
             min={0}
             max={65535}
             value={port}
             onChange={(v) => setPort(Number(v ?? 2404))}
           />
           <InputNumber
-            prefix="地址"
+            prefix={t('status.addr')}
             min={0}
             value={addr}
             onChange={(v) => setAddr(Number(v ?? 1))}
           />
           <Button type="primary" loading={busy} disabled={running} onClick={() => void handleStart()}>
-            {role === 'slave' ? '启动监听' : '连接'}
+            {role === 'slave' ? t('status.startListen') : t('status.connect')}
           </Button>
           <Button danger loading={busy} disabled={!running} onClick={() => void handleStop()}>
-            {role === 'slave' ? '停止监听' : '断开'}
+            {role === 'slave' ? t('status.stopListen') : t('status.disconnect')}
           </Button>
         </Space>
         {role === 'master' ? (
           <Space wrap style={{ marginTop: 12 }}>
             <Button size="small" disabled={!running} onClick={() => void gi.mutateAsync({}).then(report)}>
-              总召唤
+              {t('status.gi')}
             </Button>
             <Button size="small" disabled={!running} onClick={() => void clock.mutateAsync().then(report)}>
-              时钟同步
+              {t('status.clock')}
             </Button>
             <Button size="small" disabled={!running} onClick={() => void testCommand.mutateAsync().then(report)}>
-              测试命令
+              {t('status.test')}
             </Button>
             <Button size="small" disabled={!running} onClick={() => void reset.mutateAsync().then(report)}>
-              复位进程
+              {t('status.reset')}
             </Button>
           </Space>
         ) : null}
@@ -177,23 +190,23 @@ export function StatusPage() {
       <Row gutter={16}>
         <Col span={6}>
           <Card>
-            <Statistic title="点位数" value={status?.points ?? 0} />
+            <Statistic title={t('status.points')} value={status?.points ?? 0} />
           </Card>
         </Col>
         <Col span={6}>
           <Card>
-            <Statistic title="发送帧" value={status?.tx ?? 0} />
+            <Statistic title={t('status.tx')} value={status?.tx ?? 0} />
           </Card>
         </Col>
         <Col span={6}>
           <Card>
-            <Statistic title="接收帧" value={status?.rx ?? 0} />
+            <Statistic title={t('status.rx')} value={status?.rx ?? 0} />
           </Card>
         </Col>
         <Col span={6}>
           <Card>
             <Statistic
-              title="背压丢弃"
+              title={t('status.dropped')}
               value={status?.dropped ?? 0}
               valueStyle={{ color: (status?.dropped ?? 0) > 0 ? '#faad14' : undefined }}
             />
@@ -202,12 +215,12 @@ export function StatusPage() {
       </Row>
 
       <Card
-        title="运行状态"
+        title={t('status.runtime')}
         size="small"
         loading={statusQuery.isLoading}
         extra={
           <Button size="small" icon={<DownloadOutlined />} href={DIAGNOSTICS_EXPORT_URL}>
-            导出诊断包
+            {t('status.exportDiag')}
           </Button>
         }
       >
@@ -217,11 +230,15 @@ export function StatusPage() {
       <NetworkSimCard />
 
       <Card
-        title={`点表（${pointsQuery.data?.length ?? 0}）`}
+        title={t('status.pointsTable', { n: pointsQuery.data?.length ?? 0 })}
         size="small"
         extra={
           pointsQuery.isError ? (
-            <Tag color="red">加载失败：{String((pointsQuery.error as Error)?.message ?? '')}</Tag>
+            <Tag color="red">
+              {t('status.loadFailed', {
+                msg: String((pointsQuery.error as Error)?.message ?? ''),
+              })}
+            </Tag>
           ) : null
         }
       >
@@ -231,7 +248,11 @@ export function StatusPage() {
           loading={pointsQuery.isLoading}
           columns={pointColumns}
           dataSource={pointsQuery.data ?? []}
-          pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 点` }}
+          pagination={{
+            pageSize: 20,
+            showSizeChanger: true,
+            showTotal: (total) => t('status.viewPoints', { n: total }),
+          }}
           scroll={{ x: 720 }}
         />
       </Card>

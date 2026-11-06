@@ -5,6 +5,7 @@ import { Spin } from 'antd'
 import { useStatusQuery } from './api/queries'
 import { AuthGate } from './components/AuthGate'
 import { useSchemaHandshake } from './hooks/useSchemaHandshake'
+import { useT } from './i18n'
 import { useHashRoute } from './hooks/useHashRoute'
 import { ErrorBoundary } from './layout/ErrorBoundary'
 import { AppLayout } from './layout/AppLayout'
@@ -21,9 +22,10 @@ const LogsPage = lazy(() => import('./pages/LogsPage').then((m) => ({ default: m
 const HistoryPage = lazy(() => import('./pages/HistoryPage').then((m) => ({ default: m.HistoryPage })))
 
 function PageFallback() {
+  const t = useT()
   return (
     <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}>
-      <Spin tip="加载页面…" size="large">
+      <Spin tip={t('common.loading')} size="large">
         <div style={{ width: 200, height: 60 }} />
       </Spin>
     </div>

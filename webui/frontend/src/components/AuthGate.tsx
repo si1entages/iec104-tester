@@ -5,6 +5,7 @@ import { Button, Card, Input, Space, Spin, Typography } from 'antd'
 
 import { TOKEN_KEY, getToken } from '../api/client'
 import { api } from '../api/endpoints'
+import { useT } from '../i18n'
 
 type GateState = 'checking' | 'ok' | 'needed' | 'error'
 
@@ -17,6 +18,7 @@ type GateState = 'checking' | 'ok' | 'needed' | 'error'
  *  - 令牌无效/缺失时停留在输入框，不渲染主界面（避免满屏 401 报错）。
  */
 export function AuthGate({ children }: { children: ReactNode }) {
+  const t = useT()
   const [state, setState] = useState<GateState>('checking')
   const [value, setValue] = useState('')
 
@@ -59,7 +61,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   if (state === 'checking') {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', padding: 64 }}>
-        <Spin tip="校验访问令牌…" size="large">
+        <Spin tip={t('auth.checking')} size="large">
           <div style={{ width: 200, height: 60 }} />
         </Spin>
       </div>
@@ -68,30 +70,28 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   return (
     <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 96 }}>
-      <Card title="需要访问令牌" style={{ width: 440 }}>
+      <Card title={t('auth.title')} style={{ width: 440 }}>
         <Typography.Paragraph type="secondary">
-          {state === 'error'
-            ? '无法连接后端（/api/auth 探测失败）。请确认服务已启动后重试。'
-            : '服务端已启用 Web API 认证（--auth-token）。请输入访问令牌；也可直接访问 '}
+          {state === 'error' ? t('auth.errorDesc') : t('auth.desc')}
           {state === 'error' ? null : (
             <Typography.Text code>/app/?token=&lt;token&gt;</Typography.Text>
           )}
-          {state === 'error' ? null : ' 由服务端导入。'}
+          {state === 'error' ? null : ` ${t('auth.descSuffix')}`}
         </Typography.Paragraph>
         <Space.Compact style={{ width: '100%' }}>
           <Input.Password
-            placeholder="访问令牌"
+            placeholder={t('auth.placeholder')}
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onPressEnter={submit}
           />
           <Button type="primary" onClick={submit} disabled={!value.trim()}>
-            进入
+            {t('auth.enter')}
           </Button>
         </Space.Compact>
         {state === 'error' ? (
           <Button style={{ marginTop: 12 }} onClick={() => window.location.reload()}>
-            重试
+            {t('auth.retry')}
           </Button>
         ) : null}
       </Card>

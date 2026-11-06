@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "i18n:inventory": "node scripts/i18n-inventory.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "^5.5.1",

@@ -2,6 +2,7 @@ import React from 'react'
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { App as AntdApp, ConfigProvider } from 'antd'
+import enUS from 'antd/locale/en_US'
 import zhCN from 'antd/locale/zh_CN'
 import ReactDOM from 'react-dom/client'
 
@@ -30,12 +31,16 @@ const queryClient = new QueryClient({
 })
 
 const rootEl = document.getElementById('root')
-if (!rootEl) throw new Error('#root 节点缺失')
+if (!rootEl) throw new Error('#root 节点缺失') // i18n-ignore 开发期错误
 
 function Root() {
   const theme = useUiStore((s) => s.theme)
+  const locale = useUiStore((s) => s.locale)
   return (
-    <ConfigProvider locale={zhCN} theme={theme === 'light' ? lightTheme : darkTheme}>
+    <ConfigProvider
+      locale={locale === 'en' ? enUS : zhCN}
+      theme={theme === 'light' ? lightTheme : darkTheme}
+    >
       <QueryClientProvider client={queryClient}>
         {/* AntdApp 提供 message/notification 的上下文，避免静态方法丢主题 */}
         <AntdApp>
