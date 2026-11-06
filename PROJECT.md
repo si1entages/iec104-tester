@@ -29,7 +29,7 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 | 模块 | 职责 | 修改频率 |
 |------|------|---------|
 | core/protocol/asdu.py | ASDU 编解码，TypeIdentifier → 解析逻辑映射 | 高 |
-| core/protocol/types.py | 59 种 TypeID 枚举定义 | 低 |
+| core/protocol/types.py | 72 种 TypeID 枚举定义 | 低 |
 | core/protocol/apci.py | APCI 帧头编解码（I/S/U 格式） | 低 |
 | core/protocol/sequence.py | k/w 流控计数器 | 中 |
 | core/protocol/state_machine.py | START/STOP/TEST 状态机 | 中 |
@@ -54,7 +54,7 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 ### 协议层
 - APCI: I 格式（信息）、S 格式（确认）、U 格式（控制）
 - ASDU 结构: TypeID(1B) + SQ(1B) + Cause(2B) + CommonAddr(2B) + IOBs + 数据体
-- 59 种 TypeID 在 types.py 用枚举定义，asdu.py 按 TypeID 分发解析
+- 72 种 TypeID 在 types.py 用枚举定义，asdu.py 按 TypeID 分发解析
 - k/w 流控: k=12（未确认上限）, w=8（确认间隔）
 
 ### 编码风格
@@ -77,7 +77,7 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - 协议完整性: `TypeID` 枚举里**每个类型都必须同时有解码注册与 ASDUBuilder 构造器**（否则就是"能解不能发"的半实现）；新增类型时用 `tests/test_protocol_type_coverage.py` 的护栏用例兜底
 
 ### 测试
-- 单元测试: tests/test_*.py（**1281 例**；`tests/perf/` 由 `-m "not perf"` 默认排除）
+- 单元测试: tests/test_*.py（**1288 例**；`tests/perf/` 由 `-m "not perf"` 默认排除）
 - 协议 fuzz: tests/test_protocol_fuzz.py（Hypothesis；解码器只允许 `ValueError`）
 - 互操作回放: tests/test_frame_corpus_replay.py + tests/fixtures/frames/（golden + MasterEngine 回放）
 - 性能/长稳: `pytest tests/ -m perf`（解码吞吐 / 10 万点快照 / 环回 soak，时长由 `IEC104_SOAK_SECONDS` 控制）
@@ -133,6 +133,7 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - [x] 一键诊断包：`GET /api/diagnostics/export`（状态/配置脱敏/日志/报文/事件/点表/历史统计）+ 状态页按钮
 - [x] 一键环回 Demo：`python app.py --demo`（子站+主站独立子进程、自动监听/连接/总召，Ctrl+C 统一回收）
 - [x] 分支覆盖率门禁（CI `--cov-branch`，当前 88.8%）+ 协议层变异冒烟 `tools/mutation_smoke.py`（12/12 killed）
+- [x] 历史库查询 UI：`GET /api/history/{stats,data,frames,export}`（§2.11/§4.9）+ Web「历史」页（数据/报文双页签，时间/类型/IOA/方向过滤，CSV 导出；未启用提示）；`tests/test_webui_history_endpoints.py` 4 例 + `HistoryPage.test.tsx` 3 例；全量 1288 passed
 
 ## 双应用入口（纯 Web UI）
 

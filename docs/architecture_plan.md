@@ -205,7 +205,7 @@ SlaveEngine 检测到数据变化 → send_spontaneous_*() → ASDU(COT=3 突发
 | 数据-point_table | `core/data/point_table.py` | 438 | 点表模型 + YAML | `PointTable` | 被引擎/桥依赖 | 中 |
 | 数据-history | `core/data/history.py` | 439 | SQLite 历史库 | `HistoryDB` | 被引擎依赖 | 低 |
 | **日志** | `core/logging_manager.py` | **246** | **结构化日志：内存环形缓冲 + JSONL 轮转 + Python logging 桥 + 订阅推送** | `LogManager`, `LogEntry` | 被 webui 依赖；经桥收纳 `iec104.*` | 中 |
-| Web-服务 | `webui/server.py` | **564** | aiohttp REST（~35 端点）+ WS | `create_app`, `run_server` | 依赖 bridge | 中 |
+| Web-服务 | `webui/server.py` | **899** | aiohttp REST（**50 个 `/api/*` 端点**，含历史查询 §2.11）+ WS | `create_app`, `run_server` | 依赖 bridge | 中 |
 | Web-桥 | `webui/bridge.py` | **286** | Web 后端门面（组合下述三者，保持旧 API 形状） | `EngineBridge` | 依赖 session/points/events | 高 |
 | Web-会话 | `webui/session.py` | **339** | master/slave 启停与协议命令门面 | `EngineSession` | 依赖 engine/config | 高 |
 | Web-点表 | `webui/points.py` | **260** | 点表快照/批量/导入导出，同步引擎 | `PointService` | 依赖 data.point_table | 中 |
@@ -331,7 +331,7 @@ graph TD
 | ✅ **T12** | 主站页面重写 | 连接/状态栏、**选中行 + 右侧命令面板**（YK 单/双/SBO、设点、总召、步/比特串/延时/参数/文件）、点表（十万行虚拟滚动）、报文查看器（HEX + 解析 + 过滤）、趋势图。**验收**：`qa_full_flow.py` 主站项通过；双击命令点值直接下发须经确认弹窗且不绕过 SBO（T21）；10 万点不卡顿 | P0 | 5 | T11 | 前端工程师 | `webui/frontend/src/pages/master/**`, `src/components/**` |
 | ✅ **T13** | 子站页面重写 | 监听/多客户端状态、响应配置面板（延迟/错误注入 drop·corrupt·no_response·wrong_cot/品质 IV·NT·SB·OV/连接行为）、模拟（手动/随机/脚本）、点表编辑与 YAML/CSV 导入导出、自发上送。**验收**：面板改动实时生效；端到端脚本验证 | P0 | 4 | T11 | 前端工程师 | `webui/frontend/src/pages/slave/**`, `src/components/**` |
 | ✅ **T14** | 日志面板与全局外壳 | 全局导航/主题（antd `darkAlgorithm`）/错误边界；「日志」面板：分级/分类/来源过滤 + 搜索 + JSONL 导出（对接 `GET /api/logs`、`/api/logs/export`、WS `log`）。**验收**：日志实时流可视、过滤/导出可用 | P1 | 2.5 | T11 | 前端工程师 | `webui/frontend/src/pages/logs/**`, `src/layout/**` |
-| ✅ **T15** | 前端自动化测试纳入 CI | Vitest + RTL 单测 + Playwright 无头端到端（替代旧 `qa_verify/*.mjs` DOM 探针）；纳入 CI 并产出报告。**验收**：CI 中前端用例自动执行并产出报告 | P1 | 3 | T10 | 测试工程师 | `webui/frontend/**/*.test.tsx`, `webui/frontend/e2e/**`, `.github/workflows/ci.yml` |
+| ✅ **T15** | 前端自动化测试纳入 CI | Vitest + RTL 单测 + Playwright 无头端到端（替代旧 `qa_verify/*.mjs` DOM 探针）；纳入 CI 并产出报告。**验收**：CI 中前端用例自动执行并产出报告 | P1 | 3 | T10 | 测试工程师 | `webui/frontend/src/**/*.test.tsx`, `tests/e2e/playwright.config.ts`, `tests/e2e/specs/**`（5 spec：contract/logs/master/multi/slave）, `.github/workflows/ci.yml`（frontend + frontend-e2e 两 job） |
 
 ### Phase 3 — 功能与数据集成
 
@@ -368,8 +368,9 @@ graph TD
 | **T29** | 一键诊断包 | `webui/diagnostics.py` + `GET /api/diagnostics/export` + 状态页按钮；配置私钥路径脱敏；契约文档 §2.10 |
 | **T30** | 一键环回 Demo | `python app.py --demo`：两个角色独立子进程、自动监听/连接/总召、Ctrl+C 统一回收；`--demo-seconds` 用于定时演示 |
 | **T31** | 分支覆盖 + 变异冒烟 | CI `--cov-branch`（当前 88.8%）；`tools/mutation_smoke.py` 12 个高价值变异全部被杀死，CI 独立 job |
+| **T32** | 历史查询页（2026-11-06 第二批） | `GET /api/history/{stats,data,frames,export}`（契约 §2.11/§4.9）+ Web「历史」页（数据/报文双页签、时间/类型/IOA/方向过滤、CSV 导出、未启用提示）；`tests/test_webui_history_endpoints.py`（4 例）+ `HistoryPage.test.tsx`（3 例）；全量 1288 passed |
 
-> **累计统计**：T01~T31 **全部完成，待办 0**。
+> **累计统计**：T01~T32 **全部完成，待办 0**。
 
 ---
 

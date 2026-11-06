@@ -2,6 +2,30 @@
 
 > 生成时间：2026-09-24 | 代码总量：~21,195 行 Python | 371 测试用例
 
+> **⚠️ 本报告为历史快照，已过时（勿作为现行待办）。**
+> 2026-11-06 逐项核对：P0 全部 6 项与 P1 主要项均已修复合入 master，测试缺口亦大部分补齐
+> （当前基线 1284 passed、`core/` 分支覆盖 88.82%）。现行迭代计划以
+> [`architecture_plan.md`](architecture_plan.md) 为准，本报告保留仅作备查。
+>
+> ### 核对结论（2026-11-06）
+>
+> | 原编号 | 问题 | 状态 | 证据 |
+> |--------|------|------|------|
+> | P0-1 | asdu.py 解码字典每次重建 | ✅ 已修复 | `core/protocol/asdu.py:310` `_DECODERS` 类级缓存 |
+> | P0-2 | history 同步 SQLite 阻塞事件循环 | ✅ 已修复 | `core/data/history.py:130` 独立 flush 线程 |
+> | P0-3 | config roundtrip 丢失 display 字段 | ✅ 已修复 | `core/config.py:288-289` 加载段已补 |
+> | P0-4 | webui/server.py API 无输入校验 | ✅ 已修复 | 全端点校验（`status=400` 71 处） |
+> | P0-5 | simulation/proxy.py TX 拦截未实现 | ✅ 已修复 | `core/simulation/proxy.py:109` 实装 TX 拦截，乱序缓冲已消费 |
+> | P0-6 | assertions 遮蔽内置 AssertionError | ✅ 已修复 | `core/testing/assertions.py:12` 改名 `AssertionFailed` |
+> | P1-7~9 | master/slave God Class、命令样板重复 | ✅ 已修复 | 拆分后 master.py 711 行 / slave.py 723 行 + `master_protocol`/`master_session`/`slave_response` 等模块 |
+> | P1-10 | build/ 引用 PySide6 死代码 | ✅ 已修复 | `build/` 零 PySide6 残留，三脚本已合并 `build_all.py` |
+> | P1-11 | 多处访问私有属性破坏封装 | ✅ 已修复 | 改用公开 API（如 `engine.get_raw_frame_callback()`，`manager.py:100`） |
+> | P1-12 | 帧缓冲无上限增长 | ✅ 已修复 | `master.py:181` / `slave.py:171` `deque(maxlen=1000)` |
+> | P2-13/15 | print 替代 logging、弃用 API | ✅ 已修复 | `history.py` 零 print；simulation 零 `get_event_loop`/`__import__` |
+> | P2-14/16/17 | 硬编码值 / 配置去重 / requirements 统一 | ⚪ 低优未动 | 部分已随迭代解决（如端口可 `--http-port` 配置）；requirements.txt 为打包场景有意保留 |
+> | §四 测试缺口 | 22 个核心模块无单测 | ✅ 大部分补齐 | capture/testing/simulation/data 均有对应 `test_*.py`；分支覆盖 88.82%（门禁 88%） |
+> | §五 其他 | frame_type_of、player stop 等零散项 | ⚪ 未逐项核对 | 低风险；如复现再单独立项 |
+
 ---
 
 ## 一、P0 严重问题（影响性能/正确性/安全）

@@ -32,7 +32,7 @@ IEC 60870-5-104 测试工具是一款面向电力系统 SCADA 调试和测试的
 
 | 功能 | 说明 |
 |------|------|
-| 协议支持 | 59 种 ASDU 类型标识符，100% 覆盖 |
+| 协议支持 | 72 种 ASDU 类型标识符，全部可构造/可解码 |
 | 流控机制 | k/w 滑动窗口，符合标准要求 |
 | 定时器 | t0/t1/t2/t3 四级超时管理 |
 | 状态机 | STARTDT/STOPDT/TESTFR 完整生命周期 |
@@ -41,7 +41,7 @@ IEC 60870-5-104 测试工具是一款面向电力系统 SCADA 调试和测试的
 | 报文录制 | 支持 .i104/.json 格式，可导出 **pcap/pcapng**（Wireshark 直接打开） |
 | 网络模拟 | 丢包、延迟、乱序、损坏等异常 |
 | TLS 传输加密 | 证书/CA 校验、双向认证（mTLS）；**仅传输层加密，不等于 IEC 62351 合规**（见 [`tls.md`](tls.md)） |
-| 历史库 | 默认开启（SQLite 按角色分库），保留期/条数/容量三重清理，`--no-history` 关闭 |
+| 历史库 | 默认开启（SQLite 按角色分库），保留期/条数/容量三重清理，`--no-history` 关闭；Web「历史」页可查询与导出 |
 | 非标 TypeID | YAML 注册厂商私有类型即可编解码往返（未注册按标准回 COT=42） |
 | 文件传输 | F_FR/F_SR/F_SC/F_LS/F_AF/F_SG/F_DR，字节级语义经多实现交叉核实（见 [`file_transfer_fls.md`](file_transfer_fls.md)） |
 
@@ -543,6 +543,12 @@ python app.py --mode master --tls --tls-ca certs/ca.pem --tls-hostname iec104.lo
 
 主站 Web 8765 与子站 Web 8766 可同时运行，各自写自己的库文件。
 Web 模式与 headless/CLI 模式都会把收发报文落盘。
+
+**Web「历史」页**（主站/子站均可）：按时间范围、点位类型（YX/YC/YM）、IOA 或报文
+方向（RX/TX）过滤，分「数据 / 报文」两个页签展示；支持按当前过滤条件导出 CSV
+（上限 20 万行）。REST 端点见 [`api_contract.md`](../webui/api_contract.md) §2.11：
+`GET /api/history/stats|data|frames|export`。历史库未启用（`--no-history`）时
+页面给出提示并禁用导出。
 
 清理策略：保留期（`retention_days`）+ 记录条数 + 容量上限（`max_size_mb`），
 刷盘间隔由 `flush_interval` 控制。

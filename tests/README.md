@@ -26,7 +26,7 @@ tests/
   python -m pytest tests/test_asdu.py -q   # 单文件
   ```
 
-- 当前基线：**1281 passed**（`tests/` 全量，`perf` 默认排除）。
+- 当前基线：**1288 passed**（`tests/` 全量，`perf` 默认排除）。
 
 ### 覆盖率
 

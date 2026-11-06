@@ -218,3 +218,26 @@ Web 模式下所有收发帧的唯一汇聚点是 `webui/bridge.py:EngineBridge.
 
 端到端验证见 `tests/test_web_history_wiring.py::TestWebModeEndToEnd`：
 真 TCP 起子站 → 真 `MasterEngine` 连接并完成 STARTDT → 断言库中确有双向帧。
+
+## 8. Web 历史查询页（T32）
+
+历史库的浏览器查询入口（主站/子站导航「历史」）：
+
+- **过滤**：时间范围（`RangePicker`，含时分秒）、点位类型（YX/YC/YM）、IOA（数据页签）、
+  报文方向 RX/TX（报文页签）；「查询」按钮触发，不做自动轮询（历史是存量数据）。
+- **展示**：数据 / 报文两个页签，按时间戳新→旧；顶部统计标签展示记录数、待落盘数、
+  丢记录累计、库占用与最早/最新数据日期。
+- **导出**：按当前过滤条件导出 CSV（数据 6 列 / 报文 6 列，上限 20 万行）。
+- **未启用**：`--no-history` 启动时页面显示提示、导出按钮禁用。
+
+REST 契约见 [`webui/api_contract.md`](../webui/api_contract.md) §2.11 / §4.9：
+
+```
+GET /api/history/stats     # 统计
+GET /api/history/data      # point_type / ioa / start / end / limit
+GET /api/history/frames    # direction / start / end / limit
+GET /api/history/export    # type=data|frames + 同上过滤参数 → text/csv
+```
+
+后端接线测试 `tests/test_webui_history_endpoints.py`（4 例：未启用 / 过滤与统计 /
+参数校验 400 / CSV 导出），前端 `HistoryPage.test.tsx`（3 例：渲染 / 页签切换 / 未启用态）。
