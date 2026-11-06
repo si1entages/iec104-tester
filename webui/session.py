@@ -18,6 +18,8 @@ from core.engine.multi_station import (
     _coerce_tls_config,
 )
 from core.engine.slave import ResponseBehavior, SlaveEngine, SlaveEvent
+from core.simulation import NetworkCondition, SimulationManager
+from core.simulation.conditions import PRESET_NAMES
 from core.transport.connection import TlsConfigError, build_context_from_config
 
 logger = logging.getLogger("iec104.webui")
@@ -125,6 +127,10 @@ class EngineSession:
         self.engine: MasterEngine | SlaveEngine | None = None
         self.pending_response: dict = {}
         self.simulation = False
+        # 网络异常模拟（与子站数据模拟 self.simulation 无关）：
+        # enabled 在引擎未启动时也保持，start_master/start_slave 会自动安装
+        self._net_sim = SimulationManager()
+        self._net_sim_enabled = False
         self._on_event = on_event
         self._on_frame = on_frame
         # 可选：随 Web 会话关停一并回收的多站管理器（T07 显式回收路径）
@@ -312,6 +318,7 @@ class EngineSession:
         )
         eng.set_event_callback(self._hook_master)
         eng.set_raw_frame_callback(self._hook_frame_master)
+        self._install_network_simulation(eng)
         self.engine = eng
         self.config.connection.host = host
         self.config.connection.port = port
@@ -322,6 +329,7 @@ class EngineSession:
     async def stop_master(self) -> dict:
         if self.role != "master" or not self.engine:
             return {"ok": True}
+        self._remove_network_simulation()
         eng = self.engine
         self.engine = None
         try:
@@ -362,6 +370,7 @@ class EngineSession:
         eng.data_store.init_from_point_table(points.table)
         eng.set_event_callback(self._hook_slave)
         eng.set_raw_frame_callback(self._hook_frame)
+        self._install_network_simulation(eng)
         if self.pending_response:
             eng.set_response_behavior(self.pending_response)
         self.engine = eng
@@ -371,6 +380,7 @@ class EngineSession:
     async def stop_slave(self) -> dict:
         if self.role != "slave" or not self.engine:
             return {"ok": True}
+        self._remove_network_simulation()
         eng = self.engine
         self.engine = None
         self.simulation = False
@@ -656,6 +666,114 @@ class EngineSession:
             await eng.stop_simulation()
         self.simulation = bool(enabled)
         return {"ok": True}
+
+    # ── 网络异常模拟（B6：Web 接入；与子站数据模拟 self.simulation 无关）──
+
+    @staticmethod
+    def _validate_sim_condition(condition: dict) -> str | None:
+        """校验自定义网络条件字典；返回错误信息（None=通过）."""
+        fields = NetworkCondition.__dataclass_fields__
+        prob_fields = {"loss_rate", "duplicate_rate", "corrupt_rate",
+                       "reorder_rate", "disconnect_rate"}
+        nonneg_fields = {"delay_ms", "delay_variance_ms",
+                         "disconnect_duration_s", "bandwidth_bps"}
+        int_fields = {"corrupt_bits", "reorder_window"}
+        for key, value in condition.items():
+            if key not in fields:
+                return f"unknown condition field: {key}"
+            if key == "direction":
+                if value not in ("rx", "tx", "both"):
+                    return "direction 须为 rx|tx|both"
+            elif key == "active":
+                if not isinstance(value, bool):
+                    return "active 须为 bool"
+            elif key in prob_fields:
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    return f"{key} 须为数字"
+                if not 0 <= float(value) <= 1:
+                    return f"{key} 须在 0..1"
+            elif key in nonneg_fields:
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    return f"{key} 须为数字"
+                if float(value) < 0:
+                    return f"{key} 须 >= 0"
+            elif key in int_fields:
+                if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                    return f"{key} 须为 >=1 的整数"
+        return None
+
+    def network_simulation_status(self) -> dict:
+        """网络异常模拟状态（条件 / 安装态 / 统计 / 预设名）."""
+        cond = self._net_sim.condition
+        return {
+            "enabled": self._net_sim_enabled,
+            "installed": self._net_sim.installed,
+            "active": self._net_sim.is_active,
+            "describe": cond.describe(),
+            "condition": asdict(cond),
+            "stats": self._net_sim.stats(),
+            "presets": list(PRESET_NAMES),
+        }
+
+    async def set_network_simulation(self, enabled: bool, preset: str | None = None,
+                                     condition: dict | None = None) -> dict:
+        """启用/停用网络异常模拟；可在引擎未启动时预设（启动时自动安装）.
+
+        停用不卸载代理（仅 ``active=False`` 直通），避免反复启用造成包装叠加；
+        引擎停止时才真正卸载，重启后按 enabled 自动重装。
+        """
+        if preset:
+            try:
+                self._net_sim.apply_preset(preset)
+            except ValueError as e:
+                return {"ok": False, "error": str(e)}
+        if condition is not None:
+            if not isinstance(condition, dict):
+                return {"ok": False, "error": "invalid condition"}
+            err = self._validate_sim_condition(condition)
+            if err:
+                return {"ok": False, "error": err}
+            self._net_sim.apply_condition(**condition)
+        self._net_sim_enabled = bool(enabled)
+        self._net_sim.set_active(bool(enabled))
+        if enabled and self.engine is not None and not self._net_sim.installed:
+            try:
+                self._net_sim.install(self.engine)
+            except Exception as e:  # noqa: BLE001 — 模拟失败不拖垮引擎
+                logger.warning("network simulation install failed: %s", e)
+                return {"ok": False, "error": f"install failed: {e}"}
+        return {"ok": True}
+
+    def reset_network_simulation_stats(self) -> dict:
+        self._net_sim.reset_stats()
+        return {"ok": True}
+
+    def network_simulation_disconnect(self, duration: float = 5.0) -> dict:
+        """手动触发一次断线（仅已安装时有效）."""
+        if not self._net_sim.installed or self.engine is None:
+            return {"ok": False, "error": "simulation not installed（先启用并启动引擎）"}
+        if isinstance(duration, bool) or not isinstance(duration, (int, float)) \
+                or not 0 < float(duration) <= 600:
+            return {"ok": False, "error": "duration 须在 (0, 600] 秒"}
+        self._net_sim.disconnect(float(duration))
+        return {"ok": True}
+
+    def _install_network_simulation(self, eng: Any) -> None:
+        """引擎启动后按 enabled 自动安装网络异常模拟."""
+        if not self._net_sim_enabled:
+            return
+        try:
+            self._net_sim.install(eng)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("network simulation install failed: %s", e)
+
+    def _remove_network_simulation(self) -> None:
+        """引擎停止前卸载模拟（恢复原始回调；引擎对象随后丢弃）."""
+        if self._net_sim.installed:
+            try:
+                self._net_sim.remove()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("network simulation remove failed: %s", e)
 
     async def slave_set_yx(self, ioa: int, value: bool) -> dict:
         eng = self.require_slave()

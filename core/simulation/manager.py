@@ -46,6 +46,11 @@ class SimulationManager:
         self._installed = False
 
     @property
+    def installed(self) -> bool:
+        """是否已安装到引擎（与条件是否 active 无关，供状态展示用）."""
+        return self._installed
+
+    @property
     def is_active(self) -> bool:
         return self._installed and self._condition.active
 
@@ -87,7 +92,9 @@ class SimulationManager:
     def install(self, engine) -> None:
         """安装到引擎.
 
-        自动拦截引擎的帧回调，注入网络异常。
+        代理在**传输层回调**（TCP 客户端/服务端）处拦截，帧进入协议处理前即被
+        施加条件；引擎的 ``raw_frame_callback``（UI 观测点）保持原样——注入后的
+        帧到达引擎时照常上报，被丢弃的帧不会出现在界面上。
         """
         if self._installed:
             self.remove()
@@ -96,23 +103,16 @@ class SimulationManager:
         self._proxy = NetworkProxy(self._condition)
         self._proxy.install_on_engine(engine)
 
-        # 替换引擎的 raw_frame_callback
-        original_callback = engine.get_raw_frame_callback()
-        if original_callback:
-            wrapped = self._proxy.wrap_rx_callback(original_callback)
-            engine.set_raw_frame_callback(wrapped)
-
         self._installed = True
         logger.info(f"Simulation installed on engine: {self._condition.describe()}")
 
     def remove(self) -> None:
-        """从引擎移除模拟."""
+        """从引擎移除模拟（恢复传输层收发回调；条件对象保留以便再次安装）."""
         if not self._installed or not self._engine:
             return
 
-        # 恢复原始回调
-        if self._proxy and self._proxy._original_rx:
-            self._engine.set_raw_frame_callback(self._proxy._original_rx)
+        if self._proxy is not None:
+            self._proxy.uninstall_from_engine(self._engine)
 
         self._proxy = None
         self._installed = False

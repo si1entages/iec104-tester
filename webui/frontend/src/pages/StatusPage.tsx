@@ -26,6 +26,7 @@ import {
   useStatusQuery,
 } from '../api/queries'
 import type { OkResponse, Point } from '../api/types'
+import { NetworkSimCard } from '../components/NetworkSimCard'
 
 const pointColumns: TableColumnsType<Point> = [
   { title: 'IOA', dataIndex: 'ioa', width: 90, sorter: (a, b) => a.ioa - b.ioa },
@@ -212,6 +213,8 @@ export function StatusPage() {
       >
         <Descriptions column={4} size="small" items={items} />
       </Card>
+
+      <NetworkSimCard />
 
       <Card
         title={`点表（${pointsQuery.data?.length ?? 0}）`}

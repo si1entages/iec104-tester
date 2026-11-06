@@ -532,6 +532,43 @@ export interface HistoryStatsResponse {
   stats: HistoryStats
 }
 
+// ── 网络异常模拟（契约 §2.12 / §4.10）──────────────────────────────────
+
+export interface NetworkCondition {
+  delay_ms: number
+  delay_variance_ms: number
+  loss_rate: number
+  duplicate_rate: number
+  corrupt_rate: number
+  corrupt_bits: number
+  reorder_rate: number
+  reorder_window: number
+  disconnect_rate: number
+  disconnect_duration_s: number
+  bandwidth_bps: number
+  direction: string
+  active: boolean
+}
+
+export type SimStats = Record<string, number>
+
+export interface SimulationStatusResponse {
+  ok: boolean
+  enabled: boolean
+  installed: boolean
+  active: boolean
+  describe: string
+  condition: NetworkCondition
+  stats: SimStats
+  presets: string[]
+}
+
+export interface SimulationRequest {
+  enabled: boolean
+  preset?: string
+  condition?: Partial<NetworkCondition>
+}
+
 // ── WebSocket ──────────────────────────────────────────────────────────
 
 /** WS 信封：`{kind, schemaVersion, ts, data}` */

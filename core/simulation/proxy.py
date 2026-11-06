@@ -40,6 +40,11 @@ class NetworkProxy:
         self._original_rx: Callable | None = None
         self._original_tx: Callable | None = None
 
+        # 安装目标（卸载时精确恢复）：RX 为 (持有者, 属性名)，TX 为引擎对象
+        self._engine = None
+        self._rx_target: tuple[object, str] | None = None
+        self._tx_target: object | None = None
+
         # 乱序缓冲
         self._reorder_buffer: deque = deque(maxlen=condition.reorder_window)
 
@@ -98,31 +103,54 @@ class NetworkProxy:
     def install_on_engine(self, engine) -> None:
         """在引擎上安装代理.
 
-        自动包装引擎的 TX 发送方法和 RX 回调，不需要手动设置。
+        优先替换**传输层实际持有的回调引用**（TCP 客户端/服务端的 ``_on_frame``），
+        使帧在进入引擎协议处理**之前**被拦截；只有两者都不存在时才退回替换引擎
+        实例方法。引擎的 ``raw_frame_callback``（UI 观测点）不被改动——注入后的
+        帧到达引擎时照常上报，被丢弃的帧不会出现在 UI。
         """
-        # 保存引擎引用，用于后续发送
         self._engine = engine
 
-        # 安装 TX 拦截：包装引擎的 _send_frame 方法
+        # 安装 TX 拦截：引擎发送统一走 self._send_frame（会话层动态读取）
         if hasattr(engine, '_send_frame'):
-            original_tx = engine._send_frame
-            engine._send_frame = self.wrap_tx_callback(original_tx)
+            self._tx_target = engine
+            engine._send_frame = self.wrap_tx_callback(engine._send_frame)
 
-        # 安装 RX 拦截：包装引擎的 _on_frame_received 方法
-        # 对于主站，TCP 客户端直接调用 engine._on_frame_received
-        # 对于子站，TCP 服务端调用 engine._on_frame_received
-        if hasattr(engine, '_on_frame_received'):
-            original_rx = engine._on_frame_received
-            wrapped_rx = self.wrap_rx_callback(original_rx)
-            # 替换引擎实例上的回调（实例属性覆盖类方法）
-            engine._on_frame_received = wrapped_rx
-            # 如果 TCP 客户端/服务端持有回调引用，也需要更新
-            if hasattr(engine, '_client') and hasattr(engine._client, '_on_frame'):
-                engine._client._on_frame = wrapped_rx
-            elif hasattr(engine, '_server') and hasattr(engine._server, '_on_frame'):
-                engine._server._on_frame = wrapped_rx
+        # 安装 RX 拦截：找传输层动态读取的回调引用
+        owner: object | None = None
+        attr = ""
+        if hasattr(engine, '_client') and hasattr(engine._client, '_on_frame'):
+            owner, attr = engine._client, '_on_frame'
+        elif hasattr(engine, '_server') and hasattr(engine._server, '_on_frame'):
+            owner, attr = engine._server, '_on_frame'
+        elif hasattr(engine, '_on_frame_received'):
+            owner, attr = engine, '_on_frame_received'
+        if owner is not None:
+            self._rx_target = (owner, attr)
+            setattr(owner, attr, self.wrap_rx_callback(getattr(owner, attr)))
 
         logger.info(f"Network proxy installed: {self._condition.describe()}")
+
+    def uninstall_from_engine(self, engine=None) -> None:
+        """撤销安装：把 TX/RX 回调恢复为安装前对象（幂等）.
+
+        ``remove()`` 后代理不再位于帧路径上；条件对象由管理器保留，重新
+        ``install_on_engine()`` 可再次生效。
+        """
+        if self._tx_target is not None and self._original_tx is not None:
+            try:
+                self._tx_target._send_frame = self._original_tx
+            except Exception as e:  # noqa: BLE001 — 卸载失败不阻断关停
+                logger.warning(f"TX uninstall failed: {e}")
+        if self._rx_target is not None and self._original_rx is not None:
+            owner, attr = self._rx_target
+            try:
+                setattr(owner, attr, self._original_rx)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"RX uninstall failed: {e}")
+        self._rx_target = None
+        self._tx_target = None
+        self._original_rx = None
+        self._original_tx = None
 
     # ── 帧处理 ────────────────────────────────────────────────────
 

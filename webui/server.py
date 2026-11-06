@@ -620,6 +620,50 @@ def create_app(bridge: EngineBridge) -> web.Application:
             body=body, content_type="application/zip",
             headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
+    # ── 网络异常模拟（B6，api_contract.md §2.12）────────────────────────
+
+    async def api_network_simulation_get(request: web.Request) -> web.Response:
+        """网络异常模拟状态（条件/安装态/统计/预设名）."""
+        return web.json_response(bridge.network_simulation_status())
+
+    async def api_network_simulation_set(request: web.Request) -> web.Response:
+        """启用/停用网络异常模拟，可携带 preset 或自定义 condition."""
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"ok": False, "error": "invalid body"}, status=400)
+        enabled = body.get("enabled")
+        if not isinstance(enabled, bool):
+            return web.json_response({"ok": False, "error": "invalid enabled"}, status=400)
+        preset = body.get("preset")
+        if preset is not None and not isinstance(preset, str):
+            return web.json_response({"ok": False, "error": "invalid preset"}, status=400)
+        condition = body.get("condition")
+        if condition is not None and not isinstance(condition, dict):
+            return web.json_response(
+                {"ok": False, "error": "invalid condition"}, status=400)
+        result = await bridge.set_network_simulation(
+            enabled, preset=preset, condition=condition)
+        return web.json_response(result, status=200 if result.get("ok") else 400)
+
+    async def api_network_simulation_reset(request: web.Request) -> web.Response:
+        """重置网络模拟统计计数."""
+        return web.json_response(bridge.reset_network_simulation_stats())
+
+    async def api_network_simulation_disconnect(request: web.Request) -> web.Response:
+        """手动触发一次断线（时长秒，默认 5）."""
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            return web.json_response({"ok": False, "error": "invalid body"}, status=400)
+        duration = body.get("duration", 5.0)
+        result = bridge.network_simulation_disconnect(duration)
+        return web.json_response(result, status=200 if result.get("ok") else 400)
+
     async def api_slave_sim(request: web.Request) -> web.Response:
         try:
             body = await request.json()
@@ -830,6 +874,10 @@ def create_app(bridge: EngineBridge) -> web.Application:
     app.router.add_get("/api/history/data", api_history_data)
     app.router.add_get("/api/history/frames", api_history_frames)
     app.router.add_get("/api/history/export", api_history_export)
+    app.router.add_get("/api/simulation", api_network_simulation_get)
+    app.router.add_post("/api/simulation", api_network_simulation_set)
+    app.router.add_post("/api/simulation/reset", api_network_simulation_reset)
+    app.router.add_post("/api/simulation/disconnect", api_network_simulation_disconnect)
     app.router.add_post("/api/points/batch", api_points_batch)
     app.router.add_post("/api/slave/start", api_slave_start)
     app.router.add_post("/api/slave/stop", api_slave_stop)

@@ -21,6 +21,7 @@ import type {
   Point,
   RecentResponse,
   SchemaResponse,
+  SimulationStatusResponse,
   Status,
 } from './types'
 
@@ -45,6 +46,7 @@ export const queryKeys = {
   historyStats: ['history', 'stats'] as const,
   historyData: (params: HistoryDataParams) => ['history', 'data', params] as const,
   historyFrames: (params: HistoryFramesParams) => ['history', 'frames', params] as const,
+  simulationStatus: ['simulation', 'status'] as const,
 }
 
 // ── 查询 ───────────────────────────────────────────────────────────────
@@ -146,6 +148,16 @@ export function useHistoryFramesQuery(params: HistoryFramesParams, enabled = tru
     enabled,
     refetchOnWindowFocus: false,
     staleTime: 0,
+  })
+}
+
+/** 网络异常模拟状态（仅在状态页挂载期间轮询，统计计数实时更新） */
+export function useSimulationStatusQuery() {
+  return useQuery<SimulationStatusResponse>({
+    queryKey: queryKeys.simulationStatus,
+    queryFn: api.simulation.status,
+    refetchInterval: 3000,
+    staleTime: 1000,
   })
 }
 

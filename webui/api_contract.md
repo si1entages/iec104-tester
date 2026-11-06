@@ -220,6 +220,19 @@
 | GET | `/api/history/frames` | query：`direction?: "rx"\|"tx"`（空=全部）, `start?: number`, `end?: number`, `limit: int=500 (≤10000)` | `{ok, enabled, rows: HistoryFrameRecord[]}` |
 | GET | `/api/history/export` | query：`type: "data"\|"frames"="data"`, 其余过滤参数同上（`limit` ≤200000） | `text/csv` 附件（`Content-Disposition`） |
 
+### 2.12 网络异常模拟（B6）
+
+> 传输层异常注入（延迟/丢包/重复/损坏/乱序/断线/限速），包装当前引擎的收发回调。
+> **可在引擎启动前预设**：`enabled=true` 时，主站/子站启动会自动安装；
+> 引擎停止时自动卸载，重启后按启用状态自动重装。响应 `{ok:false, error}` 时 HTTP 状态为 400。
+
+| 方法 | 路径 | 请求 | 响应 |
+|------|------|------|------|
+| GET | `/api/simulation` | — | `{ok, enabled, installed, active, describe, condition: NetworkCondition, stats: SimStats, presets: string[]}`（见 §4.10） |
+| POST | `/api/simulation` | `enabled: bool`；可选 `preset?: string`（§4.10 预设名）、`condition?: Partial<NetworkCondition>`（字段校验：概率 0..1、其余非负；未知字段 → 400） | `{ok, status?: SimulationStatus, error?}` |
+| POST | `/api/simulation/reset` | — | `{ok}`（清零统计计数） |
+| POST | `/api/simulation/disconnect` | `duration?: number=5 (0<d≤600)` | `{ok, error?}`（仅已安装引擎时有效） |
+
 ---
 
 ## 3. WebSocket `/ws`
@@ -379,6 +392,23 @@ HistoryStats        = { data_records: number, frame_records: number,
                         buffered_data: number, buffered_frames: number,
                         oldest_data: number, newest_data: number,
                         db_size_bytes: number, dropped_records: number }
+```
+
+### 4.10 `NetworkCondition` / `SimStats`（网络异常模拟）
+
+```ts
+NetworkCondition = {
+  delay_ms: number, delay_variance_ms: number,
+  loss_rate: number, duplicate_rate: number,
+  corrupt_rate: number, corrupt_bits: number,
+  reorder_rate: number, reorder_window: number,
+  disconnect_rate: number, disconnect_duration_s: number,
+  bandwidth_bps: number, direction: "rx"|"tx"|"both", active: boolean
+}
+SimStats = { rx_total, tx_total, rx_dropped, tx_dropped, rx_corrupted, tx_corrupted,
+             rx_duplicated, tx_duplicated, rx_reordered, tx_reordered, disconnects,
+             [k: string]: number }
+// presets: clean | poor_wifi | congested | satellite | unreliable | intermittent | slow_link | stress
 ```
 
 ---

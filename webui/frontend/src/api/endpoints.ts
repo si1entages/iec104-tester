@@ -40,6 +40,8 @@ import type {
   SchemaResponse,
   SetpointRequest,
   SimRequest,
+  SimulationRequest,
+  SimulationStatusResponse,
   SlaveStartRequest,
   SlaveStepRequest,
   SessionExport,
@@ -165,5 +167,15 @@ export const api = {
       apiGet<HistoryRowsResponse<HistoryDataRecord>>('/api/history/data', historyQuery(params)),
     frames: (params: HistoryFramesParams = {}) =>
       apiGet<HistoryRowsResponse<HistoryFrameRecord>>('/api/history/frames', historyQuery(params)),
+  },
+
+  // ── 网络异常模拟（契约 §2.12）────────────────────────────────────────
+  simulation: {
+    status: () => apiGet<SimulationStatusResponse>('/api/simulation'),
+    set: (body: SimulationRequest) =>
+      apiPost<OkResponse & { status?: SimulationStatusResponse }>('/api/simulation', body),
+    reset: () => apiPost<OkResponse>('/api/simulation/reset'),
+    disconnect: (duration: number) =>
+      apiPost<OkResponse>('/api/simulation/disconnect', { duration }),
   },
 }

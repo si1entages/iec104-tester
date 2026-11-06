@@ -269,6 +269,25 @@ class EngineBridge:
             self._status["simulation"] = bool(enabled)
         return r
 
+    # ── 网络异常模拟（B6）─────────────────────────────────────────
+
+    def network_simulation_status(self) -> dict:
+        return {"ok": True, **self.session.network_simulation_status()}
+
+    async def set_network_simulation(self, enabled: bool, preset: str | None = None,
+                                     condition: dict | None = None) -> dict:
+        r = await self._cmd(self.session.set_network_simulation(
+            enabled, preset=preset, condition=condition))
+        if r.get("ok"):
+            r["status"] = self.session.network_simulation_status()
+        return r
+
+    def reset_network_simulation_stats(self) -> dict:
+        return self.session.reset_network_simulation_stats()
+
+    def network_simulation_disconnect(self, duration: float = 5.0) -> dict:
+        return self.session.network_simulation_disconnect(duration)
+
     def batch_points(self, ptype: str, ioas: list[int], action: str, group: int | None = None) -> dict:
         return self.points.batch(ptype, ioas, action, group, engine=self.engine)
 

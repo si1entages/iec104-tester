@@ -178,3 +178,16 @@ class ConditionPreset:
         if not factory:
             raise ValueError(f"Unknown preset: {name}. Available: {list(presets.keys())}")
         return factory()
+
+
+# 预设名称白名单（Web UI / CLI 共用；与 ConditionPreset.from_name 的键保持一致）
+PRESET_NAMES: tuple[str, ...] = (
+    "clean",
+    "poor_wifi",
+    "congested",
+    "satellite",
+    "unreliable",
+    "intermittent",
+    "slow_link",
+    "stress",
+)

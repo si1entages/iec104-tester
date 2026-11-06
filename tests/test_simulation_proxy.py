@@ -544,28 +544,42 @@ async def test_wrap_tx_callback_routes_through_proxy():
 
 def test_install_on_engine_wraps_rx_tx_and_client_hook():
     engine = SimpleNamespace()
-    engine._send_frame = AsyncMock()
-    engine._on_frame_received = lambda frame: None
-    engine._client = SimpleNamespace(_on_frame=None)
+
+    async def original_tx(frame):
+        return None
+
+    def original_rx(frame):
+        return None
+
+    engine._send_frame = original_tx
+    engine._on_frame_received = original_rx
+    engine._client = SimpleNamespace(_on_frame=original_rx)
 
     proxy = _proxy()
     proxy.install_on_engine(engine)
 
-    assert engine._on_frame_received is not None
-    assert engine._client._on_frame is engine._on_frame_received
-    assert engine._send_frame is not engine.__dict__.get("__orig", None)
+    # 传输层回调被替换；引擎实例方法与 UI 观测点保持不变
+    assert engine._client._on_frame is not original_rx
+    assert engine._on_frame_received is original_rx
+    assert proxy._original_rx is original_rx
+    assert engine._send_frame is not original_tx
 
 
 def test_install_on_engine_falls_back_to_server_hook():
-    """无 _client 但有 _server 时，更新服务端回调引用."""
+    """无 _client 但有 _server 时，替换服务端回调引用."""
     engine = SimpleNamespace()
+
+    def original_rx(conn, frame):
+        return None
+
     engine._on_frame_received = lambda frame: None
-    engine._server = SimpleNamespace(_on_frame=None)
+    engine._server = SimpleNamespace(_on_frame=original_rx)
 
     proxy = _proxy()
     proxy.install_on_engine(engine)
 
-    assert engine._server._on_frame is engine._on_frame_received
+    assert engine._server._on_frame is not original_rx
+    assert proxy._original_rx is original_rx
 
 
 def test_install_on_engine_with_minimal_engine_does_not_fail():
@@ -577,11 +591,11 @@ def test_install_on_engine_with_minimal_engine_does_not_fail():
 
 
 def test_installed_rx_wrapper_actually_delivers(monkeypatch):
-    """安装后通过引擎回调走一遍完整 RX 路径（无异常条件下原样投递）."""
+    """安装后通过传输层回调走一遍完整 RX 路径（无异常条件下原样投递）."""
     engine = SimpleNamespace()
     received = []
-    engine._on_frame_received = received.append
-    engine._client = SimpleNamespace(_on_frame=None)
+    engine._on_frame_received = lambda frame: None
+    engine._client = SimpleNamespace(_on_frame=received.append)
 
     proxy = _proxy()
     proxy.install_on_engine(engine)
@@ -591,6 +605,29 @@ def test_installed_rx_wrapper_actually_delivers(monkeypatch):
 
     assert received == [FRAME]
     assert proxy.stats["rx_total"] == 1
+
+
+def test_uninstall_from_engine_restores_hooks():
+    """卸载后 TX/RX 回调恢复为安装前对象，代理不再位于帧路径."""
+    engine = SimpleNamespace()
+
+    async def original_tx(frame):
+        return None
+
+    def original_rx(frame):
+        return None
+
+    engine._send_frame = original_tx
+    engine._on_frame_received = lambda frame: None
+    engine._client = SimpleNamespace(_on_frame=original_rx)
+
+    proxy = _proxy()
+    proxy.install_on_engine(engine)
+    proxy.uninstall_from_engine(engine)
+
+    assert engine._send_frame is original_tx
+    assert engine._client._on_frame is original_rx
+    assert proxy._original_rx is None and proxy._original_tx is None
 
 
 def test_installed_tx_wrapper_actually_delivers():

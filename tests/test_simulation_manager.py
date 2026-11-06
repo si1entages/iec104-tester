@@ -29,7 +29,8 @@ class _FakeEngine:
         self._send_frame = AsyncMock()
         self._on_frame_received = lambda frame: None
         if with_client:
-            self._client = SimpleNamespace(_on_frame=None)
+            # 真实引擎的 TCP 客户端持有同一回调引用（install 会替换它）
+            self._client = SimpleNamespace(_on_frame=self._on_frame_received)
 
     def get_raw_frame_callback(self):
         return self._raw_cb
@@ -114,18 +115,19 @@ def test_install_wraps_engine_callbacks():
         return None
 
     engine = _FakeEngine(raw_cb=original_raw)
+    transport_original = engine._client._on_frame
 
     sim = SimulationManager()
     sim.install(engine)
 
     assert sim.is_active is True
     assert sim.proxy is not None
-    # 收到帧回调被替换为代理包装版本（不再是原回调对象）
-    assert engine.get_raw_frame_callback() is not original_raw
-    # 代理保存了原始回调引用，供卸载时恢复
-    assert sim.proxy._original_rx is original_raw
-    # TCP 客户端的回调引用被同步更新
-    assert engine._client._on_frame is engine._on_frame_received
+    # UI 观测点（raw_frame_callback）不再被包装：注入后的帧到达引擎时照常上报
+    assert engine.get_raw_frame_callback() is original_raw
+    # 传输层回调被替换为代理包装版本（帧进入协议处理前拦截）
+    assert engine._client._on_frame is not transport_original
+    # 代理保存了传输层原始回调引用，供卸载时恢复
+    assert sim.proxy._original_rx is transport_original
 
 
 def test_install_without_raw_callback_leaves_it_unset():
@@ -161,14 +163,18 @@ def test_remove_restores_original_callback():
         return None
 
     engine = _FakeEngine(raw_cb=original_raw)
+    transport_original = engine._client._on_frame
 
     sim = SimulationManager()
     sim.install(engine)
-    assert engine.get_raw_frame_callback() is not original_raw
+    # 安装期间 UI 回调保持原样，传输层回调被替换
+    assert engine.get_raw_frame_callback() is original_raw
+    assert engine._client._on_frame is not transport_original
 
     sim.remove()
 
     assert engine.get_raw_frame_callback() is original_raw
+    assert engine._client._on_frame is transport_original
     assert sim.proxy is None
     assert sim.is_active is False
 
