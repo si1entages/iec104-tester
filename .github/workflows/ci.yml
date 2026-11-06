@@ -32,13 +32,101 @@ jobs:
       - name: Install dependencies
         run: |
           pip install PyYAML aiohttp
-          pip install pytest pytest-asyncio pytest-cov
+          pip install pytest pytest-asyncio pytest-cov hypothesis psutil
       - name: Run tests
         # --basetemp：把 pytest 临时根固定为仓库内目录（每次会话开始即被 pytest
         # 清空重建），避免默认的共享临时根（如 %TEMP%/pytest-of-<user>）无界累积
         # pytest-N / garbage-* 目录。累积到一定数量会拖慢收集，并在带「批量删除
         # 需确认」类安全钩子的环境里截断输出、把退出码变成 1（假失败）。
-        run: pytest tests/ -q --cov=core --cov-report=term-missing --cov-fail-under=88 --basetemp=.pytest-tmp
+        run: pytest tests/ -q --cov=core --cov-branch --cov-report=term-missing --cov-fail-under=88 --basetemp=.pytest-tmp
+
+  # 协议层变异冒烟（12 个高价值变异，约 10s）：防止测试对编解码边界“假绿”。
+  mutation-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          pip install PyYAML aiohttp
+          pip install pytest pytest-asyncio
+      - name: Mutation smoke
+        run: python tools/mutation_smoke.py
+
+  # Windows 打包回归：产品主要分发形态是 exe，而代码/测试矩阵在 Ubuntu 上跑，
+  # 打包链路（PyInstaller + 前端 dist 收集）此前从未在 CI 验证。
+  # 本 job 产出 onedir 包并真实启动两个 exe，检查 /api/status 与 /app/ 可用。
+  windows-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: webui/frontend/package-lock.json
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+      - name: Build frontend
+        working-directory: webui/frontend
+        run: |
+          npm ci
+          npm run build
+      - name: Build exe (onedir)
+        run: python build/build_all.py --skip-frontend
+      - name: Smoke packaged master
+        shell: pwsh
+        run: |
+          $exe = "dist/iec104-master/iec104-master.exe"
+          if (-not (Test-Path $exe)) { throw "missing $exe" }
+          $proc = Start-Process -FilePath $exe -ArgumentList @("--no-browser", "--no-history", "--http-port", "18765") -PassThru
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 60; $i++) {
+              Start-Sleep -Seconds 1
+              try {
+                $status = Invoke-RestMethod -Uri "http://127.0.0.1:18765/api/status" -TimeoutSec 2
+                if ($status.role -eq "master") { $ready = $true; break }
+              } catch {}
+            }
+            if (-not $ready) { throw "packaged master did not become ready" }
+            $app = Invoke-WebRequest -Uri "http://127.0.0.1:18765/app/" -UseBasicParsing -TimeoutSec 5
+            if ($app.StatusCode -ne 200) { throw "SPA /app/ returned $($app.StatusCode)" }
+          } finally {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          }
+      - name: Smoke packaged slave
+        shell: pwsh
+        run: |
+          $exe = "dist/iec104-slave/iec104-slave.exe"
+          if (-not (Test-Path $exe)) { throw "missing $exe" }
+          $proc = Start-Process -FilePath $exe -ArgumentList @("--no-browser", "--no-history", "--http-port", "18766") -PassThru
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 60; $i++) {
+              Start-Sleep -Seconds 1
+              try {
+                $status = Invoke-RestMethod -Uri "http://127.0.0.1:18766/api/status" -TimeoutSec 2
+                if ($status.role -eq "slave") { $ready = $true; break }
+              } catch {}
+            }
+            if (-not $ready) { throw "packaged slave did not become ready" }
+          } finally {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          }
+      - name: Upload packaged executables
+        uses: actions/upload-artifact@v7
+        with:
+          name: iec104-windows-onedir
+          path: dist/
+          if-no-files-found: error
 
   frontend:
     runs-on: ubuntu-24.04
