@@ -139,6 +139,7 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - [x] Web 访问安全（B7）：`--http-host`（默认 127.0.0.1）+ `--auth-token`（或 `IEC104_AUTH_TOKEN`）；令牌保护 `/api/*` 与 `/ws`（Bearer / X-Auth-Token / `?token=`），`GET /api/auth` 公开探测；前端 AuthGate 令牌输入 + URL `?token=` 导入；非回环监听且无令牌时启动告警；新增 4 后端 + 2 前端用例；全量 1297 passed
 - [x] 一致性套件接入 pytest：`tests/test_conformance_suite.py` 按套件 `_test_*` 方法参数化（失败输出具体 case id）+ 汇总用例锁死 42 case/零 FAIL/ERROR/SKIP；独立 runner 保留；全量 1308 passed
 - [x] 分支覆盖率 88.86%→92.08%：补 `scheduler`（47%→97%）、`data_store`（83.6%→95%）、`master_session`（77.5%→92%）、`multi_station`（80.6%→98%）及协议层零散分支（types/asdu 负数编码、短报文异常、时标变体、自定义类型校验、APDU 编解码）；新增 73 例；CI 门禁 88→91（保留约 1 点抖动余量）；全量 1381 passed
+- [x] 全流程验收进 CI：`e2e-full-flow` job 内拉起主站(8765)/子站(8766)/IEC 24040，等就绪后跑 `tests/e2e/qa_full_flow.py` 12 阶段（本机实测 12/12 通过、exit 0），退出回收服务，失败上传两端日志；历史库以 `--no-history` 关闭
 
 ## 双应用入口（纯 Web UI）
 

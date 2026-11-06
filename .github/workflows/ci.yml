@@ -202,3 +202,55 @@ jobs:
           path: tests/e2e/.playwright-artifacts/
           include-hidden-files: true
           if-no-files-found: error
+
+  # C2：全流程验收（qa_full_flow.py）纳入 CI。
+  # 脚本走真实 HTTP/WS/TCP（主站 8765 / 子站 8766 / IEC 24040），
+  # 因此本 job 在同一 step 内拉起两个服务、等就绪、跑验收、退出时回收；
+  # 历史库关闭（--no-history）避免 CI 磁盘写入；失败上传两端日志。
+  e2e-full-flow:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install runtime dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Run full-flow acceptance (12 stages, real services)
+        run: |
+          set -euo pipefail
+          python app.py --mode slave --no-browser --no-history \
+            --http-port 8766 --port 24040 > slave.log 2>&1 &
+          SLAVE_PID=$!
+          python app.py --mode master --no-browser --no-history \
+            --http-port 8765 > master.log 2>&1 &
+          MASTER_PID=$!
+          trap 'kill $SLAVE_PID $MASTER_PID 2>/dev/null || true' EXIT
+
+          ready=0
+          for i in $(seq 1 40); do
+            if curl -sf http://127.0.0.1:8765/api/status >/dev/null \
+               && curl -sf http://127.0.0.1:8766/api/status >/dev/null; then
+              echo "services ready after ${i}s"
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != "1" ]; then
+            echo "services failed to start"
+            tail -N 80 master.log slave.log || true
+            exit 1
+          fi
+
+          python tests/e2e/qa_full_flow.py
+      - name: Upload service logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-full-flow-logs
+          path: |
+            master.log
+            slave.log
+          if-no-files-found: ignore

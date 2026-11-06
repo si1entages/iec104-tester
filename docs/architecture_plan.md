@@ -373,8 +373,9 @@ graph TD
 | **T34** | Web 访问认证（2026-11-06 第三批） | `--http-host` + `--auth-token`（/`IEC104_AUTH_TOKEN`）；令牌保护 `/api/*` 与 `/ws`（Bearer / X-Auth-Token / `?token=`），`GET /api/auth` 公开探测（契约 §2.13）；前端 AuthGate + URL 令牌导入；非回环无令牌启动告警；4 后端 + 2 前端用例；全量 1297 passed |
 | **T35** | 一致性套件接入 pytest（2026-11-07） | `tests/test_conformance_suite.py`：按 `_test_*` 方法参数化（10 例，失败输出 case id）+ 汇总锁死 42 case/零 FAIL/ERROR/SKIP；独立 runner 保留；全量 1308 passed |
 | **T36** | 分支覆盖率提升（2026-11-07） | 实测 88.86%→**92.08%**（门禁 88→91，保留约 1 点抖动余量）：补 scheduler 47→97%、data_store 83.6→95%、master_session 77.5→92%、multi_station 80.6→98%，及 types/asdu 零散分支；新增 73 例；全量 1381 passed |
+| **T37** | 全流程验收进 CI（2026-11-07） | `.github/workflows/ci.yml` 新增 `e2e-full-flow` job：job 内拉起主站(8765)/子站(8766)/IEC 24040 → 等就绪（40s 上限）→ `tests/e2e/qa_full_flow.py` 12 阶段 → trap 回收；失败上传 `master.log`/`slave.log`；本机实测 12/12、exit 0 |
 
-> **累计统计**：T01~T36 **全部完成，待办 0**。
+> **累计统计**：T01~T37 **全部完成，待办 0**。
 
 ---
 

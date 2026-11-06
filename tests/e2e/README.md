@@ -4,12 +4,15 @@
 
 > ⚠️ 这些脚本**不会被 pytest 自动收集**（文件名不以 `test_` 开头），需**手动运行**。
 > 它们依赖本机端口与运行中的服务，不适合在 CI 中无人值守运行。
+> **例外**：`qa_full_flow.py` 已纳入 CI（`.github/workflows/ci.yml` 的
+> `e2e-full-flow` job：job 内拉起主站/子站服务 → 等就绪 → 跑 12 阶段验收 →
+> 退出时回收；失败上传 `master.log` / `slave.log`）。
 
 ## 脚本清单
 
 | 脚本 | 用途 | 前置条件 | 运行命令 |
 |------|------|---------|---------|
-| `qa_full_flow.py` | **全流程验收**：从零复位→启动→系统/控制命令→参数与文件→模拟→注入矩阵→点表管理→多客户端→前端 WS→关停重连 | 需先启动主站(8765)/子站(8766)服务，IEC 端口 24040 | `python tests/e2e/qa_full_flow.py [--shots]` |
+| `qa_full_flow.py` | **全流程验收**：从零复位→启动→系统/控制命令→参数与文件→模拟→注入矩阵→点表管理→多客户端→前端 WS→关停重连（**已入 CI** `e2e-full-flow`） | 需先启动主站(8765)/子站(8766)服务，IEC 端口 24040 | `python tests/e2e/qa_full_flow.py [--shots]` |
 | `qa_shutdown.py` | **关停与资源泄漏回归**：传输层/引擎层 `stop()` 耗时与 `wait_closed` 告警（真 socket） | 无（自包含，自动分配端口） | `python tests/e2e/qa_shutdown.py` |
 | `qa_real_device.py` | **真机只读功能矩阵**：对运行中的主站服务跑总召/累计量/对时/读/测试/复位（默认不发控制类命令） | 需主站已连真机并运行 | `python tests/e2e/qa_real_device.py [--base http://127.0.0.1:8765] [--yk]` |
 | `qa_master_sbo.py` | **主站侧 SBO 两段式**：自动补选择、选择被拒/超时中止、竞态（真 TCP 回环 + 假子站） | 无（自包含） | `python tests/e2e/qa_master_sbo.py` |

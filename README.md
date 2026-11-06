@@ -224,7 +224,7 @@ python -m pytest tests/ -m perf -q      # 性能基准（解码/10 万点/20 客
 IEC104_SOAK_SECONDS=7200 python -m pytest tests/perf/test_soak_loopback.py -m perf -q
 python run_tests.py tests/scripts/      # YAML 脚本
 python -m pytest tests/test_conformance_suite.py -q  # 一致性套件（42 case）接入 pytest
-python tests/e2e/qa_full_flow.py        # 全流程验收
+python tests/e2e/qa_full_flow.py        # 全流程验收（12 阶段；CI job e2e-full-flow）
 python tools/mutation_smoke.py          # 协议层变异冒烟（12/12 必须被杀死）
 ```
 
