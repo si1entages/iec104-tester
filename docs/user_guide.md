@@ -710,6 +710,9 @@ stations:
 
 ### 文件传输（详见 [`file_transfer_fls.md`](file_transfer_fls.md)）
 
+> 真机核实步骤与探针脚本见 [`file_transfer_open_items.md`](file_transfer_open_items.md)
+> （5 项开放清单 + `tests/e2e/qa_file_transfer_probe.py`，当前环境无真机，结论待回填）。
+
 以下开放项**未臆测实现**，待标准正文或真机联调确认：
 
 - **NOF 语义**：Ed.1「文件名」vs Ed.2「文件类型」，目标装置用哪版未知；

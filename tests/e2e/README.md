@@ -15,6 +15,7 @@
 | `qa_full_flow.py` | **全流程验收**：从零复位→启动→系统/控制命令→参数与文件→模拟→注入矩阵→点表管理→多客户端→前端 WS→关停重连（**已入 CI** `e2e-full-flow`） | 需先启动主站(8765)/子站(8766)服务，IEC 端口 24040 | `python tests/e2e/qa_full_flow.py [--shots]` |
 | `qa_shutdown.py` | **关停与资源泄漏回归**：传输层/引擎层 `stop()` 耗时与 `wait_closed` 告警（真 socket） | 无（自包含，自动分配端口） | `python tests/e2e/qa_shutdown.py` |
 | `qa_real_device.py` | **真机只读功能矩阵**：对运行中的主站服务跑总召/累计量/对时/读/测试/复位（默认不发控制类命令） | 需主站已连真机并运行 | `python tests/e2e/qa_real_device.py [--base http://127.0.0.1:8765] [--yk]` |
+| `qa_file_transfer_probe.py` | **文件传输真机核实探针（C4，只读）**：目录召唤（默认）/可选 select/request，结构化打印 NOF/LOF/NOS/LSQ/CHS/FRQ/SRQ/AFQ，用于填写 [`docs/file_transfer_open_items.md`](../../docs/file_transfer_open_items.md) | 需主站已连真机并 Running | `python tests/e2e/qa_file_transfer_probe.py [--base URL] [--ioa N] [--select NOF] [--request NOF]` |
 | `qa_master_sbo.py` | **主站侧 SBO 两段式**：自动补选择、选择被拒/超时中止、竞态（真 TCP 回环 + 假子站） | 无（自包含） | `python tests/e2e/qa_master_sbo.py` |
 | `qa_slave_sbo.py` | **子站侧 SBO 语义**：按点表 `sbo` 配置处理遥控/设点（真双引擎 TCP） | 无（自包含） | `python tests/e2e/qa_slave_sbo.py` |
 | `qa_webui_e2e.py` | **Web UI 双端联调**：SBO true/false、显式 select、设点、错误 COT 注入 | 可 `--spawn` 自启服务，或手动启动 8765/8766 | `python tests/e2e/qa_webui_e2e.py [--spawn]` |

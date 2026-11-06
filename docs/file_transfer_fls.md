@@ -143,6 +143,10 @@ LSQ=0、非法 LSQ、CHS 不参与判定、0/1/200/201/700 字节的分段边界
 
 ## 4. 待核实（含开放问题，未臆测、未改动）
 
+> 真机联调执行清单（5 项开放项的验证步骤、判定标准、记录模板）见
+> [`file_transfer_open_items.md`](file_transfer_open_items.md)；
+> 配套只读探针 `python tests/e2e/qa_file_transfer_probe.py`。
+
 ### 4.1 CHS（本节校验和）—— 已按候选答案实现（依据非标准原文）
 - **判定**：CHS = **本节所有段数据八位组的算术和 mod 256**。依据为两个互相独立的
   字节级实现的一致做法：

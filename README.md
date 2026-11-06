@@ -273,6 +273,7 @@ iec104-tester/
 - 用户手册：[`docs/user_guide.md`](docs/user_guide.md)（含 Web UI 各工作台、一键演示、诊断包、TLS、历史库、配置参考、已知限制）
 - TLS 边界与排查：[`docs/tls.md`](docs/tls.md)
 - 文件传输字节语义核实：[`docs/file_transfer_fls.md`](docs/file_transfer_fls.md)
+- 文件传输真机核实清单/探针：[`docs/file_transfer_open_items.md`](docs/file_transfer_open_items.md)
 - pcap 导出：[`docs/pcap_export.md`](docs/pcap_export.md)
 - 历史库实测数据：[`docs/history.md`](docs/history.md)
 - 互操作语料库：[`tests/fixtures/frames/README.md`](tests/fixtures/frames/README.md)
