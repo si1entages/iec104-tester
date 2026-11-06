@@ -6,6 +6,7 @@ import { Alert, App as AntdApp, Button, Card, InputNumber, Segmented, Space, Tag
 import { api } from '../../api/endpoints'
 import { useCommand, useStatusQuery } from '../../api/queries'
 import type { Point } from '../../api/types'
+import { useT } from '../../i18n'
 
 interface Props {
   disabled?: boolean
@@ -26,6 +27,7 @@ type Scope = 'all' | 'selected'
  * 手动置数走独立的「手动置数」页签（ManualSetPanel），本面板不再有模式单选。
  */
 export function SimulationPanel({ disabled = false, selected = null }: Props) {
+  const t = useT()
   const { message } = AntdApp.useApp()
   const { data: status } = useStatusQuery()
   const backendOn = Boolean(status?.simulation)
@@ -43,11 +45,11 @@ export function SimulationPanel({ disabled = false, selected = null }: Props) {
   const send = async (on: boolean): Promise<void> => {
     if (on) {
       if (yxScope === 'selected' && selected?.type !== 'YX') {
-        message.warning('YX 范围为「选中点」时，请先在点表选中一个 YX 点')
+        message.warning(t('simPanel.needYx'))
         return
       }
       if (ycScope === 'selected' && selected?.type !== 'YC') {
-        message.warning('YC 范围为「选中点」时，请先在点表选中一个 YC 点')
+        message.warning(t('simPanel.needYc'))
         return
       }
     }
@@ -67,11 +69,12 @@ export function SimulationPanel({ disabled = false, selected = null }: Props) {
         : {}),
     })
     if (result.ok) {
-      setLast({ ok: true, text: on ? '已启动自动模拟（start_simulation）' : '已停止模拟（stop_simulation）' })
-      message.success(on ? '自动模拟已启动' : '模拟已停止')
+      setLast({ ok: true, text: on ? t('simPanel.started') : t('simPanel.stopped') })
+      message.success(on ? t('simPanel.started') : t('simPanel.stopped'))
     } else {
-      setLast({ ok: false, text: `模拟控制失败：${result.error ?? '未知错误'}` })
-      message.error(`模拟控制失败：${result.error ?? '未知错误'}`)
+      const text = t('simPanel.failed', { error: result.error ?? t('cmd.unknown') })
+      setLast({ ok: false, text })
+      message.error(text)
     }
   }
 
@@ -83,13 +86,15 @@ export function SimulationPanel({ disabled = false, selected = null }: Props) {
       title={
         <Space>
           <ThunderboltOutlined />
-          <span>模拟控制</span>
-          <Tag color={backendOn ? 'green' : 'default'}>{backendOn ? '模拟中' : '未模拟'}</Tag>
+          <span>{t('simPanel.title')}</span>
+          <Tag color={backendOn ? 'green' : 'default'}>
+            {backendOn ? t('simPanel.running') : t('simPanel.idle')}
+          </Tag>
         </Space>
       }
     >
       <Space direction="vertical" size={10} style={{ width: '100%' }}>
-        {disabled ? <Alert type="info" showIcon message="子站未启动，模拟不可用" /> : null}
+        {disabled ? <Alert type="info" showIcon message={t('simPanel.slaveOff')} /> : null}
         {last ? (
           <Alert
             type={last.ok ? 'success' : 'error'}
@@ -101,7 +106,7 @@ export function SimulationPanel({ disabled = false, selected = null }: Props) {
         ) : null}
 
         <Space wrap>
-          <span style={{ fontSize: 12 }}>YX 间隔 (s)</span>
+          <span style={{ fontSize: 12 }}>{t('simPanel.yxInterval')}</span>
           <InputNumber
             min={0.1}
             max={600}
@@ -110,7 +115,7 @@ export function SimulationPanel({ disabled = false, selected = null }: Props) {
             value={yxInterval}
             onChange={(v) => setYxInterval(Math.max(0.1, Number(v ?? 5)))}
           />
-          <span style={{ fontSize: 12 }}>YC 间隔 (s)</span>
+          <span style={{ fontSize: 12 }}>{t('simPanel.ycInterval')}</span>
           <InputNumber
             min={0.1}
             max={600}
@@ -122,19 +127,19 @@ export function SimulationPanel({ disabled = false, selected = null }: Props) {
         </Space>
 
         <Space wrap>
-          <span style={{ fontSize: 12 }}>YX 范围</span>
+          <span style={{ fontSize: 12 }}>{t('simPanel.yxScope')}</span>
           <Segmented
             size="small"
             options={[
-              { value: 'all', label: '全部点' },
-              { value: 'selected', label: '选中点' },
+              { value: 'all', label: t('simPanel.scope.all') },
+              { value: 'selected', label: t('simPanel.scope.selected') },
             ]}
             value={yxScope}
             onChange={(v) => setYxScope(v as Scope)}
           />
-          <Tooltip title="每周期对范围内的每个 YX 点独立掷一次概率，命中即翻转（0~1）">
+          <Tooltip title={t('simPanel.rateTip')}>
             <span style={{ fontSize: 12 }}>
-              每周期翻转概率 <InfoCircleOutlined style={{ color: 'inherit', opacity: 0.6 }} />
+              {t('simPanel.rate')} <InfoCircleOutlined style={{ color: 'inherit', opacity: 0.6 }} />
             </span>
           </Tooltip>
           <InputNumber
@@ -148,19 +153,19 @@ export function SimulationPanel({ disabled = false, selected = null }: Props) {
         </Space>
 
         <Space wrap>
-          <span style={{ fontSize: 12 }}>YC 范围</span>
+          <span style={{ fontSize: 12 }}>{t('simPanel.ycScope')}</span>
           <Segmented
             size="small"
             options={[
-              { value: 'all', label: '全部点' },
-              { value: 'selected', label: '选中点' },
+              { value: 'all', label: t('simPanel.scope.all') },
+              { value: 'selected', label: t('simPanel.scope.selected') },
             ]}
             value={ycScope}
             onChange={(v) => setYcScope(v as Scope)}
           />
-          <Tooltip title="YC 取值在点表声明的 [min, max] 量程内均匀随机；未声明量程的点按此比例在当前值 ± 比例内浮动">
+          <Tooltip title={t('simPanel.rangeTip')}>
             <span style={{ fontSize: 12 }}>
-              无量程点浮动比例 <InfoCircleOutlined style={{ color: 'inherit', opacity: 0.6 }} />
+              {t('simPanel.range')} <InfoCircleOutlined style={{ color: 'inherit', opacity: 0.6 }} />
             </span>
           </Tooltip>
           <InputNumber
@@ -174,11 +179,14 @@ export function SimulationPanel({ disabled = false, selected = null }: Props) {
 
         {selected && (yxScope === 'selected' || ycScope === 'selected') ? (
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            选中点：{selected.type}-{selected.ioa} {selected.name}
+            {t('simPanel.selectedInfo', {
+              key: `${selected.type}-${selected.ioa}`,
+              name: selected.name,
+            })}
             {((yxScope === 'selected' && selected.type !== 'YX') ||
               (ycScope === 'selected' && selected.type !== 'YC')) ? (
               <Typography.Text type="warning" style={{ fontSize: 12 }}>
-                （类型与所选范围不匹配，启动前请改选对应类型的点）
+                {t('simPanel.mismatch')}
               </Typography.Text>
             ) : null}
           </Typography.Text>
@@ -191,10 +199,10 @@ export function SimulationPanel({ disabled = false, selected = null }: Props) {
             disabled={noRun}
             onClick={() => void send(!backendOn)}
           >
-            {backendOn ? '停止模拟' : '启动模拟'}
+            {backendOn ? t('simPanel.stop') : t('simPanel.start')}
           </Button>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            切到模拟控制页签即为随机模拟；单个点位手动改值请用「手动置数」页签。
+            {t('simPanel.hint')}
           </Typography.Text>
         </Space>
       </Space>

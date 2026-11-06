@@ -19,17 +19,23 @@ import {
 import { api } from '../../api/endpoints'
 import { useCommand } from '../../api/queries'
 import type { OkResponse, Point } from '../../api/types'
+import { useT } from '../../i18n'
+import type { MessageKey } from '../../i18n'
 import { formatValue } from '../../lib/format'
 
 /** 可手动置数的点位类别（与 `PointSnapshot.type` 一致） */
 type SetKind = 'YX' | 'YC' | 'YM' | 'STEP'
 
-const KINDS: { value: SetKind; label: string; hint: string }[] = [
-  { value: 'YX', label: '遥信 YX', hint: '单点遥信，ON / OFF（M_SP_NA_1）' },
-  { value: 'YC', label: '遥测 YC', hint: '短浮点遥测（M_ME_NC_1）' },
-  { value: 'YM', label: '电度 YM', hint: '累计量 / 电度（整数）' },
-  { value: 'STEP', label: '步位置 STEP', hint: '步位置信息，取值 -64..63（M_ST_TB_1）' },
-]
+type TFn = (key: MessageKey, params?: Record<string, string | number>) => string
+
+function kinds(t: TFn) {
+  return [
+    { value: 'YX' as SetKind, label: t('msp.kind.yx'), hint: t('msp.kind.yxHint') },
+    { value: 'YC' as SetKind, label: t('msp.kind.yc'), hint: t('msp.kind.ycHint') },
+    { value: 'YM' as SetKind, label: t('msp.kind.ym'), hint: t('msp.kind.ymHint') },
+    { value: 'STEP' as SetKind, label: t('msp.kind.step'), hint: t('msp.kind.stepHint') },
+  ]
+}
 
 interface Props {
   /** 点表选中行；用于带入 IOA 与类别 */
@@ -47,7 +53,9 @@ interface Props {
  * - STEP 步位置：`POST /api/slave/step` `{ioa, value: -64..63}`（T09 建模）
  */
 export function ManualSetPanel({ point, disabled = false }: Props) {
+  const t = useT()
   const { message } = AntdApp.useApp()
+  const kindOptions = kinds(t)
 
   const [kind, setKind] = useState<SetKind>('YX')
   const [ioa, setIoa] = useState<number>(0)
@@ -75,12 +83,15 @@ export function ManualSetPanel({ point, disabled = false }: Props) {
 
   const run = async (label: string, task: Promise<OkResponse>): Promise<void> => {
     const result = await task
+    const text = result.ok
+      ? t('cmd.done', { label })
+      : t('cmd.failed', { label, error: result.error ?? t('cmd.unknown') })
     if (result.ok) {
-      setLast({ ok: true, text: `${label} 已下发` })
-      message.success(`${label} 已下发`)
+      setLast({ ok: true, text })
+      message.success(text)
     } else {
-      setLast({ ok: false, text: `${label} 失败：${result.error ?? '未知错误'}` })
-      message.error(`${label} 失败：${result.error ?? '未知错误'}`)
+      setLast({ ok: false, text })
+      message.error(text)
     }
   }
 
@@ -91,10 +102,10 @@ export function ManualSetPanel({ point, disabled = false }: Props) {
   const mismatch = Boolean(point && point.type !== kind)
 
   const send = (): void => {
-    if (kind === 'YX') void run('遥信置数', yxCmd.mutateAsync({ ioa, value: yx }))
-    else if (kind === 'YC') void run('遥测置数', ycCmd.mutateAsync({ ioa, value: yc }))
-    else if (kind === 'YM') void run('电度置数', ymCmd.mutateAsync({ ioa, value: ym }))
-    else void run('步位置置数', stepCmd.mutateAsync({ ioa, value: step }))
+    if (kind === 'YX') void run(t('msp.kind.yx'), yxCmd.mutateAsync({ ioa, value: yx }))
+    else if (kind === 'YC') void run(t('msp.kind.yc'), ycCmd.mutateAsync({ ioa, value: yc }))
+    else if (kind === 'YM') void run(t('msp.kind.ym'), ymCmd.mutateAsync({ ioa, value: ym }))
+    else void run(t('msp.kind.step'), stepCmd.mutateAsync({ ioa, value: step }))
   }
 
   const valueEditor = () => {
@@ -102,7 +113,7 @@ export function ManualSetPanel({ point, disabled = false }: Props) {
       case 'YX':
         return (
           <Space>
-            <span>值</span>
+            <span>{t('msp.value')}</span>
             <Switch
               checkedChildren="ON"
               unCheckedChildren="OFF"
@@ -114,7 +125,7 @@ export function ManualSetPanel({ point, disabled = false }: Props) {
       case 'YC':
         return (
           <InputNumber
-            prefix="值"
+            prefix={t('msp.value')}
             step={0.001}
             style={{ width: 200 }}
             value={yc}
@@ -124,7 +135,7 @@ export function ManualSetPanel({ point, disabled = false }: Props) {
       case 'YM':
         return (
           <InputNumber
-            prefix="值"
+            prefix={t('msp.value')}
             step={1}
             style={{ width: 200 }}
             value={ym}
@@ -134,7 +145,7 @@ export function ManualSetPanel({ point, disabled = false }: Props) {
       case 'STEP':
         return (
           <InputNumber
-            prefix="值"
+            prefix={t('msp.value')}
             min={-64}
             max={63}
             step={1}
@@ -154,13 +165,11 @@ export function ManualSetPanel({ point, disabled = false }: Props) {
       title={
         <Space>
           <EditOutlined />
-          <span>手动置数</span>
+          <span>{t('msp.title')}</span>
           {point ? (
-            <Tag color="gold">
-              已选 {point.type}-{point.ioa}
-            </Tag>
+            <Tag color="gold">{t('cmd.selected', { type: point.type, ioa: point.ioa })}</Tag>
           ) : (
-            <Tag>未选点</Tag>
+            <Tag>{t('cmd.noPoint')}</Tag>
           )}
         </Space>
       }
@@ -171,15 +180,15 @@ export function ManualSetPanel({ point, disabled = false }: Props) {
           block
           value={kind}
           onChange={(v) => setKind(v as SetKind)}
-          options={KINDS.map((k) => ({ value: k.value, label: k.label }))}
+          options={kindOptions.map((k) => ({ value: k.value, label: k.label }))}
         />
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          {KINDS.find((k) => k.value === kind)?.hint}
+          {kindOptions.find((k) => k.value === kind)?.hint}
         </Typography.Text>
 
         <Space wrap>
           <InputNumber
-            prefix="目标 IOA"
+            prefix={t('cmd.targetIoa')}
             min={0}
             style={{ width: 190 }}
             value={ioa}
@@ -187,22 +196,24 @@ export function ManualSetPanel({ point, disabled = false }: Props) {
           />
           {point ? (
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {point.name} · 当前值 {formatValue(point.value)}
+              {t('cmd.currentValue', { name: point.name, value: formatValue(point.value) })}
             </Typography.Text>
           ) : (
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              在左侧点表单击一行即可带入
+              {t('cmd.pickHint')}
             </Typography.Text>
           )}
         </Space>
 
-        {disabled ? <Alert type="info" showIcon message="子站未启动，置数不可下发" /> : null}
-        {!disabled && noIoa ? <Alert type="warning" showIcon message="请先选择点位或填写目标 IOA" /> : null}
+        {disabled ? <Alert type="info" showIcon message={t('msp.slaveOff')} /> : null}
+        {!disabled && noIoa ? (
+          <Alert type="warning" showIcon message={t('cmd.needIoa')} />
+        ) : null}
         {!disabled && mismatch ? (
           <Alert
             type="warning"
             showIcon
-            message={`选中点是 ${point?.type}，当前按 ${kind} 置数——两者类别不一致，请确认`}
+            message={t('msp.mismatch', { point: point?.type ?? '', kind })}
           />
         ) : null}
         {last ? (
@@ -219,7 +230,7 @@ export function ManualSetPanel({ point, disabled = false }: Props) {
         <Space wrap>
           {valueEditor()}
           <Button type="primary" loading={busy} disabled={noRun || noIoa} onClick={send}>
-            下发置数
+            {t('msp.send')}
           </Button>
         </Space>
 
@@ -230,13 +241,13 @@ export function ManualSetPanel({ point, disabled = false }: Props) {
           items={[
             {
               key: 'help',
-              label: '各类别对应的 REST 端点',
+              label: t('msp.help'),
               children: (
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                  <div>YX：POST /api/slave/yx {'{ioa, value: bool}'}</div>
-                  <div>YC：POST /api/slave/yc {'{ioa, value: number}'}</div>
-                  <div>YM：POST /api/slave/ym {'{ioa, value: int}'}</div>
-                  <div>STEP：POST /api/slave/step {'{ioa, value: -64..63}'}</div>
+                  <div>{t('msp.helpLine', { type: 'YX', endpoint: 'POST /api/slave/yx {ioa, value: bool}' })}</div>
+                  <div>{t('msp.helpLine', { type: 'YC', endpoint: 'POST /api/slave/yc {ioa, value: number}' })}</div>
+                  <div>{t('msp.helpLine', { type: 'YM', endpoint: 'POST /api/slave/ym {ioa, value: int}' })}</div>
+                  <div>{t('msp.helpLine', { type: 'STEP', endpoint: 'POST /api/slave/step {ioa, value: -64..63}' })}</div>
                 </Typography.Text>
               ),
             },

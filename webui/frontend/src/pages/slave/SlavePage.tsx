@@ -5,6 +5,7 @@ import { Alert, Col, Row, Spin, Tabs } from 'antd'
 import { useStatusQuery } from '../../api/queries'
 import type { Point } from '../../api/types'
 import { PointsTable } from '../../components/PointsTable'
+import { useT } from '../../i18n'
 import { ManualSetPanel } from './ManualSetPanel'
 import { ResponsePanel } from './ResponsePanel'
 import { SimulationPanel } from './SimulationPanel'
@@ -35,6 +36,7 @@ function TabFallback() {
  * 过滤能力完全一致，仅选中提示文案不同。
  */
 export default function SlavePage() {
+  const t = useT()
   const { data: status } = useStatusQuery()
   const [selected, setSelected] = useState<Point | null>(null)
 
@@ -43,8 +45,8 @@ export default function SlavePage() {
       <Alert
         type="info"
         showIcon
-        message="当前部署为主站角色"
-        description="子站工作台仅在子站（--mode slave）下可用；主站工作台见「主站工作台」页。"
+        message={t('slave.masterRole')}
+        description={t('slave.masterRoleDesc')}
       />
     )
   }
@@ -60,7 +62,7 @@ export default function SlavePage() {
           <PointsTable
             selected={selected}
             onSelect={setSelected}
-            selectHint="单击行以选中并手动置数"
+            selectHint={t('slave.selectHint')}
           />
         </Col>
         <Col flex="420px">
@@ -70,22 +72,22 @@ export default function SlavePage() {
             items={[
               {
                 key: 'manual',
-                label: '手动置数',
+                label: t('slave.tab.manual'),
                 children: <ManualSetPanel point={selected} disabled={!running} />,
               },
               {
                 key: 'response',
-                label: '应答行为',
+                label: t('slave.tab.response'),
                 children: <ResponsePanel disabled={!running} />,
               },
               {
                 key: 'sim',
-                label: '模拟控制',
+                label: t('slave.tab.sim'),
                 children: <SimulationPanel disabled={!running} selected={selected} />,
               },
               {
                 key: 'inject',
-                label: '测试注入',
+                label: t('slave.tab.inject'),
                 children: <TestInjectionPanel disabled={!running} />,
               },
             ]}

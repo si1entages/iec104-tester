@@ -22,17 +22,13 @@ import type { TableColumnsType } from 'antd'
 
 import { api } from '../../api/endpoints'
 import { useCommand, useCommandNoArgs, useStatusQuery } from '../../api/queries'
+import { useT } from '../../i18n'
 
 interface ClientRow {
   key: string
   peer: string
   index: number
 }
-
-const CLIENT_COLUMNS: TableColumnsType<ClientRow> = [
-  { title: '#', dataIndex: 'index', width: 56, align: 'right' },
-  { title: '客户端', dataIndex: 'peer', className: 'mono' },
-]
 
 /**
  * 子站启动与状态区（T13）。
@@ -42,6 +38,7 @@ const CLIENT_COLUMNS: TableColumnsType<ClientRow> = [
  * - 客户端连接列表：连接数 + 各会话（`Status.client_list`）信息
  */
 export function SlaveConnectionPanel() {
+  const t = useT()
   const { message } = AntdApp.useApp()
   const { token } = antdTheme.useToken()
   const statusQuery = useStatusQuery()
@@ -70,13 +67,17 @@ export function SlaveConnectionPanel() {
   }, [status?.role, status?.host, status?.port, status?.addr])
 
   const report = (label: string, result: { ok: boolean; error?: string }): void => {
-    if (result.ok) message.success(`${label} 已下发`)
-    else message.error(`${label} 失败：${result.error ?? '未知错误'}`)
+    if (result.ok) message.success(t('cmd.done', { label }))
+    else message.error(t('cmd.failed', { label, error: result.error ?? t('cmd.unknown') }))
   }
 
   const dropped = status?.dropped ?? 0
   const clients = status?.client_list ?? []
   const clientRows: ClientRow[] = clients.map((peer, i) => ({ key: peer, peer, index: i + 1 }))
+  const clientColumns: TableColumnsType<ClientRow> = [
+    { title: '#', dataIndex: 'index', width: 56, align: 'right' },
+    { title: t('scp.col.client'), dataIndex: 'peer', className: 'mono' },
+  ]
 
   return (
     <Card
@@ -84,8 +85,10 @@ export function SlaveConnectionPanel() {
       title={
         <Space>
           <ApiOutlined />
-          <span>子站启动与状态</span>
-          <Tag color={running ? 'success' : 'default'}>{running ? '监听中' : '已停止'}</Tag>
+          <span>{t('scp.title')}</span>
+          <Tag color={running ? 'success' : 'default'}>
+            {running ? t('scp.listening') : t('scp.stopped')}
+          </Tag>
         </Space>
       }
       extra={
@@ -111,18 +114,18 @@ export function SlaveConnectionPanel() {
                       }
                     : {}),
                 })
-                .then((r) => report('启动监听', r))
+                .then((r) => report(t('scp.start'), r))
             }
           >
-            启动监听
+            {t('scp.start')}
           </Button>
           <Button
             danger
             loading={stop.isPending}
             disabled={!running}
-            onClick={() => void stop.mutateAsync().then((r) => report('停止监听', r))}
+            onClick={() => void stop.mutateAsync().then((r) => report(t('scp.stop'), r))}
           >
-            停止
+            {t('scp.stop')}
           </Button>
         </Space>
       }
@@ -132,13 +135,13 @@ export function SlaveConnectionPanel() {
           type="error"
           showIcon
           style={{ marginBottom: 12 }}
-          message="读取 /api/status 失败"
+          message={t('status.loadStatusFailed')}
           description={String((statusQuery.error as Error)?.message ?? statusQuery.error)}
         />
       ) : null}
 
       <Form layout="inline" style={{ marginBottom: 12 }} component="div">
-        <Form.Item label="绑定地址">
+        <Form.Item label={t('scp.bind')}>
           <Input
             style={{ width: 160 }}
             value={host}
@@ -146,7 +149,7 @@ export function SlaveConnectionPanel() {
             onChange={(e) => setHost(e.target.value)}
           />
         </Form.Item>
-        <Form.Item label="端口">
+        <Form.Item label={t('status.port')}>
           <InputNumber
             min={0}
             max={65535}
@@ -155,7 +158,7 @@ export function SlaveConnectionPanel() {
             onChange={(v) => setPort(Number(v ?? 2404))}
           />
         </Form.Item>
-        <Form.Item label="公共地址">
+        <Form.Item label={t('status.addr')}>
           <InputNumber
             min={0}
             value={addr}
@@ -171,21 +174,21 @@ export function SlaveConnectionPanel() {
         {tlsEnabled ? (
           <>
             <Input
-              prefix="服务端证书"
+              prefix={t('scp.tlsCert')}
               placeholder="server.pem"
               style={{ width: 200 }}
               value={tlsCert}
               onChange={(e) => setTlsCert(e.target.value)}
             />
             <Input
-              prefix="服务端私钥"
+              prefix={t('scp.tlsKey')}
               placeholder="server.key"
               style={{ width: 200 }}
               value={tlsKey}
               onChange={(e) => setTlsKey(e.target.value)}
             />
             <Input
-              prefix="CA 证书"
+              prefix={t('conn.tlsCa')}
               placeholder="ca.pem（双向认证时）"
               style={{ width: 220 }}
               value={tlsCa}
@@ -199,25 +202,25 @@ export function SlaveConnectionPanel() {
         size="small"
         column={5}
         items={[
-          { key: 'points', label: '点位数', children: status?.points ?? '-' },
+          { key: 'points', label: t('status.points'), children: status?.points ?? '-' },
           {
             key: 'clients',
-            label: '客户端数',
+            label: t('status.clients'),
             children: (
               <span style={{ color: clients.length > 0 ? '#52c41a' : undefined }}>
                 {status?.clients ?? clients.length}
               </span>
             ),
           },
-          { key: 'tx', label: '发送帧', children: status?.tx ?? '-' },
-          { key: 'rx', label: '接收帧', children: status?.rx ?? '-' },
+          { key: 'tx', label: t('status.tx'), children: status?.tx ?? '-' },
+          { key: 'rx', label: t('status.rx'), children: status?.rx ?? '-' },
           {
             key: 'dropped',
-            label: '背压丢帧',
+            label: t('conn.dropped'),
             children: <span style={{ color: dropped > 0 ? '#faad14' : undefined }}>{dropped}</span>,
           },
           { key: 'schema', label: 'schemaVersion', children: status?.schemaVersion ?? '-' },
-          { key: 'sim', label: '模拟', children: status?.simulation ? '开' : '关' },
+          { key: 'sim', label: t('conn.sim'), children: status?.simulation ? t('conn.on') : t('conn.off') },
         ]}
       />
 
@@ -228,7 +231,7 @@ export function SlaveConnectionPanel() {
         title={
           <Space>
             <ClusterOutlined />
-            <span>客户端连接</span>
+            <span>{t('scp.clientList')}</span>
             <Tag color="blue">{clients.length}</Tag>
           </Space>
         }
@@ -238,7 +241,7 @@ export function SlaveConnectionPanel() {
             image={Empty.PRESENTED_IMAGE_SIMPLE}
             description={
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                暂无客户端连接（主站在 2404 端口连上后会出现在这里）
+                {t('scp.noClients')}
               </Typography.Text>
             }
           />
@@ -246,7 +249,7 @@ export function SlaveConnectionPanel() {
           <Table<ClientRow>
             rowKey="key"
             size="small"
-            columns={CLIENT_COLUMNS}
+            columns={clientColumns}
             dataSource={clientRows}
             pagination={false}
             scroll={{ y: 160 }}

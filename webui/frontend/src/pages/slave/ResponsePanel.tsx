@@ -24,6 +24,7 @@ import type {
   SlaveQuality,
   SlaveResponseBehavior,
 } from '../../api/types'
+import { useT } from '../../i18n'
 
 /** 面板内部使用：四组配置均填满（缺省值取后端 `ResponseBehavior` 默认） */
 type FullBehavior = {
@@ -81,6 +82,7 @@ function Toggle({ label, title, checked, onChange, disabled }: ToggleProps) {
  * 一次成功下发的配置**，不是从后端读回的状态；重启后端后需重新应用。
  */
 export function ResponsePanel({ disabled = false }: Props) {
+  const t = useT()
   const { message } = AntdApp.useApp()
   const [cfg, setCfg] = useState<FullBehavior>(() => structuredClone(DEFAULTS))
   const [last, setLast] = useState<{ ok: boolean; text: string } | null>(null)
@@ -100,21 +102,26 @@ export function ResponsePanel({ disabled = false }: Props) {
 
   const send = async (payload: SlaveResponseBehavior, label: string): Promise<void> => {
     const result = await apply.mutateAsync(payload as Record<string, unknown>)
+    const text = result.ok
+      ? t('rp.applied', { label })
+      : t('rp.failed', { label, error: result.error ?? t('cmd.unknown') })
     if (result.ok) {
-      setLast({ ok: true, text: `${label} 已应用` })
-      message.success(`${label} 已应用`)
+      setLast({ ok: true, text })
+      message.success(text)
     } else {
-      setLast({ ok: false, text: `${label} 失败：${result.error ?? '未知错误'}` })
-      message.error(`${label} 失败：${result.error ?? '未知错误'}`)
+      setLast({ ok: false, text })
+      message.error(text)
     }
   }
 
   const activeInjections: string[] = []
-  if (cfg.errors.wrong_cot) activeInjections.push('错误 COT')
-  if (cfg.errors.no_response) activeInjections.push('不响应')
-  if (cfg.errors.corrupt) activeInjections.push('损坏帧')
-  if (cfg.errors.drop_frames) activeInjections.push('丢帧')
-  if (cfg.errors.drop_rate > 0) activeInjections.push(`丢帧率 ${cfg.errors.drop_rate}`)
+  if (cfg.errors.wrong_cot) activeInjections.push(t('rp.inj.wrongCot'))
+  if (cfg.errors.no_response) activeInjections.push(t('rp.inj.noResponse'))
+  if (cfg.errors.corrupt) activeInjections.push(t('rp.inj.corrupt'))
+  if (cfg.errors.drop_frames) activeInjections.push(t('rp.inj.drop'))
+  if (cfg.errors.drop_rate > 0) {
+    activeInjections.push(t('rp.inj.dropRate', { n: cfg.errors.drop_rate }))
+  }
 
   return (
     <Card
@@ -122,20 +129,20 @@ export function ResponsePanel({ disabled = false }: Props) {
       title={
         <Space wrap>
           <ExperimentOutlined />
-          <span>应答行为</span>
+          <span>{t('rp.title')}</span>
           {activeInjections.length > 0 ? (
             <Tag color="warning">{activeInjections.join(' / ')}</Tag>
           ) : (
-            <Tag color="green">正常应答</Tag>
+            <Tag color="green">{t('rp.normal')}</Tag>
           )}
         </Space>
       }
       styles={{ body: { maxHeight: 620, overflowY: 'auto' } }}
     >
       <Space direction="vertical" size={10} style={{ width: '100%' }}>
-        {disabled ? <Alert type="info" showIcon message="子站未启动，配置将在启动后生效" /> : null}
+        {disabled ? <Alert type="info" showIcon message={t('rp.slaveOff')} /> : null}
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          配置可随时下发；子站未启动时后端会暂存，启动监听时自动套用。
+          {t('rp.hint')}
         </Typography.Text>
 
         {last ? (
@@ -157,36 +164,36 @@ export function ResponsePanel({ disabled = false }: Props) {
           items={[
             {
               key: 'errors',
-              label: '错误注入',
+              label: t('rp.group.errors'),
               children: (
                 <Space direction="vertical" size={8} style={{ width: '100%' }}>
                   <Space wrap size={16}>
                     <Toggle
-                      label="丢帧（drop_frames）"
+                      label={t('rp.toggle.dropFrames')}
                       checked={cfg.errors.drop_frames}
                       onChange={(v) => patch('errors', 'drop_frames', v)}
                     />
                     <Toggle
-                      label="返回错误 COT（wrong_cot）"
-                      title="应答的传送原因整体 +1（错位），用于验证主站对 COT 的严格校验"
+                      label={t('rp.toggle.wrongCot')}
+                      title={t('rp.toggle.wrongCotTitle')}
                       checked={cfg.errors.wrong_cot}
                       onChange={(v) => patch('errors', 'wrong_cot', v)}
                     />
                   </Space>
                   <Space wrap size={16}>
                     <Toggle
-                      label="不响应（no_response）"
+                      label={t('rp.toggle.noResponse')}
                       checked={cfg.errors.no_response}
                       onChange={(v) => patch('errors', 'no_response', v)}
                     />
                     <Toggle
-                      label="损坏帧（corrupt）"
+                      label={t('rp.toggle.corrupt')}
                       checked={cfg.errors.corrupt}
                       onChange={(v) => patch('errors', 'corrupt', v)}
                     />
                   </Space>
                   <Space wrap>
-                    <span style={{ fontSize: 12 }}>丢帧比例 drop_rate</span>
+                    <span style={{ fontSize: 12 }}>{t('rp.dropRate')}</span>
                     <InputNumber
                       min={0}
                       max={1}
@@ -196,7 +203,7 @@ export function ResponsePanel({ disabled = false }: Props) {
                       onChange={(v) => patch('errors', 'drop_rate', Math.max(0, Math.min(1, Number(v ?? 0))))}
                     />
                     <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                      0–1（按比例随机丢弃应答帧）
+                      {t('rp.dropRateHint')}
                     </Typography.Text>
                   </Space>
                 </Space>
@@ -204,34 +211,34 @@ export function ResponsePanel({ disabled = false }: Props) {
             },
             {
               key: 'delays',
-              label: '命令 / 召唤延时',
+              label: t('rp.group.delays'),
               children: (
                 <Space direction="vertical" size={8} style={{ width: '100%' }}>
                   <Space wrap>
-                    <span style={{ fontSize: 12 }}>命令延时 (s)</span>
+                    <span style={{ fontSize: 12 }}>{t('rp.delay.command')}</span>
                     <InputNumber
                       min={0}
                       max={60}
                       step={0.1}
-                                            style={{ width: 160 }}
+                      style={{ width: 160 }}
                       value={cfg.delays.command}
                       onChange={(v) => patch('delays', 'command', Math.max(0, Number(v ?? 0)))}
                     />
-                    <span style={{ fontSize: 12 }}>总召唤延时 (s)</span>
+                    <span style={{ fontSize: 12 }}>{t('rp.delay.gi')}</span>
                     <InputNumber
                       min={0}
                       max={60}
                       step={0.1}
-                                            style={{ width: 160 }}
+                      style={{ width: 160 }}
                       value={cfg.delays.gi}
                       onChange={(v) => patch('delays', 'gi', Math.max(0, Number(v ?? 0)))}
                     />
-                    <span style={{ fontSize: 12 }}>数据延时 (s)</span>
+                    <span style={{ fontSize: 12 }}>{t('rp.delay.data')}</span>
                     <InputNumber
                       min={0}
                       max={60}
                       step={0.1}
-                                            style={{ width: 160 }}
+                      style={{ width: 160 }}
                       value={cfg.delays.data}
                       onChange={(v) => patch('delays', 'data', Math.max(0, Number(v ?? 0)))}
                     />
@@ -241,26 +248,26 @@ export function ResponsePanel({ disabled = false }: Props) {
             },
             {
               key: 'quality',
-              label: '品质注入',
+              label: t('rp.group.quality'),
               children: (
                 <Space wrap size={16}>
                   <Toggle
-                    label="无效 IV"
+                    label={t('rp.q.invalid')}
                     checked={cfg.quality.invalid}
                     onChange={(v) => patch('quality', 'invalid', v)}
                   />
                   <Toggle
-                    label="被闭锁 SB"
+                    label={t('rp.q.blocked')}
                     checked={cfg.quality.blocked}
                     onChange={(v) => patch('quality', 'blocked', v)}
                   />
                   <Toggle
-                    label="非当前 NT"
+                    label={t('rp.q.nt')}
                     checked={cfg.quality.not_topical}
                     onChange={(v) => patch('quality', 'not_topical', v)}
                   />
                   <Toggle
-                    label="溢出 OV"
+                    label={t('rp.q.ov')}
                     checked={cfg.quality.overflow}
                     onChange={(v) => patch('quality', 'overflow', v)}
                   />
@@ -269,33 +276,33 @@ export function ResponsePanel({ disabled = false }: Props) {
             },
             {
               key: 'connection',
-              label: '连接行为',
+              label: t('rp.group.connection'),
               children: (
                 <Space direction="vertical" size={8} style={{ width: '100%' }}>
                   <Space wrap size={16}>
                     <Toggle
-                      label="拒绝 STARTDT"
+                      label={t('rp.c.rejectStartdt')}
                       checked={cfg.connection.reject_startdt}
                       onChange={(v) => patch('connection', 'reject_startdt', v)}
                     />
                     <Toggle
-                      label="自动 STOPDT"
+                      label={t('rp.c.autoStopdt')}
                       checked={cfg.connection.auto_stopdt}
                       onChange={(v) => patch('connection', 'auto_stopdt', v)}
                     />
                     <Toggle
-                      label="主动 TESTFR"
+                      label={t('rp.c.sendTestfr')}
                       checked={cfg.connection.send_testfr}
                       onChange={(v) => patch('connection', 'send_testfr', v)}
                     />
                   </Space>
                   <Space wrap>
-                    <span style={{ fontSize: 12 }}>TESTFR 间隔 (s)</span>
+                    <span style={{ fontSize: 12 }}>{t('rp.c.testfrInterval')}</span>
                     <InputNumber
                       min={5}
                       max={600}
                       step={1}
-                                            style={{ width: 160 }}
+                      style={{ width: 160 }}
                       value={cfg.connection.testfr_interval}
                       onChange={(v) => patch('connection', 'testfr_interval', Number(v ?? 20))}
                     />
@@ -310,18 +317,18 @@ export function ResponsePanel({ disabled = false }: Props) {
           <Button
             type="primary"
             loading={apply.isPending}
-            onClick={() => void send(cfg, '应答配置')}
+            onClick={() => void send(cfg, t('rp.label.config'))}
           >
-            应用配置
+            {t('rp.apply')}
           </Button>
           <Button
             onClick={() => {
               const reset = structuredClone(DEFAULTS)
               setCfg(reset)
-              void send(reset, '恢复默认')
+              void send(reset, t('rp.label.reset'))
             }}
           >
-            恢复默认并应用
+            {t('rp.resetApply')}
           </Button>
         </Space>
       </Space>
