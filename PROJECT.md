@@ -78,12 +78,12 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - 协议完整性: `TypeID` 枚举里**每个类型都必须同时有解码注册与 ASDUBuilder 构造器**（否则就是"能解不能发"的半实现）；新增类型时用 `tests/test_protocol_type_coverage.py` 的护栏用例兜底
 
 ### 测试
-- 单元测试: tests/test_*.py（**1293 例**；`tests/perf/` 由 `-m "not perf"` 默认排除）
+- 单元测试: tests/test_*.py（**1308 例**；`tests/perf/` 由 `-m "not perf"` 默认排除）
 - 协议 fuzz: tests/test_protocol_fuzz.py（Hypothesis；解码器只允许 `ValueError`）
 - 互操作回放: tests/test_frame_corpus_replay.py + tests/fixtures/frames/（golden + MasterEngine 回放）
 - 性能/长稳: `pytest tests/ -m perf`（解码吞吐 / 10 万点快照 / 环回 soak，时长由 `IEC104_SOAK_SECONDS` 控制）
 - 变异冒烟: `python tools/mutation_smoke.py`（协议层 12 个高价值变异必须全部被杀死）
-- 一致性测试: tests/conformance/test_conformance.py（42 个用例）
+- 一致性测试: tests/conformance/test_conformance.py（42 个用例，独立 runner）+ tests/test_conformance_suite.py（接入 pytest：10 方法级 + 1 汇总，锁死 42 且零 FAIL/ERROR/SKIP）
 - 脚本测试: tests/scripts/（YAML 定义的场景测试）
 - Mock 策略: 引擎层测试用 Mock 传输层，不建真连接
 
@@ -137,6 +137,7 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - [x] 历史库查询 UI：`GET /api/history/{stats,data,frames,export}`（§2.11/§4.9）+ Web「历史」页（数据/报文双页签，时间/类型/IOA/方向过滤，CSV 导出；未启用提示）；`tests/test_webui_history_endpoints.py` 4 例 + `HistoryPage.test.tsx` 3 例；全量 1288 passed
 - [x] 网络异常模拟接入 Web UI：`/api/simulation`（GET/POST + reset/disconnect，§2.12/§4.10）+ 状态页卡片（预设/自定义/手动断线/统计）；**核心修复**：`SimulationManager.install` 原二次包装 raw 回调会覆盖代理 `_original_rx`，导致 RX 帧绕过协议处理——改为在传输层回调（`_client/_server._on_frame`）拦截并提供 `uninstall_from_engine` 精确恢复；新增 4 后端 + 3 前端用例；全量 1293 passed
 - [x] Web 访问安全（B7）：`--http-host`（默认 127.0.0.1）+ `--auth-token`（或 `IEC104_AUTH_TOKEN`）；令牌保护 `/api/*` 与 `/ws`（Bearer / X-Auth-Token / `?token=`），`GET /api/auth` 公开探测；前端 AuthGate 令牌输入 + URL `?token=` 导入；非回环监听且无令牌时启动告警；新增 4 后端 + 2 前端用例；全量 1297 passed
+- [x] 一致性套件接入 pytest：`tests/test_conformance_suite.py` 按套件 `_test_*` 方法参数化（失败输出具体 case id）+ 汇总用例锁死 42 case/零 FAIL/ERROR/SKIP；独立 runner 保留；全量 1308 passed
 
 ## 双应用入口（纯 Web UI）
 

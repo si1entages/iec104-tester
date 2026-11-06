@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/WebUI-aiohttp-41CD52" alt="Web UI">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/IEC--104-72%20TypeIDs-brightgreen.svg" alt="IEC 104">
-  <img src="https://img.shields.io/badge/Tests-1293-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-1308-brightgreen.svg" alt="Tests">
 </p>
 
 ---
@@ -218,16 +218,17 @@ custom_types: []   # 非标厂商私有 TypeID 注册
 ## 🧪 测试
 
 ```bash
-python -m pytest tests/ -q              # 单元 + 集成（1293 例；性能基准默认排除）
+python -m pytest tests/ -q              # 单元 + 集成（1308 例；性能基准默认排除）
 python -m pytest tests/ -q --cov=core --cov-branch --cov-report=term-missing --cov-fail-under=88
 python -m pytest tests/ -m perf -q      # 性能基准（解码/10 万点/20 客户端并发/环回 soak）
 IEC104_SOAK_SECONDS=7200 python -m pytest tests/perf/test_soak_loopback.py -m perf -q
 python run_tests.py tests/scripts/      # YAML 脚本
+python -m pytest tests/test_conformance_suite.py -q  # 一致性套件（42 case）接入 pytest
 python tests/e2e/qa_full_flow.py        # 全流程验收
 python tools/mutation_smoke.py          # 协议层变异冒烟（12/12 必须被杀死）
 ```
 
-- 当前基线：**1293 passed，4 deselected**；`core/` 分支覆盖率 **88.82%**（门禁 88%）
+- 当前基线：**1308 passed，4 deselected**；`core/` 分支覆盖率 **88.82%**（门禁 88%）
 - 20 客户端并发实测约 **2.9k 帧/秒**；2h soak 实测 **7200s / 34,765 次 GI / 内存 +0.64 MB**
 - 互操作语料库：`tests/fixtures/frames/`（合成基线 + `real/` 真机目录），
   `tests/test_frame_corpus_replay.py` 做 golden 解码与主站回放回归；

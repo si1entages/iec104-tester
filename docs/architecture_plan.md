@@ -371,8 +371,9 @@ graph TD
 | **T32** | 历史查询页（2026-11-06 第二批） | `GET /api/history/{stats,data,frames,export}`（契约 §2.11/§4.9）+ Web「历史」页（数据/报文双页签、时间/类型/IOA/方向过滤、CSV 导出、未启用提示）；`tests/test_webui_history_endpoints.py`（4 例）+ `HistoryPage.test.tsx`（3 例）；全量 1288 passed |
 | **T33** | 网络异常模拟接入 Web UI（2026-11-06 第三批） | `/api/simulation`（GET/POST + reset/disconnect，契约 §2.12/§4.10）+ 状态页卡片（预设/自定义/手动断线/统计）；核心修复 `SimulationManager` 覆盖 raw 回调致 RX 绕过协议处理（改为传输层回调拦截 + 卸载恢复）；4 后端 + 3 前端用例；全量 1293 passed |
 | **T34** | Web 访问认证（2026-11-06 第三批） | `--http-host` + `--auth-token`（/`IEC104_AUTH_TOKEN`）；令牌保护 `/api/*` 与 `/ws`（Bearer / X-Auth-Token / `?token=`），`GET /api/auth` 公开探测（契约 §2.13）；前端 AuthGate + URL 令牌导入；非回环无令牌启动告警；4 后端 + 2 前端用例；全量 1297 passed |
+| **T35** | 一致性套件接入 pytest（2026-11-07） | `tests/test_conformance_suite.py`：按 `_test_*` 方法参数化（10 例，失败输出 case id）+ 汇总锁死 42 case/零 FAIL/ERROR/SKIP；独立 runner 保留；全量 1308 passed |
 
-> **累计统计**：T01~T34 **全部完成，待办 0**。
+> **累计统计**：T01~T35 **全部完成，待办 0**。
 
 ---
 

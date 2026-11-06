@@ -26,7 +26,7 @@ tests/
   python -m pytest tests/test_asdu.py -q   # 单文件
   ```
 
-- 当前基线：**1293 passed**（`tests/` 全量，`perf` 默认排除）。
+- 当前基线：**1308 passed**（`tests/` 全量，`perf` 默认排除）。
 
 ### 覆盖率
 
@@ -74,10 +74,15 @@ python -m pytest tests/ -q --cov=core --cov-branch --cov-report=term-missing
 - **运行**：
 
   ```bash
-  python tests/conformance/test_conformance.py
-  # 或经 pytest 收集：
-  python -m pytest tests/conformance/ -q
+  python tests/conformance/test_conformance.py        # 独立 runner（分类报告）
+  python -m pytest tests/test_conformance_suite.py -q  # 接入 pytest（10 方法级 + 1 汇总）
   ```
+
+- **pytest 接入**：`tests/test_conformance_suite.py` 按套件的 `_test_*` 方法参数化，
+  失败时输出具体 case（id/name/message）；汇总用例锁死 **42 个 case** 且零
+  FAIL/ERROR/SKIP（套件删减或静默跳过都会红灯）。`tests/conformance/` 本身仍保留
+  独立 runner，两套入口共用同一份测试逻辑；注意直接 `pytest tests/conformance/`
+  不会收集到用例（该文件是 runner 而非 test 函数）。
 
 ---
 
