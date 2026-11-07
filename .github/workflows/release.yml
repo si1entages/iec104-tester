@@ -136,7 +136,7 @@ jobs:
       # 没有 .git，会报 "fatal: not a git repository"（v1.1.0/v1.2.0 实测）。
       - uses: actions/checkout@v7
       - name: Download release archives
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
