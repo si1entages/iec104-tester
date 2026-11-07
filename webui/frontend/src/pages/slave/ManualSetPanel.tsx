@@ -178,7 +178,7 @@ export function ManualSetPanel({ point, disabled = false }: Props) {
       }
       styles={{ body: { maxHeight: 620, overflowY: 'auto' } }}
     >
-      <Space direction="vertical" size={10} style={{ width: '100%' }}>
+      <Space orientation="vertical" size={10} style={{ width: '100%' }}>
         <Segmented
           block
           value={kind}
@@ -209,22 +209,22 @@ export function ManualSetPanel({ point, disabled = false }: Props) {
           )}
         </Space>
 
-        {disabled ? <Alert type="info" showIcon message={t('msp.slaveOff')} /> : null}
+        {disabled ? <Alert type="info" showIcon title={t('msp.slaveOff')} /> : null}
         {!disabled && noIoa ? (
-          <Alert type="warning" showIcon message={t('cmd.needIoa')} />
+          <Alert type="warning" showIcon title={t('cmd.needIoa')} />
         ) : null}
         {!disabled && mismatch ? (
           <Alert
             type="warning"
             showIcon
-            message={t('msp.mismatch', { point: point?.type ?? '', kind })}
+            title={t('msp.mismatch', { point: point?.type ?? '', kind })}
           />
         ) : null}
         {last ? (
           <Alert
             type={last.ok ? 'success' : 'error'}
             showIcon
-            message={last.text}
+            title={last.text}
             closable
             onClose={() => setLast(null)}
           />

@@ -83,7 +83,7 @@ export function StationCard({ station, index, frozen, onChange, onRemove }: Prop
         </Space>
       }
     >
-      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+      <Space orientation="vertical" size={8} style={{ width: '100%' }}>
         <Space wrap size={12}>
           <Field label={t('sc.stationId')} width={180}>
             <Input
@@ -147,7 +147,7 @@ export function StationCard({ station, index, frozen, onChange, onRemove }: Prop
               key: 'points',
               label: t('sc.pointsSim'),
               children: (
-                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Space orientation="vertical" size={8} style={{ width: '100%' }}>
                   <Space wrap size={12}>
                     <Field label={t('sc.autoGen')} width={60}>
                       <Switch

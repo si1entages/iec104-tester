@@ -148,14 +148,14 @@ export function AppLayout({ children }: Props) {
         <Content style={{ padding: 16, overflow: 'auto' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {schemaWarning ? (
-              <Alert type="warning" showIcon message={t('header.schemaWarning')} description={schemaWarning} />
+              <Alert type="warning" showIcon title={t('header.schemaWarning')} description={schemaWarning} />
             ) : null}
             {sendBackpressure ? (
               <Alert
                 type="warning"
                 showIcon
                 closable
-                message={t('header.backpressure')}
+                title={t('header.backpressure')}
                 description={sendBackpressure}
                 onClose={() => setSendBackpressure(null)}
               />
@@ -164,7 +164,7 @@ export function AppLayout({ children }: Props) {
               <Alert
                 type="info"
                 showIcon
-                message={t('header.dropped', { n: droppedFrames })}
+                title={t('header.dropped', { n: droppedFrames })}
                 description={t('header.droppedDesc')}
               />
             ) : null}

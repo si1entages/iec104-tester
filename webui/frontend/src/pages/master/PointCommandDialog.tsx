@@ -162,14 +162,14 @@ export function PointCommandDialog({ point, disabled = false, onClose }: Props) 
       okButtonProps={{ danger: true, disabled }}
       cancelButtonProps={{ disabled: busy }}
       confirmLoading={busy}
-      maskClosable={!busy}
+      mask={{ closable: !busy }}
       closable={!busy}
       keyboard={!busy}
       onOk={() => void handleOk()}
       onCancel={onClose}
       width={540}
     >
-      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      <Space orientation="vertical" size={12} style={{ width: '100%' }}>
         <Descriptions
           size="small"
           column={2}
@@ -207,7 +207,7 @@ export function PointCommandDialog({ point, disabled = false, onClose }: Props) 
               <Alert
                 type="warning"
                 showIcon
-                message={t('pcd.sboTitle')}
+                title={t('pcd.sboTitle')}
                 description={t('pcd.sboDesc')}
               />
             ) : null}
@@ -250,7 +250,7 @@ export function PointCommandDialog({ point, disabled = false, onClose }: Props) 
           {t('pcd.hint')}
         </Typography.Text>
         {disabled ? (
-          <Alert type="info" showIcon message={t('cmd.engineOff')} />
+          <Alert type="info" showIcon title={t('cmd.engineOff')} />
         ) : null}
       </Space>
     </Modal>

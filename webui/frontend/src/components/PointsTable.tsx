@@ -200,7 +200,7 @@ export function PointsTable({
           type="error"
           showIcon
           style={{ marginBottom: 8 }}
-          message={t('pt2.loadFailed')}
+          title={t('pt2.loadFailed')}
           description={String((error as Error)?.message ?? error)}
         />
       ) : null}

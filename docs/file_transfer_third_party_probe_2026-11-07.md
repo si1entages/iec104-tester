@@ -128,6 +128,22 @@ File ACK sent: qualifier=1
 
 且无 CHS mismatch 告警，证明 122/COT13、SCQ=6、按 LSQ 回 F_AF、逐节 CHS 均生效。
 
+### 2.8 v1.3.0 回归复测（同日）
+
+版本 1.3.0（前端依赖大版本升级）发布后，用同一 lib60870-C v2.4.1 从站重跑：
+
+```bash
+python app.py --mode master --no-browser --no-history --http-port 8765
+curl -X POST http://127.0.0.1:8765/api/master/start -H "Content-Type: application/json" \
+  -d '{"host":"127.0.0.1","port":2404,"addr":1}'
+python tests/e2e/qa_file_transfer_probe.py --ioa 30000 --select 1 --request 1 --wait 1
+```
+
+结果与 2.6 完全一致：F_FR(800B) → F_SR(1) → 2×F_SG → F_LS(LSQ=3,CHS=184) →
+F_SR(2) → 2×F_SG → F_LS(LSQ=3,CHS=72) → F_LS(LSQ=1,CHS=0)；
+主站日志 `File received: name=1 size=800`、`File ACK sent: qualifier=1`，
+无 CHS mismatch。**仍为第三方从站，真机复测未执行。**
+
 ## 3. 5 项结论
 
 | 项 | 结论（第三方） | 真机 |

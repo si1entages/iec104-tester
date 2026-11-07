@@ -135,7 +135,7 @@ export function SlaveConnectionPanel() {
           type="error"
           showIcon
           style={{ marginBottom: 12 }}
-          message={t('status.loadStatusFailed')}
+          title={t('status.loadStatusFailed')}
           description={String((statusQuery.error as Error)?.message ?? statusQuery.error)}
         />
       ) : null}

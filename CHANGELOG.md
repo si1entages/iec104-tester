@@ -3,6 +3,20 @@
 本文件记录对外可见的功能/修复；版本号与 `pyproject.toml`、
 `core/version.py`、`webui/frontend/package.json` 保持一致。
 
+## [Unreleased]
+
+### Changed
+
+- 清理 Ant Design 6 弃用告警（前端测试告警从 5 类降为 0）：
+  `Alert message` → `title`、`Space direction` → `orientation`、
+  `InputNumber addonAfter` → `suffix`、`Modal maskClosable` → `mask.closable`、
+  `Statistic valueStyle` → `styles.content`。
+
+### Verified
+
+- 文件传输 C4 回归（第三方 lib60870-C v2.4.1，非真机）：v1.3.0 代码重跑
+  800B / 2 节 / LSQ 3,3,1 / CHS 184,72,0，接收完成且无告警；真机项仍待复测。
+
 ## [1.3.0] — 2026-11-07
 
 ### Changed

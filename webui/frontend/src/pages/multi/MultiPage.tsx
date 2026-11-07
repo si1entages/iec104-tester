@@ -157,7 +157,7 @@ export default function MultiPage() {
         type="info"
         showIcon
         closable
-        message={t('multi.roleNote')}
+        title={t('multi.roleNote')}
         description={t('multi.roleNoteDesc')}
       />
 
@@ -165,7 +165,7 @@ export default function MultiPage() {
         <Alert
           type={last.ok ? 'success' : 'error'}
           showIcon
-          message={last.text}
+          title={last.text}
           closable
           onClose={() => setLast(null)}
         />
@@ -220,7 +220,7 @@ export default function MultiPage() {
             type="warning"
             showIcon
             style={{ marginBottom: 12 }}
-            message={t('multi.validationIssues', { n: issues.length })}
+            title={t('multi.validationIssues', { n: issues.length })}
             description={
               <ul style={{ margin: 0, paddingLeft: 18 }}>
                 {issues.map((it) => (
@@ -236,7 +236,7 @@ export default function MultiPage() {
             type="warning"
             showIcon
             style={{ marginBottom: 12 }}
-            message={t('multi.stationMismatch')}
+            title={t('multi.stationMismatch')}
             description={
               <Space>
                 <Typography.Text style={{ fontSize: 12 }}>
@@ -255,7 +255,7 @@ export default function MultiPage() {
           />
         ) : null}
 
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={12} style={{ width: '100%' }}>
           {draft.length === 0 ? (
             <Typography.Text type="secondary">{t('multi.empty')}</Typography.Text>
           ) : (

@@ -139,8 +139,8 @@ export function ResponsePanel({ disabled = false }: Props) {
       }
       styles={{ body: { maxHeight: 620, overflowY: 'auto' } }}
     >
-      <Space direction="vertical" size={10} style={{ width: '100%' }}>
-        {disabled ? <Alert type="info" showIcon message={t('rp.slaveOff')} /> : null}
+      <Space orientation="vertical" size={10} style={{ width: '100%' }}>
+        {disabled ? <Alert type="info" showIcon title={t('rp.slaveOff')} /> : null}
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           {t('rp.hint')}
         </Typography.Text>
@@ -149,7 +149,7 @@ export function ResponsePanel({ disabled = false }: Props) {
           <Alert
             type={last.ok ? 'success' : 'error'}
             showIcon
-            message={last.text}
+            title={last.text}
             closable
             onClose={() => setLast(null)}
           />
@@ -166,7 +166,7 @@ export function ResponsePanel({ disabled = false }: Props) {
               key: 'errors',
               label: t('rp.group.errors'),
               children: (
-                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Space orientation="vertical" size={8} style={{ width: '100%' }}>
                   <Space wrap size={16}>
                     <Toggle
                       label={t('rp.toggle.dropFrames')}
@@ -213,7 +213,7 @@ export function ResponsePanel({ disabled = false }: Props) {
               key: 'delays',
               label: t('rp.group.delays'),
               children: (
-                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Space orientation="vertical" size={8} style={{ width: '100%' }}>
                   <Space wrap>
                     <span style={{ fontSize: 12 }}>{t('rp.delay.command')}</span>
                     <InputNumber
@@ -278,7 +278,7 @@ export function ResponsePanel({ disabled = false }: Props) {
               key: 'connection',
               label: t('rp.group.connection'),
               children: (
-                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Space orientation="vertical" size={8} style={{ width: '100%' }}>
                   <Space wrap size={16}>
                     <Toggle
                       label={t('rp.c.rejectStartdt')}

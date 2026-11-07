@@ -121,7 +121,7 @@ export function MultiStatusView({ summary, status, loading, isError, error, onDi
           type="error"
           showIcon
           style={{ marginBottom: 12 }}
-          message={t('msv.error')}
+          title={t('msv.error')}
           description={String((error as Error)?.message ?? error)}
         />
       ) : null}
@@ -134,7 +134,7 @@ export function MultiStatusView({ summary, status, loading, isError, error, onDi
           <Statistic
             title={t('msv.totalClients')}
             value={summary?.total_clients ?? 0}
-            valueStyle={{ color: (summary?.total_clients ?? 0) > 0 ? token.colorSuccess : undefined }}
+            styles={{ content: { color: (summary?.total_clients ?? 0) > 0 ? token.colorSuccess : undefined } }}
           />
         </Col>
         <Col span={4}>

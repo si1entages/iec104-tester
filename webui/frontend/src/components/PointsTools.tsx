@@ -149,7 +149,7 @@ export function PointsTools() {
         placement="bottomRight"
         title={t('pt.batchTitle')}
         content={
-          <Space direction="vertical" size={8} style={{ width: 300 }}>
+          <Space orientation="vertical" size={8} style={{ width: 300 }}>
             <Space wrap>
               <span style={{ fontSize: 12 }}>{t('pt.type')}</span>
               <Select size="small" style={{ width: 90 }} value={batchType} options={TYPE_OPTIONS} onChange={setBatchType} />

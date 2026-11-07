@@ -308,7 +308,7 @@ export function HistoryPage() {
           type="warning"
           showIcon
           style={{ marginBottom: 12 }}
-          message={t('history.notEnabled')}
+          title={t('history.notEnabled')}
           description={t('history.notEnabledDesc')}
         />
       ) : null}

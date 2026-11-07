@@ -149,6 +149,7 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - [x] D4 CI 工程化：concurrency 取消旧 run、Dependabot（pip/npm/actions）、Python 3.14 矩阵、夜间 perf workflow、PR 阶段 Linux onefile dry-run、coverage XML artifact
 - [x] D5 版本/文档一致性：`core/version.py` 单一版本源 + 三处一致性测试；历史文档的 TLS/冗余/i18n 清单表述加注当前状态
 - [x] D6 前端依赖大版本升级（v1.3.0）：React 19/Ant Design 6/TypeScript 7/Vite 8/Vitest 5/ECharts 6 等 17 项（PR #6）；适配 TS7 去 `baseUrl`、antd6 角色/aria 选择器；Vitest5 覆盖率口径重基线（55/58/50/53）；`actions/download-artifact` 7→8（PR #5）；合并后 master CI 10/10 绿
+- [x] D7 antd 6 弃用告警清零 + C4 回归：`Alert message→title`、`Space direction→orientation`、`InputNumber addonAfter→suffix`、`Modal maskClosable→mask.closable`、`Statistic valueStyle→styles.content`；前端测试 antd 告警 0、128 passed、Playwright 22/22；lib60870 第三方文件传输 800B/2 节回归通过（真机仍待）
 - [x] E1 Web 测试中心：`/api/tests/*`（脚本列表/运行/停止/状态/报告下载）+「自动化测试」页；子进程隔离、实时日志、50 用例脚本可选；4 后端 + 2 前端用例
 - [x] E2 报文录制/回放进 Web：`/api/capture/*`（录制启停/暂停/文件/导出 pcap/加载/回放/单步）+「报文抓包」页；5 后端 + 2 前端用例
 - [x] E3 冗余双通道进 Web：`POST /api/master/start` 支持 `redundancy`，状态返回活动通道/主备在线/切换次数；连接面板可配置；新增后端 12 + 前端 1 用例

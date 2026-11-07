@@ -185,7 +185,7 @@ export function NetworkSimCard() {
               max={600}
               value={disconnectSec}
               onChange={(v) => setDisconnectSec(Number(v ?? 5))}
-              addonAfter={t('sim.seconds')}
+              suffix={t('sim.seconds')}
               style={{ width: 140 }}
             />
             <Button

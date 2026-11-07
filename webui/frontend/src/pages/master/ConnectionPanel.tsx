@@ -137,7 +137,7 @@ export function ConnectionPanel() {
           type="error"
           showIcon
           style={{ marginBottom: 12 }}
-          message={t('status.loadStatusFailed')}
+          title={t('status.loadStatusFailed')}
           description={String((statusQuery.error as Error)?.message ?? statusQuery.error)}
         />
       ) : null}
@@ -321,7 +321,7 @@ function LiveRefreshControl() {
         value={liveRefreshMs}
         style={{ width: 130 }}
         onChange={(v) => setLiveRefreshMs(Math.max(0, Number(v ?? 0)))}
-        addonAfter="ms"
+        suffix="ms"
       />
       <span style={{ color: token.colorTextTertiary }}>{t('conn.liveOff')}</span>
       {heavy ? (

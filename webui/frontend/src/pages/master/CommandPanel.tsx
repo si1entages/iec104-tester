@@ -219,7 +219,7 @@ export function CommandPanel({ point, disabled = false }: Props) {
       key: 'yk',
       label: t('cmd.yk.title'),
       children: (
-        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={8} style={{ width: '100%' }}>
           <Space wrap>
             <span>{t('cmd.commandType')}</span>
             <Switch
@@ -297,7 +297,7 @@ export function CommandPanel({ point, disabled = false }: Props) {
       key: 'setpoint',
       label: t('cmd.sp.title'),
       children: (
-        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={8} style={{ width: '100%' }}>
           <Select style={{ width: '100%' }} value={spKind} options={setpointKinds(t)} onChange={setSpKind} />
           <Space wrap>
             <InputNumber
@@ -335,7 +335,7 @@ export function CommandPanel({ point, disabled = false }: Props) {
       key: 'system',
       label: t('cmd.system.title'),
       children: (
-        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={8} style={{ width: '100%' }}>
           <Space wrap>
             <Select style={{ width: 210 }} value={giQoi} options={giOptions(t)} onChange={setGiQoi} />
             <Button
@@ -367,7 +367,7 @@ export function CommandPanel({ point, disabled = false }: Props) {
       key: 'step',
       label: t('cmd.misc.title'),
       children: (
-        <Space direction="vertical" size={10} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={10} style={{ width: '100%' }}>
           <Space wrap>
             <span>{t('cmd.step.title')}</span>
             <Select
@@ -412,7 +412,7 @@ export function CommandPanel({ point, disabled = false }: Props) {
               max={60000}
               value={delayMs}
               onChange={(v) => setDelayMs(Number(v ?? 0))}
-              addonAfter="ms"
+              suffix="ms"
               style={{ width: 190 }}
             />
             <Button
@@ -437,7 +437,7 @@ export function CommandPanel({ point, disabled = false }: Props) {
       key: 'param',
       label: t('cmd.param.title'),
       children: (
-        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={8} style={{ width: '100%' }}>
           <Select
             style={{ width: '100%' }}
             value={paramKind}
@@ -482,7 +482,7 @@ export function CommandPanel({ point, disabled = false }: Props) {
       key: 'file',
       label: t('cmd.file.title'),
       children: (
-        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={8} style={{ width: '100%' }}>
           <Select
             style={{ width: '100%' }}
             value={fileAction}
@@ -529,7 +529,7 @@ export function CommandPanel({ point, disabled = false }: Props) {
       }
       styles={{ body: { maxHeight: 620, overflowY: 'auto' } }}
     >
-      <Space direction="vertical" size={10} style={{ width: '100%' }}>
+      <Space orientation="vertical" size={10} style={{ width: '100%' }}>
         <Space wrap>
           <InputNumber
             prefix={t('cmd.targetIoa')}
@@ -550,15 +550,15 @@ export function CommandPanel({ point, disabled = false }: Props) {
           )}
         </Space>
 
-        {disabled ? <Alert type="info" showIcon message={t('cmd.engineOff')} /> : null}
+        {disabled ? <Alert type="info" showIcon title={t('cmd.engineOff')} /> : null}
         {!disabled && noIoa ? (
-          <Alert type="warning" showIcon message={t('cmd.needIoa')} />
+          <Alert type="warning" showIcon title={t('cmd.needIoa')} />
         ) : null}
         {last ? (
           <Alert
             type={last.ok ? 'success' : 'error'}
             showIcon
-            message={last.text}
+            title={last.text}
             closable
             onClose={() => setLast(null)}
           />

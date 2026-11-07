@@ -93,13 +93,13 @@ export function SimulationPanel({ disabled = false, selected = null }: Props) {
         </Space>
       }
     >
-      <Space direction="vertical" size={10} style={{ width: '100%' }}>
-        {disabled ? <Alert type="info" showIcon message={t('simPanel.slaveOff')} /> : null}
+      <Space orientation="vertical" size={10} style={{ width: '100%' }}>
+        {disabled ? <Alert type="info" showIcon title={t('simPanel.slaveOff')} /> : null}
         {last ? (
           <Alert
             type={last.ok ? 'success' : 'error'}
             showIcon
-            message={last.text}
+            title={last.text}
             closable
             onClose={() => setLast(null)}
           />

@@ -68,14 +68,14 @@ export function TestInjectionPanel({ disabled = false }: { disabled?: boolean })
       }
       styles={{ body: { maxHeight: 620, overflowY: 'auto' } }}
     >
-      <Space direction="vertical" size={10} style={{ width: '100%' }}>
-        {disabled ? <Alert type="info" showIcon message={t('tip.slaveOff')} /> : null}
+      <Space orientation="vertical" size={10} style={{ width: '100%' }}>
+        {disabled ? <Alert type="info" showIcon title={t('tip.slaveOff')} /> : null}
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           {t('tip.hint')}
         </Typography.Text>
 
         {last ? (
-          <Alert type={last.ok ? 'success' : 'error'} showIcon message={last.text} closable onClose={() => setLast(null)} />
+          <Alert type={last.ok ? 'success' : 'error'} showIcon title={last.text} closable onClose={() => setLast(null)} />
         ) : null}
 
         <Space wrap>

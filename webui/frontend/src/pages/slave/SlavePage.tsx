@@ -45,7 +45,7 @@ export default function SlavePage() {
       <Alert
         type="info"
         showIcon
-        message={t('slave.masterRole')}
+        title={t('slave.masterRole')}
         description={t('slave.masterRoleDesc')}
       />
     )

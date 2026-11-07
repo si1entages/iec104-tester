@@ -136,7 +136,7 @@ export function StatusPage() {
         <Alert
           type="error"
           showIcon
-          message={t('status.loadStatusFailed')}
+          title={t('status.loadStatusFailed')}
           description={String((statusQuery.error as Error)?.message ?? statusQuery.error)}
         />
       ) : null}
@@ -208,7 +208,7 @@ export function StatusPage() {
             <Statistic
               title={t('status.dropped')}
               value={status?.dropped ?? 0}
-              valueStyle={{ color: (status?.dropped ?? 0) > 0 ? '#faad14' : undefined }}
+              styles={{ content: { color: (status?.dropped ?? 0) > 0 ? '#faad14' : undefined } }}
             />
           </Card>
         </Col>
