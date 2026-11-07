@@ -46,11 +46,8 @@ describe('CommandPanel（命令面板）YK 撤销选择', () => {
   }
 
   async function fillIoa(value: string): Promise<void> {
-    const ioaInput = screen
-      .getAllByRole('spinbutton')
-      .find((el) => el.closest('.ant-input-number-affix-wrapper')?.textContent?.includes('IOA'))
-    expect(ioaInput).toBeTruthy()
-    fireEvent.change(ioaInput!, { target: { value } })
+    const ioaInput = screen.getByLabelText('目标 IOA')
+    fireEvent.change(ioaInput, { target: { value } })
   }
 
   it('选择成功后解锁「撤销选择」，撤销请求携带 deactivate=true 并复位按钮', async () => {

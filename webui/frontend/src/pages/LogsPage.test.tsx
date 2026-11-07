@@ -73,7 +73,7 @@ describe('LogsPage（日志面板）', () => {
       'fetch',
       vi.fn(async () => jsonResponse({ ok: true, logs: [], stats: {} })),
     )
-    const { client, container } = setup()
+    const { client } = setup()
 
     act(() => {
       replaceLiveLogs(client, [
@@ -87,9 +87,9 @@ describe('LogsPage（日志面板）', () => {
 
     // 打开级别下拉并取消勾选 INFO（maxTagCount=responsive 在 jsdom 里不渲染选中标签，
     // 直接用容器定位第一个 Select——级别多选是过滤行里的第一个）
-    const levelSelect = container.querySelector('.ant-select .ant-select-selector')
-    expect(levelSelect).not.toBeNull()
-    fireEvent.mouseDown(levelSelect as Element, { button: 0 })
+    const levelSelect = screen.getAllByRole('combobox')[0]
+    expect(levelSelect).toBeTruthy()
+    fireEvent.mouseDown(levelSelect, { button: 0 })
     // 可视选项在打开的 dropdown 里（role="listbox" 是 rc-select 的隐藏无障碍列表，别用它）
     const infoOption = await waitFor(() => {
       const el =

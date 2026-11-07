@@ -34,9 +34,9 @@ test('级别过滤生效（拦截 /api/logs 注入确定性数据）', async ({ 
   // 字体度量（CI Linux runner 无中文字体，与本地 Windows Edge 不同），中心点可能
   // 恰好落在某个 × 上——点击会变成「移除该级别」而非「展开下拉」（CI 首跑实测踩坑）。
   // 改为点击 selector 右侧空白：那里只有无删除叉的 +N 计数 tag，任何字体下都安全。
-  const levelSelector = page.locator('.ant-select .ant-select-selector').first()
-  const box = await levelSelector.boundingBox()
-  await levelSelector.click({ position: { x: (box?.width ?? 260) - 8, y: (box?.height ?? 32) / 2 } })
+  // antd 6 移除了 .ant-select-selector 包装层，直接点第一个 Select 的 combobox
+  const levelSelector = page.getByRole('combobox').first()
+  await levelSelector.click()
   const infoOption = page
     .locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option[title="INFO"]')
     .first()
