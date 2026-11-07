@@ -656,12 +656,12 @@ class SlaveResponseBuilder:
         obj = asdu.objects[0]
 
         # 召唤目录
-        if type_id == TypeID.F_SC_NA_1 and cot == COT.ACT:
+        if type_id == TypeID.F_SC_NA_1 and cot in (COT.ACT, COT.FILE):
             if isinstance(obj.data, CallDirectory):
                 e._file_transfer.handle_file_request(obj.ioa, obj.data.file_name, obj.data.qualifier)
 
         # 文件选择/召唤/获取
-        elif type_id == TypeID.F_SC_NB_1 and cot == COT.ACT:
+        elif type_id == TypeID.F_SC_NB_1 and cot in (COT.ACT, COT.FILE):
             if isinstance(obj.data, FileSelectCallGet):
                 e._file_transfer.handle_file_request(obj.ioa, obj.data.file_name, obj.data.qualifier)
 

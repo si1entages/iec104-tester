@@ -8,6 +8,7 @@ import hmac
 import io
 import json
 import logging
+import ssl
 import time
 from pathlib import Path
 
@@ -29,6 +30,51 @@ RESOURCES = Path(__file__).parent.parent / "resources"
 # （更大导出请用 CLI capture_tool / 诊断包，避免浏览器内存压力）
 HISTORY_QUERY_MAX_LIMIT = 10000
 HISTORY_EXPORT_MAX_ROWS = 200000
+
+# 安全响应头（E4）：静态 SPA + REST/WS 同源。
+# - CSP 允许 antd CSS-in-JS 注入的 <style>（style-src 'unsafe-inline'），
+#   但不允许内联/外部脚本；WS 与 REST 都走同源（localhost/局域网 IP）。
+# - frame-ancestors/X-Frame-Options 防点击劫持；nosniff 防 MIME 嗅探。
+_CSP = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "font-src 'self' data:; "
+    "connect-src 'self' ws: wss:; "
+    "object-src 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'; "
+    "frame-ancestors 'none'"
+)
+
+
+@web.middleware
+async def security_headers(request: web.Request, handler) -> web.Response:
+    """给所有响应补安全头（含 401/404）."""
+    resp = await handler(request)
+    resp.headers.setdefault("Content-Security-Policy", _CSP)
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    resp.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+    if request.secure:
+        resp.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return resp
+
+
+def create_web_ssl_context(certfile: str, keyfile: str | None = None) -> ssl.SSLContext:
+    """构造 Web UI 的 TLS 服务端上下文（E4：HTTPS 监听）.
+
+    仅用于浏览器 ↔ Web 服务；与控制链路 TLS（``core.transport.tls_context``）
+    互不影响。最低 TLS 1.2，与 IEC 侧策略一致。
+    """
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    ctx.load_cert_chain(certfile, keyfile or None)
+    return ctx
+
 
 
 @web.middleware
@@ -56,6 +102,30 @@ def _extract_token(request: web.Request) -> str:
     return request.headers.get("X-Auth-Token", "") or request.query.get("token", "")
 
 
+def _validate_redundancy(cfg: dict) -> str | None:
+    """校验 Web 端冗余配置字段；返回错误信息（None=通过）."""
+    if "enabled" in cfg and not isinstance(cfg["enabled"], bool):
+        return "invalid redundancy.enabled"
+    if "standby_host" in cfg:
+        if not isinstance(cfg["standby_host"], str) or not cfg["standby_host"].strip():
+            return "invalid redundancy.standby_host"
+    if "standby_port" in cfg:
+        port = cfg["standby_port"]
+        if not isinstance(port, int) or isinstance(port, bool) or not 0 < port <= 65535:
+            return "invalid redundancy.standby_port"
+    for key, low in (("switch_timeout", 0.0), ("dedup_window", 0.0)):
+        if key not in cfg:
+            continue
+        value = cfg[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return f"invalid redundancy.{key}"
+        if (key == "switch_timeout" and float(value) <= low) or (
+            key != "switch_timeout" and float(value) < low
+        ):
+            return f"invalid redundancy.{key}"
+    return None
+
+
 def create_app(bridge: EngineBridge, auth_token: str | None = None) -> web.Application:
     @web.middleware
     async def token_auth(request: web.Request, handler) -> web.Response:
@@ -76,7 +146,7 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None) -> web.Appli
             return await handler(request)
         return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
 
-    app = web.Application(middlewares=[no_cache_pages, token_auth])
+    app = web.Application(middlewares=[security_headers, no_cache_pages, token_auth])
 
     async def index(request: web.Request) -> web.Response:
         """旧原生页（master.html/slave.html）已退役（T19）：一律进新前端 /app/."""
@@ -187,6 +257,14 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None) -> web.Appli
         tls = body.get("tls")
         if tls is not None and not isinstance(tls, dict):
             return web.json_response({"ok": False, "error": "invalid tls"}, status=400)
+        redundancy = body.get("redundancy")
+        if redundancy is not None:
+            if not isinstance(redundancy, dict):
+                return web.json_response(
+                    {"ok": False, "error": "invalid redundancy"}, status=400)
+            err = _validate_redundancy(redundancy)
+            if err:
+                return web.json_response({"ok": False, "error": err}, status=400)
         r = await bridge.start_master(
             host,
             port,
@@ -194,6 +272,7 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None) -> web.Appli
             bool(body.get("reconnect", True)),
             float(gi_interval),
             tls=tls,
+            redundancy=redundancy,
         )
         return web.json_response(r)
 
@@ -826,6 +905,150 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None) -> web.Appli
     async def api_multi_summary(request: web.Request) -> web.Response:
         return web.json_response(bridge.multi_summary())
 
+    # ── 报文录制/回放（E2）───────────────────────────────────────────
+
+    async def api_capture_status(request: web.Request) -> web.Response:
+        return web.json_response(bridge.captures.status())
+
+    async def api_capture_start(request: web.Request) -> web.Response:
+        body = {}
+        if request.can_read_body:
+            try:
+                body = await request.json()
+            except Exception:
+                return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"ok": False, "error": "invalid body"}, status=400)
+        name = body.get("name")
+        if name is not None and not isinstance(name, str):
+            return web.json_response({"ok": False, "error": "invalid name"}, status=400)
+        result = bridge.captures.start(name)
+        return web.json_response(result, status=200 if result.get("ok") else 400)
+
+    async def api_capture_stop(request: web.Request) -> web.Response:
+        result = bridge.captures.stop()
+        return web.json_response(result, status=200 if result.get("ok") else 400)
+
+    async def api_capture_pause(request: web.Request) -> web.Response:
+        result = bridge.captures.pause()
+        return web.json_response(result, status=200 if result.get("ok") else 400)
+
+    async def api_capture_resume(request: web.Request) -> web.Response:
+        result = bridge.captures.resume()
+        return web.json_response(result, status=200 if result.get("ok") else 400)
+
+    async def api_capture_files(request: web.Request) -> web.Response:
+        return web.json_response({"ok": True, "files": bridge.captures.list_files()})
+
+    async def api_capture_download(request: web.Request) -> web.Response:
+        name = request.match_info.get("name", "")
+        path = bridge.captures.download_path(name)
+        if path is None:
+            return web.json_response({"ok": False, "error": "file not found"}, status=404)
+        return web.FileResponse(path, headers={
+            "Content-Disposition": f'attachment; filename="{path.name}"'})
+
+    async def api_capture_export(request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"ok": False, "error": "invalid body"}, status=400)
+        name, fmt = body.get("name"), body.get("format")
+        if not isinstance(name, str) or not isinstance(fmt, str):
+            return web.json_response({"ok": False, "error": "invalid name/format"}, status=400)
+        result = bridge.captures.export(name, fmt)
+        return web.json_response(result, status=200 if result.get("ok") else 400)
+
+    async def api_capture_load(request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        name = body.get("name") if isinstance(body, dict) else None
+        if not isinstance(name, str):
+            return web.json_response({"ok": False, "error": "invalid name"}, status=400)
+        result = bridge.captures.load(name)
+        return web.json_response(result, status=200 if result.get("ok") else 400)
+
+    async def api_capture_frames(request: web.Request) -> web.Response:
+        try:
+            offset = int(request.query.get("offset", 0) or 0)
+            limit = int(request.query.get("limit", 200) or 200)
+        except ValueError:
+            return web.json_response({"ok": False, "error": "invalid offset/limit"}, status=400)
+        result = bridge.captures.frames(offset, limit)
+        return web.json_response(result, status=200 if result.get("ok") else 400)
+
+    async def api_capture_play(request: web.Request) -> web.Response:
+        body = {}
+        if request.can_read_body:
+            try:
+                body = await request.json()
+            except Exception:
+                body = {}
+        if not isinstance(body, dict):
+            return web.json_response({"ok": False, "error": "invalid body"}, status=400)
+        try:
+            speed = float(body.get("speed", 1.0))
+        except (TypeError, ValueError):
+            return web.json_response({"ok": False, "error": "invalid speed"}, status=400)
+        result = bridge.captures.play(speed)
+        return web.json_response(result, status=200 if result.get("ok") else 400)
+
+    async def api_capture_playback_stop(request: web.Request) -> web.Response:
+        return web.json_response(bridge.captures.stop_playback())
+
+    async def api_capture_playback_pause(request: web.Request) -> web.Response:
+        result = bridge.captures.pause_playback()
+        return web.json_response(result, status=200 if result.get("ok") else 400)
+
+    async def api_capture_step(request: web.Request) -> web.Response:
+        body = {}
+        if request.can_read_body:
+            try:
+                body = await request.json()
+            except Exception:
+                body = {}
+        if not isinstance(body, dict):
+            return web.json_response({"ok": False, "error": "invalid body"}, status=400)
+        result = bridge.captures.step(str(body.get("direction", "forward")))
+        return web.json_response(result, status=200 if result.get("ok") else 400)
+
+    # ── 自动化测试中心（E1）─────────────────────────────────────────
+
+    async def api_tests_scripts(request: web.Request) -> web.Response:
+        return web.json_response({"ok": True, "scripts": bridge.testcenter.list_scripts()})
+
+    async def api_tests_run(request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        scripts = body.get("scripts") if isinstance(body, dict) else None
+        if not isinstance(scripts, list) or not all(isinstance(s, str) for s in scripts):
+            return web.json_response(
+                {"ok": False, "error": "scripts 须为字符串数组"}, status=400)
+        result = bridge.testcenter.start(scripts)
+        return web.json_response(result, status=200 if result.get("ok") else 400)
+
+    async def api_tests_stop(request: web.Request) -> web.Response:
+        result = bridge.testcenter.stop()
+        return web.json_response(result, status=200 if result.get("ok") else 400)
+
+    async def api_tests_status(request: web.Request) -> web.Response:
+        return web.json_response(bridge.testcenter.status())
+
+    async def api_tests_report(request: web.Request) -> web.Response:
+        run_id = request.match_info.get("run_id", "")
+        name = request.match_info.get("name", "")
+        path = bridge.testcenter.report_path(run_id, name)
+        if path is None:
+            return web.json_response({"ok": False, "error": "report not found"}, status=404)
+        return web.FileResponse(path, headers={
+            "Content-Disposition": f'attachment; filename="{path.name}"'})
+
     async def ws_feed(request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse(heartbeat=20)
         await ws.prepare(request)
@@ -915,6 +1138,25 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None) -> web.Appli
     app.router.add_get("/api/history/data", api_history_data)
     app.router.add_get("/api/history/frames", api_history_frames)
     app.router.add_get("/api/history/export", api_history_export)
+    app.router.add_get("/api/tests/scripts", api_tests_scripts)
+    app.router.add_post("/api/tests/run", api_tests_run)
+    app.router.add_post("/api/tests/stop", api_tests_stop)
+    app.router.add_get("/api/tests/status", api_tests_status)
+    app.router.add_get("/api/tests/reports/{run_id}/{name}", api_tests_report)
+    app.router.add_get("/api/capture/status", api_capture_status)
+    app.router.add_post("/api/capture/start", api_capture_start)
+    app.router.add_post("/api/capture/stop", api_capture_stop)
+    app.router.add_post("/api/capture/pause", api_capture_pause)
+    app.router.add_post("/api/capture/resume", api_capture_resume)
+    app.router.add_get("/api/capture/files", api_capture_files)
+    app.router.add_get("/api/capture/download/{name}", api_capture_download)
+    app.router.add_post("/api/capture/export", api_capture_export)
+    app.router.add_post("/api/capture/load", api_capture_load)
+    app.router.add_get("/api/capture/frames", api_capture_frames)
+    app.router.add_post("/api/capture/play", api_capture_play)
+    app.router.add_post("/api/capture/playback/stop", api_capture_playback_stop)
+    app.router.add_post("/api/capture/playback/pause", api_capture_playback_pause)
+    app.router.add_post("/api/capture/step", api_capture_step)
     app.router.add_get("/api/simulation", api_network_simulation_get)
     app.router.add_post("/api/simulation", api_network_simulation_set)
     app.router.add_post("/api/simulation/reset", api_network_simulation_reset)
@@ -947,7 +1189,8 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None) -> web.Appli
 async def _run(role: str, host: str = "127.0.0.1", port: int = 8765,
                point_table=None, connection: dict | None = None,
                history_db=None, app_config=None,
-               auth_token: str | None = None) -> None:
+               auth_token: str | None = None,
+               ssl_context: ssl.SSLContext | None = None) -> None:
     if auth_token is None and host not in ("127.0.0.1", "localhost", "::1"):
         logger.warning(
             "Web UI 监听 %s 且未启用访问令牌：局域网内任何主机都可能调用 REST/WS"
@@ -959,7 +1202,7 @@ async def _run(role: str, host: str = "127.0.0.1", port: int = 8765,
     app = create_app(bridge, auth_token=auth_token)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, host, port)
+    site = web.TCPSite(runner, host, port, ssl_context=ssl_context)
     await site.start()
     logger.info("Web UI http://%s:%s  role=%s", host, port, role)
     try:
@@ -972,7 +1215,8 @@ async def _run(role: str, host: str = "127.0.0.1", port: int = 8765,
 def run_server(role: str, host: str = "127.0.0.1", port: int = 8765,
                point_table=None, connection: dict | None = None,
                history_db=None, app_config=None,
-               auth_token: str | None = None) -> None:
+               auth_token: str | None = None,
+               ssl_context: ssl.SSLContext | None = None) -> None:
     """启动 Web 服务（阻塞）.
 
     Args:
@@ -992,6 +1236,7 @@ def run_server(role: str, host: str = "127.0.0.1", port: int = 8765,
     try:
         asyncio.run(_run(role, host, port, point_table=point_table,
                          connection=connection, history_db=history_db,
-                         app_config=app_config, auth_token=auth_token))
+                         app_config=app_config, auth_token=auth_token,
+                         ssl_context=ssl_context))
     except KeyboardInterrupt:
         pass

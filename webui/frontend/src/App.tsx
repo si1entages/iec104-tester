@@ -20,6 +20,8 @@ const MultiPage = lazy(() => import('./pages/multi/MultiPage'))
 const StatusPage = lazy(() => import('./pages/StatusPage').then((m) => ({ default: m.StatusPage })))
 const LogsPage = lazy(() => import('./pages/LogsPage').then((m) => ({ default: m.LogsPage })))
 const HistoryPage = lazy(() => import('./pages/HistoryPage').then((m) => ({ default: m.HistoryPage })))
+const CapturePage = lazy(() => import('./pages/CapturePage').then((m) => ({ default: m.CapturePage })))
+const TestCenterPage = lazy(() => import('./pages/TestCenterPage').then((m) => ({ default: m.TestCenterPage })))
 
 function PageFallback() {
   const t = useT()
@@ -67,6 +69,10 @@ export default function App() {
               <LogsPage />
             ) : page === 'history' ? (
               <HistoryPage />
+            ) : page === 'capture' ? (
+              <CapturePage />
+            ) : page === 'tests' ? (
+              <TestCenterPage />
             ) : (
               <StatusPage />
             )}

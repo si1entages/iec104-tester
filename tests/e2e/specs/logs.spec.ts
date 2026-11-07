@@ -6,7 +6,7 @@ import { expect, test } from '@playwright/test'
 import { MASTER, gotoApp } from './helpers'
 
 test('级别过滤生效（拦截 /api/logs 注入确定性数据）', async ({ page }) => {
-  await page.route('**/api/logs?*', (route) =>
+  await page.route('**/api/logs**', (route) =>
     route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
@@ -21,6 +21,10 @@ test('级别过滤生效（拦截 /api/logs 注入确定性数据）', async ({ 
     }),
   )
   await gotoApp(page, MASTER, '日志')
+  // 实时 WS 日志会排在历史行之前；用关键字把视图收敛到注入的 3 行，避免分页遮挡
+  const search = page.getByPlaceholder('关键字搜索')
+  await search.fill('e2e-')
+  await search.press('Enter')
   await expect(page.getByText('e2e-error-row')).toBeVisible()
   await expect(page.getByText('e2e-info-row')).toBeVisible()
   await expect(page.getByText('e2e-debug-row')).toBeVisible()

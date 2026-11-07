@@ -1490,7 +1490,7 @@ class ASDUBuilder:
             file_length: 文件长度 (24-bit, 3 字节, LOF)
             status: FRQ 文件准备就绪限定词 (0=肯定, 0x80=否定)
         """
-        asdu = ASDU(type_id=TypeID.F_FR_NA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        asdu = ASDU(type_id=TypeID.F_FR_NA_1, sq=False, num=1, cot=COT.FILE, common_addr=common_addr)
         fr = FileReady(ioa=ioa, file_name=file_name, file_length=file_length, status=status)
         asdu.objects.append(InformationObject(ioa=ioa, data=fr))
         return asdu.encode()
@@ -1510,7 +1510,7 @@ class ASDUBuilder:
             section_length: 节长度 (24-bit, 3 字节, LOF)
             status: SRQ 节准备就绪限定词
         """
-        asdu = ASDU(type_id=TypeID.F_SR_NA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        asdu = ASDU(type_id=TypeID.F_SR_NA_1, sq=False, num=1, cot=COT.FILE, common_addr=common_addr)
         sr = SectionReady(ioa=ioa, file_name=file_name, section_name=section_name,
                           section_length=section_length, status=status)
         asdu.objects.append(InformationObject(ioa=ioa, data=sr))
@@ -1531,7 +1531,7 @@ class ASDUBuilder:
             qualifier: SCQ — 1=选择文件, 2=请求文件, 3=去激活文件, 4=删除文件,
                 5=选择节, 6=请求节, 7=去激活节（见 ``types.SCQ_NAMES``）
         """
-        asdu = ASDU(type_id=TypeID.F_SC_NA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        asdu = ASDU(type_id=TypeID.F_SC_NA_1, sq=False, num=1, cot=COT.FILE, common_addr=common_addr)
         cd = CallDirectory(ioa=ioa, file_name=file_name, section_name=section_name, qualifier=qualifier)
         asdu.objects.append(InformationObject(ioa=ioa, data=cd))
         return asdu.encode()
@@ -1551,7 +1551,7 @@ class ASDUBuilder:
             lsq: LSQ 最后的节/段限定词 (0-4；仅 1/2 表示整个文件传输结束)
             chs: CHS 本节校验和（算法见 ``file_transfer.section_checksum``）
         """
-        asdu = ASDU(type_id=TypeID.F_LS_NA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        asdu = ASDU(type_id=TypeID.F_LS_NA_1, sq=False, num=1, cot=COT.FILE, common_addr=common_addr)
         ls = LastSection(ioa=ioa, file_name=file_name, section_name=section_name,
                          lsq=lsq, chs=chs)
         asdu.objects.append(InformationObject(ioa=ioa, data=ls))
@@ -1569,7 +1569,7 @@ class ASDUBuilder:
             section_name: 节名 (8-bit)
             qualifier: 0=缺省, 1=肯定文件, 2=否定文件, 3=肯定节, 4=否定节
         """
-        asdu = ASDU(type_id=TypeID.F_AF_NA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        asdu = ASDU(type_id=TypeID.F_AF_NA_1, sq=False, num=1, cot=COT.FILE, common_addr=common_addr)
         af = AckFileSection(ioa=ioa, file_name=file_name, section_name=section_name, qualifier=qualifier)
         asdu.objects.append(InformationObject(ioa=ioa, data=af))
         return asdu.encode()
@@ -1588,7 +1588,7 @@ class ASDUBuilder:
             section_name: 节名 (8-bit, NOS)
             data: 段数据 (LOS = 本段字节数，1 字节 → 最多 255 字节)
         """
-        asdu = ASDU(type_id=TypeID.F_SG_NA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        asdu = ASDU(type_id=TypeID.F_SG_NA_1, sq=False, num=1, cot=COT.FILE, common_addr=common_addr)
         sg = FileSegment(ioa=ioa, file_name=file_name, section_name=section_name, data=data)
         asdu.objects.append(InformationObject(ioa=ioa, data=sg))
         return asdu.encode()
@@ -1609,7 +1609,7 @@ class ASDUBuilder:
             status: SOF 文件状态
             time_tag: 时标
         """
-        asdu = ASDU(type_id=TypeID.F_DR_TA_1, sq=False, num=1, cot=COT.ACT, common_addr=common_addr)
+        asdu = ASDU(type_id=TypeID.F_DR_TA_1, sq=False, num=1, cot=COT.FILE, common_addr=common_addr)
         if time_tag is None:
             time_tag = CP56Time2a.now()
         de = DirectoryEntry(ioa=ioa, file_name=file_name, file_length=file_length,

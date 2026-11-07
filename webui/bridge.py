@@ -10,9 +10,11 @@ from core.config import AppConfig
 from core.data.point_table import PointTable
 from core.logging_manager import LogManager
 
+from .capture import CaptureService
 from .events import EventBus
 from .points import PointService
 from .session import EngineSession
+from .testcenter import TestCenterService
 
 logger = logging.getLogger("iec104.webui")
 
@@ -60,6 +62,19 @@ class EngineBridge:
         self.logs = LogManager(source=role, log_dir=Path("logs"))
         self.logs.attach_python_logging()
         self.logs.subscribe(self._on_log_entry)
+
+        # 报文录制/回放（E2）：默认目录 data/captures；录制需显式开启。
+        capture_dir = (Path(self.config.history.dir) if self.config.history.dir
+                       else Path("data")) / "captures"
+        self.captures = CaptureService(
+            capture_dir, role, publish=lambda kind, data: self.bus.publish(kind, data))
+
+        # 自动化测试中心（E1）：报告目录与历史库同根，便于诊断包统一收集。
+        report_dir = (Path(self.config.history.dir) if self.config.history.dir
+                      else Path("data")) / "test_reports"
+        self.testcenter = TestCenterService(reports_dir=report_dir)
+        self.testcenter.set_publisher(
+            lambda kind, data: self.bus.publish(kind, data))
 
     def _on_log_entry(self, entry) -> None:
         self.bus.publish("log", {
@@ -113,6 +128,7 @@ class EngineBridge:
         return self.bus.recent(kind, limit)
 
     def _on_raw_frame(self, data: bytes, direction: str, client_id: str = "") -> None:
+        self.captures.record_frame(data, direction, client_id)
         self.bus.publish("frame", {
             "direction": direction,
             "len": len(data),
@@ -165,10 +181,12 @@ class EngineBridge:
         self.bus.publish("event", {"type": "ui", "data": {"msg": msg}})
 
     async def start_master(self, host: str, port: int, addr: int, reconnect: bool = True,
-                           gi_interval: float = 0.0, tls: dict | None = None) -> dict:
+                           gi_interval: float = 0.0, tls: dict | None = None,
+                           redundancy: dict | None = None) -> dict:
         self.ensure_demo_points()
         r = await self.session.start_master(host, port, addr, reconnect, self.points,
-                                            gi_interval=gi_interval, tls=tls)
+                                            gi_interval=gi_interval, tls=tls,
+                                            redundancy=redundancy)
         if r.get("ok"):
             self._status.update({"running": True, "host": host, "port": port})
             self._notify_ui(f"连接中 {host}:{port}")
@@ -361,7 +379,18 @@ class EngineBridge:
         与订阅队列也必须释放，避免 Web 会话关停后残留引用。
         """
         try:
-            # 1) 引擎与会话资源
+            # 0) 录制中则落盘，避免关停丢最后一段
+            if self.captures.recording:
+                try:
+                    self.captures.stop()
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("capture stop on shutdown: %s", e)
+            # 1) 测试中心子进程（若在运行）
+            try:
+                await self.testcenter.shutdown()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("test center shutdown: %s", e)
+            # 2) 引擎与会话资源
             await self.session.shutdown()
         except Exception as e:
             logger.warning("session shutdown: %s", e)

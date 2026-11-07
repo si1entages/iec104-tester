@@ -78,12 +78,12 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - 协议完整性: `TypeID` 枚举里**每个类型都必须同时有解码注册与 ASDUBuilder 构造器**（否则就是"能解不能发"的半实现）；新增类型时用 `tests/test_protocol_type_coverage.py` 的护栏用例兜底
 
 ### 测试
-- 单元测试: tests/test_*.py（**1381 例**；`tests/perf/` 由 `-m "not perf"` 默认排除）
+- 单元测试: tests/test_*.py（**1545 例**；`tests/perf/` 由 `-m "not perf"` 默认排除）
 - 协议 fuzz: tests/test_protocol_fuzz.py（Hypothesis；解码器只允许 `ValueError`）
 - 互操作回放: tests/test_frame_corpus_replay.py + tests/fixtures/frames/（golden + MasterEngine 回放）
 - 性能/长稳: `pytest tests/ -m perf`（解码吞吐 / 10 万点快照 / 环回 soak，时长由 `IEC104_SOAK_SECONDS` 控制）
 - 变异冒烟: `python tools/mutation_smoke.py`（协议层 12 个高价值变异必须全部被杀死）
-- 一致性测试: tests/conformance/test_conformance.py（42 个用例，独立 runner）+ tests/test_conformance_suite.py（接入 pytest：10 方法级 + 1 汇总，锁死 42 且零 FAIL/ERROR/SKIP）
+- 一致性测试: tests/conformance/test_conformance.py（50 个用例，独立 runner）+ tests/test_conformance_suite.py（接入 pytest：11 方法级 + 1 汇总，锁死 50 且零 FAIL/ERROR/SKIP）
 - 脚本测试: tests/scripts/（YAML 定义的场景测试）
 - Mock 策略: 引擎层测试用 Mock 传输层，不建真连接
 
@@ -133,16 +133,27 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - [x] 性能/长稳基准：`tests/perf/`（解码吞吐、10 万点快照、**20 客户端并发约 2.9k 帧/秒**、主站↔子站环回 soak；默认 `-m "not perf"`；**2h soak 实跑通过：7200s / 34,765 GI / 内存 +0.64 MB**）
 - [x] 一键诊断包：`GET /api/diagnostics/export`（状态/配置脱敏/日志/报文/事件/点表/历史统计）+ 状态页按钮
 - [x] 一键环回 Demo：`python app.py --demo`（子站+主站独立子进程、自动监听/连接/总召，Ctrl+C 统一回收）
-- [x] 分支覆盖率门禁（CI `--cov-branch`，当前 92.1%）+ 协议层变异冒烟 `tools/mutation_smoke.py`（12/12 killed）
+- [x] 分支覆盖率门禁（CI `--cov-branch`：core 92.0% + webui 89%，合并 91.3%，门禁 91）+ 协议层变异冒烟 `tools/mutation_smoke.py`（12/12 killed）
 - [x] 历史库查询 UI：`GET /api/history/{stats,data,frames,export}`（§2.11/§4.9）+ Web「历史」页（数据/报文双页签，时间/类型/IOA/方向过滤，CSV 导出；未启用提示）；`tests/test_webui_history_endpoints.py` 4 例 + `HistoryPage.test.tsx` 3 例；全量 1288 passed
 - [x] 网络异常模拟接入 Web UI：`/api/simulation`（GET/POST + reset/disconnect，§2.12/§4.10）+ 状态页卡片（预设/自定义/手动断线/统计）；**核心修复**：`SimulationManager.install` 原二次包装 raw 回调会覆盖代理 `_original_rx`，导致 RX 帧绕过协议处理——改为在传输层回调（`_client/_server._on_frame`）拦截并提供 `uninstall_from_engine` 精确恢复；新增 4 后端 + 3 前端用例；全量 1293 passed
 - [x] Web 访问安全（B7）：`--http-host`（默认 127.0.0.1）+ `--auth-token`（或 `IEC104_AUTH_TOKEN`）；令牌保护 `/api/*` 与 `/ws`（Bearer / X-Auth-Token / `?token=`），`GET /api/auth` 公开探测；前端 AuthGate 令牌输入 + URL `?token=` 导入；非回环监听且无令牌时启动告警；新增 4 后端 + 2 前端用例；全量 1297 passed
 - [x] 一致性套件接入 pytest：`tests/test_conformance_suite.py` 按套件 `_test_*` 方法参数化（失败输出具体 case id）+ 汇总用例锁死 42 case/零 FAIL/ERROR/SKIP；独立 runner 保留；全量 1308 passed
 - [x] 分支覆盖率 88.86%→92.08%：补 `scheduler`（47%→97%）、`data_store`（83.6%→95%）、`master_session`（77.5%→92%）、`multi_station`（80.6%→98%）及协议层零散分支（types/asdu 负数编码、短报文异常、时标变体、自定义类型校验、APDU 编解码）；新增 73 例；CI 门禁 88→91（保留约 1 点抖动余量）；全量 1381 passed
 - [x] 全流程验收进 CI：`e2e-full-flow` job 内拉起主站(8765)/子站(8766)/IEC 24040，等就绪后跑 `tests/e2e/qa_full_flow.py` 12 阶段（本机实测 12/12 通过、exit 0），退出回收服务，失败上传两端日志；历史库以 `--no-history` 关闭
-- [x] 前端 i18n（阶段一）：零依赖 `src/i18n`（zh/en 词典 + `t()`/`useT()`/`tNow()`）、头部「中 / EN」切换（localStorage 记忆、antd ConfigProvider locale 联动）；已覆盖外壳/认证/状态/日志/历史/模拟卡片/共享列宽/运行时告警；`npm run i18n:inventory` 输出剩余 20 文件/535 行（工作台内部）作为后续批次清单；新增 5 用例（字典键对齐 + 英文渲染）；前端 123 passed
+- [x] 前端 i18n（阶段一）：零依赖 `src/i18n`（zh/en 词典 + `t()`/`useT()`/`tNow()`）、头部「中 / EN」切换（localStorage 记忆、antd ConfigProvider locale 联动）；已覆盖外壳/认证/状态/日志/历史/模拟卡片/共享列宽/运行时告警；`npm run i18n:inventory` 当时剩余 20 文件/535 行（工作台内部，T40 已完成并清零）；新增 5 用例（字典键对齐 + 英文渲染）；前端 123 passed
 - [x] 前端 i18n（阶段二，完成）：主站（CommandPanel/PointCommandDialog/ConnectionPanel/MasterPage/TrendChart）、子站（SlavePage/SlaveConnectionPanel/ManualSetPanel/ResponsePanel/SimulationPanel/TestInjectionPanel）、多站（MultiPage/StationCard/MultiStatusView/stationDraft）、报文解析与查看器（lib/frame.ts 双语对照表 + FrameViewer/FrameTranslatePopover）、共享点表（PointsTable/PointsTools）全部迁入词典；**`npm run i18n:inventory` = 0 文件 / 0 行**；zh 文案逐字保留，前端 123 passed / typecheck 通过
-- [x] 文件传输真机核实准备（C4，无真机）：`docs/file_transfer_open_items.md`（5 项开放清单：NOF 语义/SCQ 组合/WITH_DEACT/多节/FRQ-SRQ，含验证步骤、判定标准、回填模板）+ `tests/e2e/qa_file_transfer_probe.py`（只读探针：默认目录召唤，结构化打印 NOF/LOF/NOS/LSQ/CHS/FRQ/SRQ/AFQ；本机对模拟器实测跑通）；user_guide §11 与 FLS 文档已互链；**结论待真机窗口回填，代码未臆测改动**
+- [x] 文件传输真机核实准备（C4，无真机）：`docs/file_transfer_open_items.md`（5 项开放清单：NOF 语义/SCQ 组合/WITH_DEACT/多节/FRQ-SRQ，含验证步骤、判定标准、回填模板）+ `tests/e2e/qa_file_transfer_probe.py`（只读探针：默认目录召唤，结构化打印 NOF/LOF/NOS/LSQ/CHS/FRQ/SRQ/AFQ；本机对模拟器实测跑通）；user_guide §11 与 FLS 文档已互链；**2026-11-07 第三方 lib60870-C v2.4.1 实测回填 5 项（NOF/SCQ/DEACT/多节/FRQ-SRQ），并修复 3 项互操作问题（122/COT13、SCQ=6 节流程、停发 128/129）；默认代码复测 800B 多节文件接收完成；真机窗口仍待复测**
+- [x] D1 WebUI 覆盖率门禁：全量覆盖 `webui/` 从 77.1% → 89%（server 92% / session 97% / capture 75% / testcenter 79%）；新增 HTTP 边界、会话分发、抓包、测试中心、安全头等用例；CI 增加独立 `coverage report --include="webui/*" --fail-under=85`
+- [x] D2 前端覆盖率：`@vitest/coverage-v8` + `npm run test:coverage`（阈值 78/78/80/55，当前 lines 80.1% / branches 83.3% / functions 56.5%）；CI 上传 coverage artifact
+- [x] D3 e2e 补口：历史查询、网络模拟、AuthGate、中英切换 4 条 Playwright 用例（本地 22/22）
+- [x] D4 CI 工程化：concurrency 取消旧 run、Dependabot（pip/npm/actions）、Python 3.14 矩阵、夜间 perf workflow、PR 阶段 Linux onefile dry-run、coverage XML artifact
+- [x] D5 版本/文档一致性：`core/version.py` 单一版本源 + 三处一致性测试；历史文档的 TLS/冗余/i18n 清单表述加注当前状态
+- [x] E1 Web 测试中心：`/api/tests/*`（脚本列表/运行/停止/状态/报告下载）+「自动化测试」页；子进程隔离、实时日志、50 用例脚本可选；4 后端 + 2 前端用例
+- [x] E2 报文录制/回放进 Web：`/api/capture/*`（录制启停/暂停/文件/导出 pcap/加载/回放/单步）+「报文抓包」页；5 后端 + 2 前端用例
+- [x] E3 冗余双通道进 Web：`POST /api/master/start` 支持 `redundancy`，状态返回活动通道/主备在线/切换次数；连接面板可配置；新增后端 12 + 前端 1 用例
+- [x] E4 Web HTTPS + 安全头：`--web-tls-cert/--web-tls-key`，CSP / X-Frame-Options / Referrer-Policy / Permissions-Policy；4 个安全头/证书用例
+- [x] E5 发布体验：`--version`、README 4 张界面截图、`SECURITY.md`、`CHANGELOG.md`
+- [x] F2 一致性负例：新增 8 个畸形 APCI/ASDU 用例（42→50），独立 runner 与 pytest 汇总同步锁死
 
 ## 双应用入口（纯 Web UI）
 
@@ -153,5 +164,5 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 
 联调：开两个终端分别执行 `python app.py --mode master` / `python app.py --mode slave`（或对应瘦入口），浏览器中两个页面操作。
 
-架构：`webui/bridge.py` 引擎桥 + `webui/server.py` aiohttp REST/WS + `webui/static` 工业深色页，浏览器为唯一 UI（无桌面壳）。
+架构：`webui/bridge.py` 引擎桥 + `webui/server.py` aiohttp REST/WS + `webui/frontend`（React/Vite，产物 `webui/static/app`），浏览器为唯一 UI（无桌面壳）。
 共享：`core/` 引擎。README 与代码对齐：主站含组召唤/复位/测试/读/参数/文件与点表导出；子站含响应注入与模拟。多站/录制/网络模拟见 CLI。

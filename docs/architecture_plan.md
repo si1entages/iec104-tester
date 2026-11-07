@@ -205,11 +205,13 @@ SlaveEngine 检测到数据变化 → send_spontaneous_*() → ASDU(COT=3 突发
 | 数据-point_table | `core/data/point_table.py` | 438 | 点表模型 + YAML | `PointTable` | 被引擎/桥依赖 | 中 |
 | 数据-history | `core/data/history.py` | 439 | SQLite 历史库 | `HistoryDB` | 被引擎依赖 | 低 |
 | **日志** | `core/logging_manager.py` | **246** | **结构化日志：内存环形缓冲 + JSONL 轮转 + Python logging 桥 + 订阅推送** | `LogManager`, `LogEntry` | 被 webui 依赖；经桥收纳 `iec104.*` | 中 |
-| Web-服务 | `webui/server.py` | **997** | aiohttp REST（**55 个 `/api/*` 端点**，含历史查询 §2.11、网络模拟 §2.12、认证探测 §2.13）+ WS | `create_app`, `run_server` | 依赖 bridge | 中 |
-| Web-桥 | `webui/bridge.py` | **286** | Web 后端门面（组合下述三者，保持旧 API 形状） | `EngineBridge` | 依赖 session/points/events | 高 |
-| Web-会话 | `webui/session.py` | **339** | master/slave 启停与协议命令门面 | `EngineSession` | 依赖 engine/config | 高 |
-| Web-点表 | `webui/points.py` | **260** | 点表快照/批量/导入导出，同步引擎 | `PointService` | 依赖 data.point_table | 中 |
-| Web-事件 | `webui/events.py` | **67** | WS 订阅事件总线（环形缓冲 + 背压计数） | `EventBus` | 无 Python 反向依赖 | 中 |
+| Web-服务 | `webui/server.py` | **1242** | aiohttp REST（**74 个 `/api/*` 端点**，含历史查询 §2.11、网络模拟 §2.12、认证 §2.13、抓包 §2.14、测试中心 §2.15）+ WS | `create_app`, `run_server` | 依赖 bridge | 中 |
+| Web-桥 | `webui/bridge.py` | **415** | Web 后端门面（组合下述三者，保持旧 API 形状） | `EngineBridge` | 依赖 session/points/events | 高 |
+| Web-会话 | `webui/session.py` | **849** | master/slave 启停与协议命令门面 | `EngineSession` | 依赖 engine/config | 高 |
+| Web-点表 | `webui/points.py` | **280** | 点表快照/批量/导入导出，同步引擎 | `PointService` | 依赖 data.point_table | 中 |
+| Web-事件 | `webui/events.py` | **80** | WS 订阅事件总线（环形缓冲 + 背压计数） | `EventBus` | 无 Python 反向依赖 | 中 |
+| Web-抓包 | `webui/capture.py` | **316** | 录制器/回放器封装（文件/导出/离线回放） | `CaptureService` | 依赖 core.capture | 中 |
+| Web-测试中心 | `webui/testcenter.py` | **256** | YAML 脚本子进程运行、日志/报告管理 | `TestCenterService` | 依赖 core.testing | 中 |
 | Web-契约 | `webui/api_contract.md` | — | REST/WS 契约表（**待补 `schemaVersion`**） | 文档 | 无 | 中 |
 | **前端(旧)** | `webui/static/*` | html 238/…；js **539**；css **315** | 原生 HTML/CSS/JS 页（**待退役**） | HTTP 资源 | 无 Python 依赖 | 高 |
 | **前端(新)** | `webui/frontend/*` | 新增 | **Vite + React18 + TS + AntD5 工程（源码）** | 经 REST/WS 契约 | 无 Python 依赖 | 高 |
@@ -374,11 +376,18 @@ graph TD
 | **T35** | 一致性套件接入 pytest（2026-11-07） | `tests/test_conformance_suite.py`：按 `_test_*` 方法参数化（10 例，失败输出 case id）+ 汇总锁死 42 case/零 FAIL/ERROR/SKIP；独立 runner 保留；全量 1308 passed |
 | **T36** | 分支覆盖率提升（2026-11-07） | 实测 88.86%→**92.08%**（门禁 88→91，保留约 1 点抖动余量）：补 scheduler 47→97%、data_store 83.6→95%、master_session 77.5→92%、multi_station 80.6→98%，及 types/asdu 零散分支；新增 73 例；全量 1381 passed |
 | **T37** | 全流程验收进 CI（2026-11-07） | `.github/workflows/ci.yml` 新增 `e2e-full-flow` job：job 内拉起主站(8765)/子站(8766)/IEC 24040 → 等就绪（40s 上限）→ `tests/e2e/qa_full_flow.py` 12 阶段 → trap 回收；失败上传 `master.log`/`slave.log`；本机实测 12/12、exit 0 |
-| **T38** | 前端 i18n 阶段一（2026-11-07） | 零依赖 `src/i18n`（zh/en 词典、`t()`/`useT()`/`tNow()`、占位符）+ 头部「中 / EN」（localStorage 记忆、antd locale 联动）；覆盖外壳/认证/状态/日志/历史/模拟卡片/共享列宽/运行时告警；`i18n:inventory` 清单剩余 20 文件/535 行（工作台内部，后续批次）；5 用例；前端 123 passed |
-| **T39** | 文件传输真机核实准备（2026-11-07） | `docs/file_transfer_open_items.md`（5 项开放清单：NOF/SCQ/WITH_DEACT/多节/FRQ-SRQ + 步骤/判定/回填模板）+ `tests/e2e/qa_file_transfer_probe.py`（只读探针，默认目录召唤；本机模拟器跑通）；文档互链；**结论待真机窗口**，代码未臆测改动 |
+| **T38** | 前端 i18n 阶段一（2026-11-07） | 零依赖 `src/i18n`（zh/en 词典、`t()`/`useT()`/`tNow()`、占位符）+ 头部「中 / EN」（localStorage 记忆、antd locale 联动）；覆盖外壳/认证/状态/日志/历史/模拟卡片/共享列宽/运行时告警；`i18n:inventory` 清单当时剩余 20 文件/535 行（工作台内部，T40 已完成并清零）；5 用例；前端 123 passed |
+| **T39** | 文件传输真机核实准备（2026-11-07） | `docs/file_transfer_open_items.md`（5 项开放清单：NOF/SCQ/WITH_DEACT/多节/FRQ-SRQ + 步骤/判定/回填模板）+ `tests/e2e/qa_file_transfer_probe.py`（只读探针，默认目录召唤；本机模拟器跑通）；文档互链；**2026-11-07 用第三方 lib60870-C v2.4.1 实测回填 5 项并修复 122/COT13、SCQ=6 节流程、128/129 确认类型；默认代码复测 800B 多节完成；真机仍待复测** |
 | **T40** | 前端 i18n 阶段二（2026-11-07） | 主站/子站/多站工作台、报文解析与查看器（lib/frame.ts 双语对照表）、共享点表组件全部迁入词典；`npm run i18n:inventory` = **0 文件 / 0 行**；zh 文案逐字保留；前端 123 passed |
+| **T41** | 门禁补盲（D1/D2，2026-11-07） | WebUI 覆盖率 77.1%→**89%**（CI 独立门禁 ≥85%）；前端接入 `@vitest/coverage-v8`（阈值 statements/lines 78、branches 80、functions 55）+ coverage artifact；后端 1545 passed、合并覆盖 91.3% |
+| **T42** | e2e 与 CI 工程化（D3/D4，2026-11-07） | 新增历史/网络模拟/AuthGate/中英切换 4 条 Playwright（22/22）；CI concurrency、Python 3.14、Dependabot、夜间 perf、PR onefile dry-run |
+| **T43** | 版本单一源与文档校准（D5，2026-11-07） | `core/version.py` 为唯一版本源（`--version` = 1.2.0）；版本一致性测试；历史文档 TLS/冗余/i18n 表述加注现状 |
+| **T44** | Web 测试中心（E1，2026-11-07） | `/api/tests/*`（scripts/run/stop/status/reports）+「自动化测试」页；子进程隔离、实时日志、报告下载；4 后端 + 2 前端用例 |
+| **T45** | Web 报文录制/回放（E2，2026-11-07） | `/api/capture/*` 14 端点 +「报文抓包」页：录制启停/暂停、文件列表/下载、i104/json/pcap/pcapng 导出、离线回放/单步/倍速；5 后端 + 2 前端用例 |
+| **T46** | 冗余 UI 与 Web 安全（E3/E4，2026-11-07） | 主站 start 支持 `redundancy`，状态返回活动通道/主备在线/切换次数 + 连接面板配置；`--web-tls-cert/--web-tls-key` HTTPS、CSP/XFO/Referrer-Policy/Permissions-Policy；12 后端 + 1 前端 + 4 安全用例 |
+| **T47** | 发布体验与负例（E5/F2，2026-11-07） | `--version`、README 4 张截图、SECURITY/CHANGELOG；一致性套件新增 8 个畸形 APCI/ASDU 负例（42→50，pytest 汇总同步锁死） |
 
-> **累计统计**：T01~T40 **全部完成，待办 0**（T39 结论待真机窗口回填）。
+> **累计统计**：T01~T47 **全部完成，待办 0**（T39 第三方实测已回填，真机复测待窗口）。
 
 ---
 

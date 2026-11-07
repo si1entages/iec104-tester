@@ -32,11 +32,14 @@ from core.protocol.file_transfer import (
     LSQ_FILE_TRANSFER_WITHOUT_DEACT,
     LSQ_NOT_USED,
     LSQ_SECTION_COMPLETE,
+    SCQ_REQUEST_FILE,
+    SCQ_REQUEST_SECTION,
+    SCQ_SELECT_FILE,
     FileTransferManager,
     FileTransferSlave,
     FileTransferState,
 )
-from core.protocol.types import FileReadyAck, FileSegment, LastSection, SectionReadyAck
+from core.protocol.types import FileSegment, LastSection
 
 #: ASDU 头(类型1 + VSQ1 + COT2 + 公共地址2) + IOA3 = 9 字节；其后为信息体
 IO_BODY_OFFSET = 9
@@ -75,14 +78,10 @@ def _slave_with_file(data: bytes) -> tuple[FileTransferSlave, list[bytes]]:
 
 
 def _upload_whole_file(mgr: FileTransferSlave) -> None:
-    """跑完一遍完整上送流程（请求 → FR ACK → SR ACK → 各段 + F_LS）."""
-    mgr.handle_file_request(IOA, FILE_NAME, 1)
-    mgr.handle_file_ready_ack(
-        IOA, FileReadyAck(ioa=IOA, file_name=FILE_NAME, status=0)
-    )
-    mgr.handle_section_ready_ack(
-        IOA, SectionReadyAck(ioa=IOA, file_name=FILE_NAME, section_name=1, status=0)
-    )
+    """跑完一遍标准上送流程：SELECT → F_FR → REQUEST → F_SR → SECTION → F_SG/F_LS."""
+    mgr.handle_file_request(IOA, FILE_NAME, SCQ_SELECT_FILE)
+    mgr.handle_file_request(IOA, FILE_NAME, SCQ_REQUEST_FILE)
+    mgr.handle_file_request(IOA, FILE_NAME, SCQ_REQUEST_SECTION)
 
 
 # ── ① 已核实的 LSQ 定义域与语义 ──────────────────────────────────
@@ -372,6 +371,22 @@ def test_send_side_writes_computed_chs_octet():
     assert body[4] == section_checksum(payload)
 
 
+def test_file_end_marker_section_skips_chs_check(caplog):
+    """lib60870 末帧用新节号（如 section=3）且 CHS=0：不得按上一节数据误报 CHS 不符."""
+    mgr, received = _receiver()
+    mgr.handle_file_segment(_segment(b"AB"))          # section 1, sum=0x83
+
+    with caplog.at_level("WARNING", logger="iec104.file_transfer"):
+        mgr.handle_last_section(LastSection(
+            ioa=IOA, file_name=FILE_NAME, section_name=1, lsq=3, chs=0x83))
+        mgr.handle_last_section(LastSection(
+            ioa=IOA, file_name=FILE_NAME, section_name=2, lsq=1, chs=0))
+
+    assert mgr.state is FileTransferState.COMPLETED
+    assert received == [b"AB"]
+    assert not any("CHS mismatch" in r.getMessage() for r in caplog.records)
+
+
 def test_receive_side_chs_mismatch_warns_but_still_delivers(caplog):
     """接收侧校验不通过 → 记告警，**不丢弃**数据、不阻止完成判定（非标准原文，见 docs §4.1）."""
     mgr, received = _receiver()
@@ -506,6 +521,27 @@ def test_master_manager_request_file_sends_scq_request_file():
 
     body = sent[0][IO_BODY_OFFSET:]
     assert body[3] == SCQ_REQUEST_FILE
+    # 第三方实测：必须 F_SC_NA_1(122)+COT=FILE(13)，不能再用 127/COT=ACT
+    asdu = ASDU.decode(sent[0])
+    from core.protocol.types import COT, TypeID
+    assert asdu.type_id == TypeID.F_SC_NA_1
+    assert int(asdu.cot) == int(COT.FILE)
+
+
+def test_slave_standard_select_request_section_sequence():
+    """标准上送序列：SELECT→F_FR、REQUEST→F_SR、SECTION→F_SG/F_LS；不得发 128/129."""
+    mgr, sent = _slave_with_file(b"abcdef")
+
+    mgr.handle_file_request(IOA, FILE_NAME, SCQ_SELECT_FILE)
+    assert sent[-1][0] == 120
+
+    mgr.handle_file_request(IOA, FILE_NAME, SCQ_REQUEST_FILE)
+    assert sent[-1][0] == 121
+
+    mgr.handle_file_request(IOA, FILE_NAME, SCQ_REQUEST_SECTION)
+    assert sent[-1][0] == 123
+    assert any(f[0] == 125 for f in sent)
+    assert all(f[0] not in (128, 129) for f in sent)
 
 
 @pytest.mark.asyncio

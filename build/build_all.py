@@ -40,6 +40,8 @@ ADD_DATA = [
     ("webui/static", "webui/static"),
     ("configs", "configs"),
     ("resources", "resources"),
+    # E1 Web 测试中心：随包分发 YAML 测试脚本，否则打包版“脚本列表”为空
+    ("tests/scripts", "tests/scripts"),
 ]
 
 

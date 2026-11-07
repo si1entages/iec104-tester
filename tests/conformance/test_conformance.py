@@ -93,6 +93,9 @@ class ConformanceTestSuite:
         # 定时器测试
         self._test_timers()
 
+        # 负例/畸形输入（鲁棒性）
+        self._test_negative_cases()
+
         # 计算统计
         self.report.total = len(self.report.cases)
         self.report.passed = sum(1 for c in self.report.cases if c.result == TestResult.PASS)
@@ -579,6 +582,64 @@ class ConformanceTestSuite:
                 "TIMER-DEFAULT-01", "定时器默认值", category,
                 "验证定时器默认值符合标准", TestResult.ERROR, str(e)
             )
+
+
+    # ── 负例/畸形输入（F2）──────────────────────────────────────
+
+    def _test_negative_cases(self):
+        """畸形 APCI/ASDU 必须明确拒绝（ValueError），而不是静默通过."""
+        category = "负例/鲁棒性"
+
+        def expect_value_error(case_id: str, name: str, description: str, fn):
+            try:
+                fn()
+            except ValueError:
+                self._add_result(case_id, name, category, description, TestResult.PASS)
+            except Exception as e:  # noqa: BLE001
+                self._add_result(case_id, name, category, description,
+                                 TestResult.FAIL, f"异常类型错误: {type(e).__name__}: {e}")
+            else:
+                self._add_result(case_id, name, category, description,
+                                 TestResult.FAIL, "未抛 ValueError")
+
+        expect_value_error(
+            "NEG-APCI-01", "起始字节错误", "非 0x68 起始字节必须拒绝",
+            lambda: APCICodec.decode(bytes.fromhex("690401000000")))
+        expect_value_error(
+            "NEG-APCI-02", "APCI 过短", "不足 2 字节必须拒绝",
+            lambda: APCICodec.decode(bytes([0x68])))
+        expect_value_error(
+            "NEG-APCI-03", "长度字段过小", "APDU length < 4 必须拒绝",
+            lambda: APCICodec.decode(bytes.fromhex("680301000000")))
+        expect_value_error(
+            "NEG-APCI-04", "帧不完整", "声明长度大于实际字节必须拒绝",
+            lambda: APCICodec.decode(bytes.fromhex("680801000000")))
+        expect_value_error(
+            "NEG-APCI-05", "未知帧类型", "控制域不匹配 I/S/U 必须拒绝",
+            lambda: APCICodec.decode(bytes.fromhex("680405010000")))
+        expect_value_error(
+            "NEG-ASDU-01", "ASDU 头截断", "不足 6 字节的 ASDU 头必须拒绝",
+            lambda: ASDU.decode(bytes.fromhex("0101030001")))
+        expect_value_error(
+            "NEG-ASDU-02", "信息体数量不符", "num=2 但只给 1 个信息体必须拒绝",
+            lambda: ASDU.decode(bytes.fromhex("010203000100" + "01000000")))
+
+        # 未知 TypeID：头部仍可解析（用于按标准回 COT=42），不得抛异常
+        try:
+            asdu = ASDU.decode_header(bytes.fromhex("FE0103000100"))
+            if int(asdu.type_id) == 0xFE:
+                self._add_result(
+                    "NEG-ASDU-03", "未知 TypeID 头解析", category,
+                    "未知类型应保留原始 TypeID 供错误应答", TestResult.PASS)
+            else:
+                self._add_result(
+                    "NEG-ASDU-03", "未知 TypeID 头解析", category,
+                    "未知类型应保留原始 TypeID 供错误应答", TestResult.FAIL,
+                    f"type_id={asdu.type_id!r}")
+        except Exception as e:  # noqa: BLE001
+            self._add_result(
+                "NEG-ASDU-03", "未知 TypeID 头解析", category,
+                "未知类型应保留原始 TypeID 供错误应答", TestResult.ERROR, str(e))
 
 
 def print_report(report: TestReport):

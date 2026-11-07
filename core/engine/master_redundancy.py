@@ -115,6 +115,7 @@ class MasterRedundancy:
         self._active: TCPClient | None = None
         self._switch_t0: float | None = None
         self._rebuild_task: asyncio.Task | None = None
+        self._failover_count = 0
 
         self._primary = TCPClient(
             host=host, port=port,
@@ -153,6 +154,26 @@ class MasterRedundancy:
     def active(self) -> TCPClient | None:
         """当前活动通道（``start()`` 前为 ``None``）."""
         return self._active
+
+    def status(self) -> dict:
+        """冗余运行态快照（Web 状态页展示；只读，不改变切换状态）."""
+        if self._active is self._primary:
+            active = "primary"
+        elif self._active is self._standby:
+            active = "standby"
+        else:
+            active = None
+        return {
+            "enabled": True,
+            "active": active,
+            "primary_connected": self._primary.is_connected,
+            "standby_connected": self._standby.is_connected,
+            "standby_host": self._cfg.standby_host,
+            "standby_port": int(self._cfg.standby_port),
+            "switch_timeout": float(self._cfg.switch_timeout),
+            "dedup_window": float(self._cfg.dedup_window),
+            "failovers": self._failover_count,
+        }
 
     # ── 生命周期 ─────────────────────────────────────────────────
 
@@ -223,6 +244,7 @@ class MasterRedundancy:
         other = self._standby if dead is self._primary else self._primary
         logger.warning("活动通道断开，切换到%s通道",
                        "备用" if other is self._standby else "原主用")
+        self._failover_count += 1
         self._switch_t0 = time.monotonic()
         # 引擎先感知断开（状态机离开 Running / DISCONNECTED 事件），再换活动客户端
         self._engine_on_disconnected()

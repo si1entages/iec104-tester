@@ -2,10 +2,12 @@ import type { ReactNode } from 'react'
 
 import {
   ApiOutlined,
+  CameraOutlined,
   CloudServerOutlined,
   DashboardOutlined,
   DatabaseOutlined,
   DeploymentUnitOutlined,
+  ExperimentOutlined,
   FileTextOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons'
@@ -29,6 +31,8 @@ const MENU_ITEMS: { key: PageKey; icon: ReactNode; labelKey: MessageKey; roles: 
   { key: 'status', icon: <DashboardOutlined />, labelKey: 'menu.status', roles: ['master', 'slave'] },
   { key: 'logs', icon: <FileTextOutlined />, labelKey: 'menu.logs', roles: ['master', 'slave'] },
   { key: 'history', icon: <DatabaseOutlined />, labelKey: 'menu.history', roles: ['master', 'slave'] },
+  { key: 'capture', icon: <CameraOutlined />, labelKey: 'menu.capture', roles: ['master', 'slave'] },
+  { key: 'tests', icon: <ExperimentOutlined />, labelKey: 'menu.tests', roles: ['master', 'slave'] },
 ]
 
 const WS_BADGE: Record<WsStatus, { status: 'processing' | 'warning' | 'error' | 'default'; textKey: MessageKey }> = {

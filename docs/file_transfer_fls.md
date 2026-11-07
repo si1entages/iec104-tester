@@ -146,6 +146,7 @@ LSQ=0、非法 LSQ、CHS 不参与判定、0/1/200/201/700 字节的分段边界
 > 真机联调执行清单（5 项开放项的验证步骤、判定标准、记录模板）见
 > [`file_transfer_open_items.md`](file_transfer_open_items.md)；
 > 配套只读探针 `python tests/e2e/qa_file_transfer_probe.py`。
+> 第三方实测原始记录：[`file_transfer_third_party_probe_2026-11-07.md`](file_transfer_third_party_probe_2026-11-07.md)。
 
 ### 4.1 CHS（本节校验和）—— 已按候选答案实现（依据非标准原文）
 - **判定**：CHS = **本节所有段数据八位组的算术和 mod 256**。依据为两个互相独立的
@@ -173,7 +174,9 @@ LSQ=0、非法 LSQ、CHS 不参与判定、0/1/200/201/700 字节的分段边界
 - lib60870 把 NOF 定义为枚举 `NameOfFile`（0=DEFAULT / 1=TRANSPARENT_FILE /
   2=DISTURBANCE_DATA / 3=SEQUENCES_OF_EVENTS / 4=SEQUENCES_OF_ANALOGUE_VALUES）；
   本实现把 `file_name` 当任意 16 位标识使用（内部自洽，但真机语义未知）。
-- **开放问题**：目标装置用哪一版语义？目录召唤返回的 NOF 取值集合是什么？
+- **第三方实测（2026-11-07，lib60870-C v2.4.1）**：正选 NOF=1 → F_FR len=800 status=0；
+  负选 NOF=9 → F_FR len=0 status=0x80。该实现按 Ed.2 枚举解释，NOF 必须匹配提供者。
+- **开放问题**：目标装置用哪一版语义？目录召唤返回的 NOF 取值集合是什么？（真机待测）
 
 ### 4.4 目录传输的表达方式（SCQ 与 NOF 的组合）—— 已选**内部一致的项目约定**
 - **决定**：目录请求沿用 **SCQ=5**（`SCQ_REQUEST_DIRECTORY`），这是**项目约定值**，
@@ -182,6 +185,9 @@ LSQ=0、非法 LSQ、CHS 不参与判定、0/1/200/201/700 字节的分段边界
 - **内部闭环证据**（`tests/test_file_transfer_fls.py::test_directory_request_closes_loop_master_to_slave`）：
   master `file_call_directory` 发 F_SC_NA_1(SCQ=5) → 子站 `handle_file_request(5)` 回
   每文件一条 F_DR_TA_1 + 一条 F_LS_NA_1(LSQ=0) 终止标记，主子两侧都认 5。
+- **第三方实测（2026-11-07）**：lib60870-C 的 file service 只处理 SCQ=1/2/3/6，
+  **没有目录处理器**；SCQ=5（COT=6 或 13）均无回帧。故 SCQ=5 仅为本项目内部约定，
+  不是可移植的目录表达；真机需按装置手册确认。
 - **遗留**：真机对 5 的解释可能不同（按标准应理解为"选择节"），真机联调（§6 第 4 步）
   记录对端实际所用组合后再定夺是否改值。常量化后即使要改，也只动
   `SCQ_REQUEST_DIRECTORY` 一处定义。
@@ -190,11 +196,25 @@ LSQ=0、非法 LSQ、CHS 不参与判定、0/1/200/201/700 字节的分段边界
 - LSQ=2/4 语义上要求"随后去激活"。**开放问题**：主站收到后是否必须回
   `F_AF`（去激活确认）或发送 DEACT 命令？本实现不区分 WITH_DEACT，仅按完成处理，
   未做任何推断性补发。
+- **第三方实测（2026-11-07）**：lib60870-C 实际用 LSQ=3（节结束）/1（文件结束），
+  主站回 `F_AF POS_ACK_SECTION` 后继续/结束，**未等待 COT=8 DEACT**。
+  真机若使用 LSQ=2/4，仍需按清单复测。
 
-### 4.6 多节（multi-section）流程
-- 本管理器不支持真正的多节累积与逐节校验：段数据一律拼进 `_context.data`，
-  且没有"节结束 → 等待下一节"的状态迁移。**开放问题**：对端按 LSQ=3/4 分节上送时，
-  主站是否应逐节校验并按节回 `F_AF`（POS_ACK_SECTION）？—— 依赖 4.1 的校验和结论。
+### 4.6 多节（multi-section）流程 —— 已实现主站逐节接收
+- 主站：收到 `F_SR` 自动发 `F_SC(SCQ=6, NOS)`；`F_SG` 段数据同时累积到文件与
+  **本节缓冲**；`F_LS` 按 LSQ 回 `F_AF`（LSQ=1/2 → 肯定文件 1；3/4 → 肯定节 3），
+  CHS 按本节缓冲校验（不把上一节数据算进下一节）。
+- 从站：仍按单节发送（多节分包未实现，属另一项）。
+- **第三方实测（2026-11-07，默认代码）**：lib60870-C 800B 文件分 2 节×400B，
+  每节 2 段（236+164B），LSQ=3/3/1，CHS=184/72/0；主站完整接收
+  `File received: name=1 size=800`，无 CHS 告警。
+
+### 4.7 F_SC 类型/COT 与确认类型 —— 已修复
+- 文件命令统一 `F_SC_NA_1(122) + COT=FILE(13)`；`F_SC_NB_1(127)` 仅保留解码兼容。
+- 主站不再发送 `F_FR_NB(128)/F_SR_NB(129)`；收到 `F_SR` 改发 SCQ=6，收到 `F_LS`
+  按 LSQ 回 F_AF。
+- **第三方复测（2026-11-07）**：lib60870-C 不再把确认当上传公告（无 `COT=44`），
+  select → request → 2 节 → 完成；真机仍按 open_items 复测。
 
 ## 5. 已修（5.1~5.4 + CHS，本轮完成；提交 559636b / b61e6ff / 4f6ee97 / ee8ca58 / ed6584a）
 

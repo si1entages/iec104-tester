@@ -45,6 +45,7 @@ from ..protocol.file_transfer import (
     AFQ_POS_ACK_SECTION,
     SCQ_REQUEST_DIRECTORY,
     SCQ_REQUEST_FILE,
+    SCQ_REQUEST_SECTION,
     SCQ_SELECT_FILE,
     FileTransferState,
 )
@@ -121,35 +122,41 @@ class MasterProtocolHandler:
         logger.info("File Call Directory sent")
 
     async def file_select(self, ioa: int, file_name: int) -> None:
-        """发送文件选择命令 (F_SC_NB_1).
+        """发送文件选择命令 (F_SC_NA_1, COT=FILE).
 
-        Args:
-            ioa: 信息对象地址
-            file_name: 文件名 (16-bit)
+        2026-11-07 第三方 lib60870 实测：F_SC_NB_1(127)+COT=ACT(6) 被静默忽略；
+        标准文件传输使用 F_SC_NA_1(122)+COT=13。此处与 file_request 统一为 122/13。
         """
         e = self._engine
-        asdu_data = ASDUBuilder.build_file_select_call_get(
+        asdu_data = ASDUBuilder.build_call_directory(
             e._common_addr, ioa, file_name, qualifier=SCQ_SELECT_FILE
         )
-        # SCQ_SELECT_FILE=1（曾用魔法数字 4——SCQ 表修正后 4=DELETE_FILE，
-        # "选择文件"会变成向真机发删除命令，故一律改用带名常量）。
         await e._send_command_asdu(asdu_data)
         logger.info(f"File Select: file_name={file_name}")
 
     async def file_request(self, ioa: int, file_name: int) -> None:
-        """发送文件请求命令 (F_SC_NB_1).
-
-        Args:
-            ioa: 信息对象地址
-            file_name: 文件名 (16-bit)
-        """
+        """发送文件请求命令 (F_SC_NA_1, COT=FILE, SCQ=2)."""
         e = self._engine
-        asdu_data = ASDUBuilder.build_file_select_call_get(
+        asdu_data = ASDUBuilder.build_call_directory(
             e._common_addr, ioa, file_name, qualifier=SCQ_REQUEST_FILE
         )
-        # SCQ_REQUEST_FILE=2（曾用魔法数字 1——新表中 1=SELECT_FILE，语义静默翻转）。
         await e._send_command_asdu(asdu_data)
         logger.info(f"File Request: file_name={file_name}")
+
+    async def request_section(self, ioa: int, file_name: int,
+                              section_name: int) -> None:
+        """发送节请求 (F_SC_NA_1, COT=FILE, SCQ=6).
+
+        标准/第三方实测流程：收到 F_SR_NA_1 后必须请求该节（SCQ=6），
+        从站才会发送 F_SG 段与 F_LS 结束标记。只回 F_SR_NB 不会触发数据。
+        """
+        e = self._engine
+        asdu_data = ASDUBuilder.build_call_directory(
+            e._common_addr, ioa, file_name, section_name,
+            qualifier=SCQ_REQUEST_SECTION,
+        )
+        await e._send_command_asdu(asdu_data)
+        logger.info(f"File Section Request: file_name={file_name} section={section_name}")
 
     async def file_ack(self, ioa: int, file_name: int,
                         section_name: int = 0, qualifier: int = AFQ_POS_ACK_FILE) -> None:
@@ -539,18 +546,25 @@ class MasterProtocolHandler:
 
         if type_id == TypeID.F_FR_NA_1:
             e._file_transfer.handle_file_ready(obj.data)
-            # 主站收到"文件准备就绪"应立即回复 F_FR_NB_1 确认
-            e._file_transfer.send_file_ready_ack(obj.ioa)
+            # 标准/第三方流程：文件就绪后不单独回 ACK，由调用方发 SCQ=2 请求文件。
+            # （旧实现回 F_FR_NB_1(128)，lib60870 会当成上传公告并回 COT=44。）
         elif type_id == TypeID.F_SR_NA_1:
             e._file_transfer.handle_section_ready(obj.data)
-            # 主站收到"节准备就绪"应立即回复 F_SR_NB_1 确认
-            e._file_transfer.send_section_ready_ack(obj.ioa)
+            # 收到节就绪必须请求该节（SCQ=6），从站才发送 F_SG/F_LS；
+            # 只回 F_SR_NB_1(129) 不会触发数据（旧实现缺陷）。
+            e._spawn(e.request_section(
+                obj.ioa, obj.data.file_name, obj.data.section_name))
         elif type_id == TypeID.F_SG_NA_1:
             e._file_transfer.handle_file_segment(obj.data)
         elif type_id == TypeID.F_LS_NA_1:
             e._file_transfer.handle_last_section(obj.data)
-            # 收到"最后的节/段"后回复 F_AF_NA_1 (肯定节) 完成握手
-            e._file_transfer.send_ack(obj.ioa, qualifier=AFQ_POS_ACK_SECTION)
+            lsq = getattr(obj.data, "lsq", None)
+            if lsq in (1, 2):
+                # 整个文件结束：肯定文件确认
+                e._file_transfer.send_ack(obj.ioa, qualifier=AFQ_POS_ACK_FILE)
+            elif lsq in (3, 4):
+                # 仅本节结束：肯定节确认，从站继续下一节
+                e._file_transfer.send_ack(obj.ioa, qualifier=AFQ_POS_ACK_SECTION)
         elif type_id == TypeID.F_DR_TA_1:
             e._file_transfer.handle_directory_entry(obj.data)
         elif type_id == TypeID.F_FR_NB_1:

@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { App as AntdApp } from 'antd'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ConnectionPanel } from './ConnectionPanel'
@@ -61,5 +61,39 @@ describe('ConnectionPanel（连接参数）', () => {
     expect(posts[0].body.gi_interval).toBe(30)
     expect(posts[0].body.host).toBe('127.0.0.1')
     expect(posts[0].body.port).toBe(2404)
+  })
+
+  it('冗余开关 + 备用地址随 start 请求体下发（E3）', async () => {
+    const posts: Array<{ path: string; body: Record<string, unknown> }> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: unknown, init?: RequestInit) => {
+        const url = String(input)
+        if (url.startsWith('/api/master/start')) {
+          posts.push({ path: '/api/master/start', body: JSON.parse(String(init?.body ?? '{}')) })
+          return jsonResponse({ ok: true })
+        }
+        return jsonResponse({ role: 'master', running: false, started: false })
+      }),
+    )
+    setup()
+
+    const label = screen.getByText('冗余双通道')
+    const group = label.closest('.ant-space') as HTMLElement
+    const redSwitch = within(group).getByRole('switch')
+    fireEvent.click(redSwitch)
+
+    fireEvent.change(screen.getByLabelText('备用地址'), { target: { value: '10.0.0.2' } })
+    fireEvent.change(screen.getByLabelText('备用端口'), { target: { value: '2406' } })
+    fireEvent.change(screen.getByLabelText('切换超时(s)'), { target: { value: '3' } })
+
+    fireEvent.click(screen.getByRole('button', { name: /连\s*接/ }))
+    await waitFor(() => expect(posts).toHaveLength(1))
+    expect(posts[0].body.redundancy).toEqual({
+      enabled: true,
+      standby_host: '10.0.0.2',
+      standby_port: 2406,
+      switch_timeout: 3,
+    })
   })
 })

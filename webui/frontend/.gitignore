@@ -8,3 +8,6 @@ dist/
 *.local.mjs
 
 # 不忽略构建产物 webui/static/app/ —— 它随仓库分发并被 PyInstaller 打包
+
+# Vitest 覆盖率报告（CI 以 artifact 上传）
+coverage/

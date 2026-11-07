@@ -20,6 +20,8 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
+from core.version import __version__
+
 # Web UI 默认 HTTP 端口（按角色区分，避免主站/子站同时启动时端口冲突）
 _DEFAULT_HTTP_PORT = {"slave": 8766, "master": 8765}
 
@@ -113,7 +115,9 @@ def _open_browser_when_ready(
 def run_web(role: str, http_port: int | None = None, open_browser: bool = True,
             point_table=None, connection: dict | None = None,
             history_db=None, engine_config=None,
-            http_host: str = "127.0.0.1", auth_token: str | None = None) -> None:
+            http_host: str = "127.0.0.1", auth_token: str | None = None,
+            web_tls_cert: str | None = None,
+            web_tls_key: str | None = None) -> None:
     """启动 Web 服务（阻塞）并在就绪后打开浏览器.
 
     Args:
@@ -132,14 +136,22 @@ def run_web(role: str, http_port: int | None = None, open_browser: bool = True,
         http_host: Web UI 监听地址（默认 127.0.0.1；0.0.0.0 会暴露到局域网）.
         auth_token: 可选访问令牌；设置后 /api/* 与 /ws 需携带令牌.
     """
-    from webui.server import run_server
+    from webui.server import create_web_ssl_context, run_server
 
     port = http_port if http_port is not None else _DEFAULT_HTTP_PORT.get(
         role, _DEFAULT_HTTP_PORT["master"]
     )
+    ssl_context = None
+    if web_tls_cert:
+        try:
+            ssl_context = create_web_ssl_context(web_tls_cert, web_tls_key)
+        except (OSError, ValueError) as e:
+            print(f"Web UI TLS 配置无效，拒绝启动: {e}", file=sys.stderr, flush=True)
+            raise SystemExit(2) from e
     # 0.0.0.0/:: 是监听地址而非可访问地址：本机浏览器仍走回环地址
     browse_host = "127.0.0.1" if http_host in ("0.0.0.0", "::", "") else http_host
-    url = f"http://{browse_host}:{port}/"
+    scheme = "https" if ssl_context is not None else "http"
+    url = f"{scheme}://{browse_host}:{port}/"
 
     if http_host not in ("127.0.0.1", "localhost", "::1"):
         print(
@@ -151,7 +163,7 @@ def run_web(role: str, http_port: int | None = None, open_browser: bool = True,
     if auth_token:
         print(
             f"Web UI 认证已启用：首次打开会提示输入令牌；也可直接访问 "
-            f"http://{browse_host}:{port}/app/?token=<token>",
+            f"{scheme}://{browse_host}:{port}/app/?token=<token>",
             flush=True,
         )
     print(f"Web UI: {url}", flush=True)
@@ -164,7 +176,8 @@ def run_web(role: str, http_port: int | None = None, open_browser: bool = True,
     try:
         run_server(role, http_host, port, point_table=point_table,
                    connection=connection, history_db=history_db,
-                   app_config=engine_config, auth_token=auth_token)
+                   app_config=engine_config, auth_token=auth_token,
+                   ssl_context=ssl_context)
     except KeyboardInterrupt:
         pass
 
@@ -385,6 +398,11 @@ def cli(default_role: str | None = None) -> int:
         description="IEC 60870-5-104 协议测试工具"
     )
     parser.add_argument(
+        "--version", action="version",
+        version=f"iec104-tester {__version__}",
+        help="打印版本号并退出"
+    )
+    parser.add_argument(
         "--mode", choices=["master", "slave"], default=default_role,
         help="运行模式: master(主站) 或 slave(子站)"
     )
@@ -429,6 +447,10 @@ def cli(default_role: str | None = None) -> int:
         help="运行自动化测试脚本 (YAML 文件或目录)"
     )
     parser.add_argument(
+        "--report-dir", type=str, default="test_reports",
+        help="自动化测试报告输出目录（默认 test_reports）"
+    )
+    parser.add_argument(
         "--http-port", type=int, default=None,
         help="Web UI HTTP 端口 (默认主站 8765 / 子站 8766)"
     )
@@ -441,6 +463,14 @@ def cli(default_role: str | None = None) -> int:
         default=os.environ.get("IEC104_AUTH_TOKEN") or None,
         help="Web API 访问令牌（可选）；设置后 REST/WS 需携带令牌；"
              "默认读环境变量 IEC104_AUTH_TOKEN"
+    )
+    parser.add_argument(
+        "--web-tls-cert", type=str, default=None,
+        help="Web UI HTTPS 证书 (PEM)；设置后 Web 服务以 HTTPS 监听"
+    )
+    parser.add_argument(
+        "--web-tls-key", type=str, default=None,
+        help="Web UI HTTPS 私钥 (PEM)；缺省时假定与证书同文件"
     )
     parser.add_argument(
         "--no-browser", action="store_true",
@@ -600,7 +630,7 @@ def cli(default_role: str | None = None) -> int:
         # 自动化测试脚本模式
         if args.test:
             logger.info(f"Running test script: {args.test}")
-            return _run_tests(args.test, logger)
+            return _run_tests(args.test, logger, args.report_dir)
 
         # 无GUI模式
         if args.no_gui:
@@ -640,7 +670,8 @@ def cli(default_role: str | None = None) -> int:
         run_web(role, args.http_port, open_browser=not args.no_browser,
                 point_table=point_table, connection=connection,
                 history_db=history_db, engine_config=config,
-                http_host=args.http_host, auth_token=args.auth_token)
+                http_host=args.http_host, auth_token=args.auth_token,
+                web_tls_cert=args.web_tls_cert, web_tls_key=args.web_tls_key)
         return 0
     finally:
         # 保证异常路径也会关闭历史数据库
@@ -648,14 +679,15 @@ def cli(default_role: str | None = None) -> int:
             history_db.close()
 
 
-def _run_tests(script_path: str, logger) -> int:
+def _run_tests(script_path: str, logger, report_dir: str = "test_reports") -> int:
     """运行自动化测试脚本，返回进程退出码."""
     import asyncio
 
     from core.testing import ReportGenerator, TestRunner
 
     async def run():
-        runner = TestRunner(report_dir="test_reports")
+        out_dir = Path(report_dir)
+        runner = TestRunner(report_dir=str(out_dir))
 
         target = Path(script_path)
         if target.is_dir():
@@ -681,12 +713,13 @@ def _run_tests(script_path: str, logger) -> int:
         runner.set_callbacks(on_step_complete=on_step, on_test_complete=on_test)
 
         results = []
+        out_dir.mkdir(parents=True, exist_ok=True)
         for script in scripts:
             result = await runner.run(script)
             results.append(result)
-            ReportGenerator.save(result, f"test_reports/{script.name}.txt", format="text")
-            ReportGenerator.save(result, f"test_reports/{script.name}.json", format="json")
-            ReportGenerator.save(result, f"test_reports/{script.name}.html", format="html")
+            ReportGenerator.save(result, out_dir / f"{script.name}.txt", format="text")
+            ReportGenerator.save(result, out_dir / f"{script.name}.json", format="json")
+            ReportGenerator.save(result, out_dir / f"{script.name}.html", format="html")
 
         passed = sum(1 for r in results if r.status.value == "passed")
         failed = len(results) - passed

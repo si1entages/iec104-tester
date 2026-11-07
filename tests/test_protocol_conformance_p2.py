@@ -82,6 +82,15 @@ def _apci_of(frame: bytes):
     return apci
 
 
+def _sent_asdu_frames(client) -> list[bytes]:
+    """从 mock 的 client.send 调用中提取全部 ASDU（去掉 6 字节 APCI 头）."""
+    frames = []
+    for call in client.send.call_args_list:
+        apdu = call.args[0] if call.args else call.kwargs.get("data")
+        frames.append(apdu[6:])
+    return frames
+
+
 # ═══════════════════════════════════════════════════════════════════
 #  #6: TypeID 58-64 带时标控制命令 (round-trip 长度)
 # ═══════════════════════════════════════════════════════════════════
@@ -678,6 +687,55 @@ async def test_file_transfer_send_times_out_when_window_stuck():
     with pytest.raises(RuntimeError, match="t1"):
         await engine.file_select(0, 1)
     assert time.monotonic() - t0 >= 0.15
+
+
+@pytest.mark.asyncio
+async def test_master_section_request_is_scq6_fsc_na_cot_file():
+    """收到 F_SR 后主站自动发节请求（SCQ=6），而不是回 F_SR_NB(129)."""
+    engine, client = _make_master()
+    asdu = ASDU.decode(ASDUBuilder.build_section_ready(1, 100, 5, 1, 400, 0))
+    engine._protocol.process_file_transfer(asdu)
+    await asyncio.sleep(0.05)
+
+    frames = _sent_asdu_frames(client)
+    assert frames, "未发出节请求"
+    req = ASDU.decode(frames[-1])
+    assert req.type_id == TypeID.F_SC_NA_1
+    assert int(req.cot) == int(COT.FILE)
+    assert req.objects[0].data.qualifier == 6
+    assert req.objects[0].data.section_name == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lsq,afq", [(1, 1), (2, 1), (3, 3), (4, 3)])
+async def test_master_ack_qualifier_follows_lsq(lsq, afq):
+    """F_LS 的确认类型按 LSQ 区分：1/2=肯定文件(1)，3/4=肯定节(3)."""
+    engine, client = _make_master()
+    asdu = ASDU.decode(ASDUBuilder.build_last_section(1, 100, 5, 1, lsq, 0))
+    engine._protocol.process_file_transfer(asdu)
+    await asyncio.sleep(0.02)
+
+    frames = _sent_asdu_frames(client)
+    assert frames, "未发出 F_AF 确认"
+    ack = ASDU.decode(frames[-1])
+    assert ack.type_id == TypeID.F_AF_NA_1
+    assert ack.objects[0].data.qualifier == afq
+
+
+@pytest.mark.asyncio
+async def test_master_does_not_send_legacy_nb_acks():
+    """F_FR/F_SR 不再触发 128/129 旧确认（lib60870 会误判为上传公告）."""
+    engine, client = _make_master()
+    for frame in (
+        ASDUBuilder.build_file_ready(1, 100, 5, 800, 0),
+        ASDUBuilder.build_section_ready(1, 100, 5, 1, 400, 0),
+    ):
+        engine._protocol.process_file_transfer(ASDU.decode(frame))
+    await asyncio.sleep(0.05)
+
+    types = [ASDU.decode(f).type_id for f in _sent_asdu_frames(client)]
+    assert 128 not in [int(t) for t in types]
+    assert 129 not in [int(t) for t in types]
 
 
 @pytest.mark.parametrize("method,args", [

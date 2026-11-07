@@ -13,12 +13,20 @@
   <img src="https://img.shields.io/badge/WebUI-aiohttp-41CD52" alt="Web UI">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/IEC--104-72%20TypeIDs-brightgreen.svg" alt="IEC 104">
-  <img src="https://img.shields.io/badge/Tests-1381-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-1545-brightgreen.svg" alt="Tests">
 </p>
 
 ---
 
 工业级 IEC 60870-5-104 协议测试工具：主站/子站**浏览器 Web UI**（纯 web 形态，浏览器作为唯一界面，可同时开两个标签页联调），协议引擎完整，附多站并发、报文录制回放、网络异常模拟、YAML 自动化测试、TLS 传输加密与历史库。
+
+### 界面预览
+
+| 主站工作台 | 子站工作台 |
+|---|---|
+| ![主站](docs/pr-assets/webui-master.png) | ![子站](docs/pr-assets/webui-slave.png) |
+| **报文抓包 / pcap 导出** | **自动化测试中心** |
+| ![抓包](docs/pr-assets/webui-capture.png) | ![测试中心](docs/pr-assets/webui-tests.png) |
 
 ## ✨ 功能特性
 
@@ -35,10 +43,13 @@
 - **主站工作台**：十万行点表虚拟滚动（只渲染可视窗口）、命令面板（系统命令/遥控/设点/步/比特串/延时/参数/文件命令）、实时报文查看器（悬停 HEX 逐段翻译）、点位趋势图（只采样被订阅点位）
 - **子站工作台**：点表编辑与手动置数、**应答行为配置**（延迟/丢帧/损坏/不响应/品质/错误 COT）、数据模拟（手动/自动、YX/YC 范围模式）
 - **多站页**：多子站卡片管理与聚合状态
+- **报文抓包页**：录制启停/暂停、文件列表与下载、一键导出 pcap/pcapng（Wireshark 可打开）、离线回放（播放/暂停/单步/倍速）
+- **自动化测试页**：选择 `tests/scripts/*.yaml`，子进程隔离运行，实时日志 + 通过/失败汇总 + HTML/JSON/TXT 报告下载
 - **日志页**：结构化日志分级/分类/来源过滤、关键字搜索、暂停/清空、JSONL 导出
 - 深色/浅色主题切换（首次跟随系统偏好，手动切换后记忆）
 - **中/英界面切换**（头部「中 / EN」）：全站双语（外壳、主站/子站/多站工作台、
   状态/日志/历史页、网络模拟、认证闸门）；`npm run i18n:inventory` 迁移清单为 0
+- 安全：`--auth-token` 访问令牌、`--web-tls-cert/--web-tls-key` HTTPS、CSP/X-Frame-Options/Referrer-Policy 安全头
 - 点值经 WebSocket 实时刷新；按钮可用性由服务端状态驱动；数据表表头吸顶、数值等宽（tabular-nums）
 
 ### 主站（`core/engine/master.py`）
@@ -64,7 +75,7 @@
 - **报文导出**：`.i104` / `.json` / **pcap / pcapng**（Wireshark 可直接打开）
 - **一键诊断包**：状态/配置（私钥脱敏）/日志/报文/事件/点表/历史统计打包下载（状态页按钮或 `GET /api/diagnostics/export`）
 - **一键环回演示**：`python app.py --demo`（本机子站+主站自动监听/连接/总召）
-- 质量门禁：互操作语料库回放、Hypothesis fuzz、20 客户端并发、2h 环回 soak、分支覆盖 92.08%、协议层变异 12/12
+- 质量门禁：互操作语料库回放、Hypothesis fuzz、20 客户端并发、2h 环回 soak、分支覆盖 core 92.0% / 合并 91.3%、协议层变异 12/12
 - 多站并发（`run_multi_station.py`）、网络异常模拟（**Web 状态页卡片** / `sim_tool.py`）、YAML 自动化测试（`run_tests.py`）
 
 ### 打包与发布
@@ -186,6 +197,8 @@ python sim_tool.py --preset poor_wifi --mode master --host 127.0.0.1
 | `--http-port` | Web UI HTTP 端口 | 主站 8765 / 子站 8766 |
 | `--http-host` | Web UI 监听地址（0.0.0.0 会暴露到局域网） | 127.0.0.1 |
 | `--auth-token` | Web API 访问令牌（可选；亦可读环境变量 `IEC104_AUTH_TOKEN`） | — |
+| `--web-tls-cert` / `--web-tls-key` | Web UI HTTPS 证书 / 私钥 (PEM)；设置后 Web 服务走 HTTPS | — |
+| `--version` | 打印版本号并退出 | — |
 | `--no-browser` | 启动 Web 服务时不自动打开浏览器 | false |
 | `--demo` | 一键环回演示：本机子站+主站并自动连接 | false |
 | `--demo-seconds` | 演示运行 N 秒后自动停止（0=直到 Ctrl+C） | 0 |
@@ -220,17 +233,17 @@ custom_types: []   # 非标厂商私有 TypeID 注册
 ## 🧪 测试
 
 ```bash
-python -m pytest tests/ -q              # 单元 + 集成（1381 例；性能基准默认排除）
+python -m pytest tests/ -q              # 单元 + 集成（1545 例；性能基准默认排除）
 python -m pytest tests/ -q --cov=core --cov-branch --cov-report=term-missing --cov-fail-under=91
 python -m pytest tests/ -m perf -q      # 性能基准（解码/10 万点/20 客户端并发/环回 soak）
 IEC104_SOAK_SECONDS=7200 python -m pytest tests/perf/test_soak_loopback.py -m perf -q
 python run_tests.py tests/scripts/      # YAML 脚本
-python -m pytest tests/test_conformance_suite.py -q  # 一致性套件（42 case）接入 pytest
+python -m pytest tests/test_conformance_suite.py -q  # 一致性套件（50 case）接入 pytest
 python tests/e2e/qa_full_flow.py        # 全流程验收（12 阶段；CI job e2e-full-flow）
 python tools/mutation_smoke.py          # 协议层变异冒烟（12/12 必须被杀死）
 ```
 
-- 当前基线：**1381 passed，4 deselected**；`core/` 分支覆盖率 **92.08%**（门禁 91%）
+- 当前基线：**1545 passed，4 deselected**；`core/` 92.0%、`webui/` 89.0%，合并 **91.3%**（门禁 91%，webui 独立门禁 85%）
 - 20 客户端并发实测约 **2.9k 帧/秒**；2h soak 实测 **7200s / 34,765 次 GI / 内存 +0.64 MB**
 - 互操作语料库：`tests/fixtures/frames/`（合成基线 + `real/` 真机目录），
   `tests/test_frame_corpus_replay.py` 做 golden 解码与主站回放回归；

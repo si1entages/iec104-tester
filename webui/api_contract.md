@@ -70,7 +70,7 @@
 
 | 方法 | 路径 | 请求 | 响应 |
 |------|------|------|------|
-| POST | `/api/master/start` | `host: str="127.0.0.1"`, `port: int=2404 (0-65535)`, `addr: int=1 (≥0)`, `reconnect: bool=true`, `gi_interval: number=0 (≥0)`, `tls?: TlsOptions`（可选，见下方说明） | `{ok, error?}` |
+| POST | `/api/master/start` | `host: str="127.0.0.1"`, `port: int=2404 (0-65535)`, `addr: int=1 (≥0)`, `reconnect: bool=true`, `gi_interval: number=0 (≥0)`, `tls?: TlsOptions`（可选，见下方说明）, `redundancy?: RedundancyOptions`（可选，见 §4.11） | `{ok, error?}` |
 | POST | `/api/master/stop` | — | `{ok, error?}` |
 | POST | `/api/master/gi` | `qoi: int=20`（1–16 组召唤 ｜ 20 站召唤） | `{ok, error?}` |
 | POST | `/api/master/clock` | — | `{ok, error?}` |
@@ -244,6 +244,35 @@
 | 方法 | 路径 | 请求 | 响应 |
 |------|------|------|------|
 | GET | `/api/auth` | 可带令牌（上述三种形态之一） | `{ok, required: bool, valid: bool}` |
+
+### 2.14 报文录制/回放（E2）
+
+| 方法 | 路径 | 请求 | 响应 |
+|------|------|------|------|
+| GET | `/api/capture/status` | — | `{ok, recording, paused, frames, rx, tx, dropped, elapsed, file, files: CaptureFileInfo[], playback: CapturePlayback}` |
+| POST | `/api/capture/start` | 可选 `name?: str`（单层文件名，`.i104/.json/.pcap/.pcapng`；缺省自动命名） | `{ok, recording, paused, frames, rx, tx, dropped, elapsed, file}` |
+| POST | `/api/capture/stop` | — | `{ok, frames, file}`（停止并落盘） |
+| POST | `/api/capture/pause` | — | `{ok, error?}` |
+| POST | `/api/capture/resume` | — | `{ok, error?}` |
+| GET | `/api/capture/files` | — | `{ok, files: CaptureFileInfo[]}` |
+| GET | `/api/capture/download/{name}` | 单层文件名 | 文件流（附件下载） |
+| POST | `/api/capture/export` | `name: str`, `format: "i104"\|"json"\|"pcap"\|"pcapng"` | `{ok, file, frames}`（同目录生成新文件） |
+| POST | `/api/capture/load` | `name: str` | `{ok, file, frames, loaded, state, index, total, progress, duration, current}` |
+| GET | `/api/capture/frames` | `offset?: int=0`, `limit?: int=200 (1–1000)` | `{ok, total, offset, rows: CaptureFrame[]}` |
+| POST | `/api/capture/play` | `speed: number=1 (0.1–100)` | `{ok, ...CapturePlayback, error?}`（后台异步回放，仅离线展示） |
+| POST | `/api/capture/playback/stop` | — | `{ok, ...CapturePlayback}` |
+| POST | `/api/capture/playback/pause` | — | `{ok, ...CapturePlayback, error?}` |
+| POST | `/api/capture/step` | `direction: "forward"\|"backward"="forward"` | `{ok, ...CapturePlayback, error?}` |
+
+### 2.15 自动化测试中心（E1）
+
+| 方法 | 路径 | 请求 | 响应 |
+|------|------|------|------|
+| GET | `/api/tests/scripts` | — | `{ok, scripts: TestScriptInfo[]}`（`tests/scripts/*.yaml`） |
+| POST | `/api/tests/run` | `scripts: string[]`（文件名数组，非空） | `{ok, run?: TestRun, error?}`（子进程顺序执行；单 run 互斥） |
+| POST | `/api/tests/stop` | — | `{ok, error?}`（终止当前子进程） |
+| GET | `/api/tests/status` | — | `{ok, running, run: TestRun \| null}`（日志最多 500 行） |
+| GET | `/api/tests/reports/{run_id}/{name}` | run_id / 报告文件名（`.html/.json/.txt`） | 文件流（附件下载） |
 
 ---
 
@@ -421,6 +450,57 @@ SimStats = { rx_total, tx_total, rx_dropped, tx_dropped, rx_corrupted, tx_corrup
              rx_duplicated, tx_duplicated, rx_reordered, tx_reordered, disconnects,
              [k: string]: number }
 // presets: clean | poor_wifi | congested | satellite | unreliable | intermittent | slow_link | stress
+```
+
+### 4.11 `RedundancyOptions` / `RedundancyStatus`（主站冗余）
+
+```ts
+RedundancyOptions = {           // POST /api/master/start（省略时沿用 CLI/--config）
+  enabled?: boolean,
+  standby_host?: string,
+  standby_port?: number,        // 1–65535，且不能与主用 host:port 完全相同
+  switch_timeout?: number,      // >0，默认 2.0s
+  dedup_window?: number         // >=0，默认 5.0s
+}
+RedundancyStatus = {            // Status.redundancy（仅启用时存在）
+  enabled: true,
+  active: "primary" | "standby" | null,
+  primary_connected: boolean, standby_connected: boolean,
+  standby_host: string, standby_port: number,
+  switch_timeout: number, dedup_window: number,
+  failovers: number
+}
+```
+
+### 4.12 `CaptureFileInfo` / `CaptureFrame` / `CapturePlayback`（报文录制/回放）
+
+```ts
+CaptureFileInfo = { name: string, size: number, mtime: number }
+CaptureFrame = {
+  timestamp: number, absolute_time: number,
+  direction: "RX"|"TX", frame_type: "I"|"S"|"U"|"?",
+  length: number, hex: string, metadata: Record<string, unknown>
+}
+CapturePlayback = {
+  loaded: boolean, file?: string, state?: "stopped"|"playing"|"paused"|"stepping",
+  index?: number, total?: number, progress?: number, duration?: number,
+  current?: CaptureFrame | null
+}
+```
+
+### 4.13 `TestScriptInfo` / `TestRun`（自动化测试中心）
+
+```ts
+TestScriptInfo = { id: string, name: string, description: string, role: "master"|"slave"|"?",
+                   steps: number, tags?: string[], timeout?: number, error?: string }
+TestRun = {
+  id: string, status: "running"|"passed"|"failed"|"stopped"|"error",
+  scripts: string[], started_at: number, ended_at: number | null,
+  returncode: number | null,
+  summary: { scripts: number, passed: number, failed: number } | null,
+  lines: string[], results: { script: string, returncode: number }[],
+  reports: { name: string, format: "html"|"json"|"txt", size: number }[]
+}
 ```
 
 ---

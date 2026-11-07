@@ -52,7 +52,7 @@ webui/frontend/
     │   ├── types.ts      # 契约类型（api_contract.md 的 TS 投影）
     │   ├── validate.ts   # 零依赖运行时校验（宽进严出、绝不抛异常）
     │   ├── client.ts     # fetch 封装 / buildUrl / ApiError
-    │   ├── endpoints.ts  # 全部 REST 端点（36 个）
+    │   ├── endpoints.ts  # 全部 REST 端点（74 个）
     │   └── queries.ts    # React Query：queries + 命令 mutations + 失效策略
     ├── ws/
     │   ├── client.ts     # WS 客户端：指数退避重连 + 背压感知
@@ -67,7 +67,7 @@ webui/frontend/
 
 ## 数据层与状态分层（T11）
 
-- **REST**：`api/endpoints.ts` 覆盖 `api_contract.md` 全部 36 个端点；
+- **REST**：`api/endpoints.ts` 覆盖 `api_contract.md` 全部 74 个端点；
   `api/queries.ts` 提供 `useStatusQuery` / `usePointsQuery` / `useLogsQuery` /
   `useLiveLogs` 与命令 `useCommand` / `useCommandNoArgs`（命令返回后自动失效
   `status` / `points`，断线时也能对齐）。

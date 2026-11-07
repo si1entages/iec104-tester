@@ -9,7 +9,7 @@ from collections.abc import Callable
 from dataclasses import asdict
 from typing import Any
 
-from core.config import AppConfig
+from core.config import AppConfig, RedundancyConfig
 from core.engine.master import MasterEngine, MasterEvent
 from core.engine.multi_station import (
     MultiStationConfig,
@@ -281,7 +281,8 @@ class EngineSession:
     async def start_master(self, host: str, port: int, addr: int,
                            reconnect: bool, points: Any,
                            gi_interval: float = 0.0,
-                           tls: Any = None) -> dict:
+                           tls: Any = None,
+                           redundancy: Any = None) -> dict:
         if self.engine:
             return {"ok": False, "error": "already running"}
         # TLS 来源优先级（D3 修复）：HTTP body 显式传入 > 会话配置
@@ -297,6 +298,23 @@ class EngineSession:
             logger.info("TLS enabled (master, verify=%s, source=%s)",
                         getattr(effective_tls, "verify", True),
                         "request body" if tls is not None else "CLI/config")
+        # 冗余双通道（E3）：body 显式传入 > CLI/config；未传时沿用配置。
+        red_cfg = self.config.redundancy
+        if redundancy is not None:
+            fields = {k: redundancy[k] for k in (
+                "enabled", "standby_host", "standby_port",
+                "switch_timeout", "dedup_window") if k in redundancy}
+            try:
+                red_cfg = RedundancyConfig(**fields)
+            except TypeError as e:
+                return {"ok": False, "error": f"冗余配置无效: {e}"}
+        if red_cfg.enabled:
+            if not red_cfg.standby_host:
+                return {"ok": False, "error": "冗余配置无效: standby_host 必填"}
+            if not 0 < int(red_cfg.standby_port) <= 65535:
+                return {"ok": False, "error": "冗余配置无效: standby_port 非法"}
+            if red_cfg.standby_host == host and int(red_cfg.standby_port) == int(port):
+                return {"ok": False, "error": "冗余配置无效: 备用地址不能与主用相同"}
         eng = MasterEngine(
             host=host, port=port, common_addr=addr,
             auto_start=True, auto_gi=False, reconnect=reconnect,
@@ -314,16 +332,22 @@ class EngineSession:
             ssl_context=ssl_context, server_hostname=server_hostname,
             # D4 修复：CLI/--config 启用的冗余双通道配置经会话配置传入；
             # 默认 enabled=False 时引擎行为与单通道完全一致（无回归）。
-            redundancy=self.config.redundancy,
+            redundancy=red_cfg,
         )
         eng.set_event_callback(self._hook_master)
         eng.set_raw_frame_callback(self._hook_frame_master)
         self._install_network_simulation(eng)
         self.engine = eng
+        try:
+            await eng.start()
+        except Exception as e:  # noqa: BLE001 — 启动失败必须回滚会话状态
+            self.engine = None
+            self._remove_network_simulation()
+            logger.warning("master start failed: %s", e)
+            return {"ok": False, "error": str(e)}
         self.config.connection.host = host
         self.config.connection.port = port
         self.config.connection.common_addr = addr
-        await eng.start()
         return {"ok": True}
 
     async def stop_master(self) -> dict:
@@ -374,7 +398,13 @@ class EngineSession:
         if self.pending_response:
             eng.set_response_behavior(self.pending_response)
         self.engine = eng
-        await eng.start()
+        try:
+            await eng.start()
+        except Exception as e:  # noqa: BLE001 — 端口占用等启动失败必须回滚
+            self.engine = None
+            self._remove_network_simulation()
+            logger.warning("slave start failed: %s", e)
+            return {"ok": False, "error": str(e)}
         return {"ok": True}
 
     async def stop_slave(self) -> dict:
@@ -468,6 +498,22 @@ class EngineSession:
             st["vs"] = seq.send_seq
             st["vr"] = seq.recv_seq
             st["window"] = f"{seq.unconfirmed_count}/{seq.k}"
+        if self.role == "master":
+            status_fn = getattr(self.engine, "redundancy_status", None)
+            red = status_fn() if callable(status_fn) else None
+            if red is None and self.config.redundancy.enabled:
+                cfg = self.config.redundancy
+                red = {
+                    "enabled": True, "active": None,
+                    "primary_connected": False, "standby_connected": False,
+                    "standby_host": cfg.standby_host,
+                    "standby_port": int(cfg.standby_port),
+                    "switch_timeout": float(cfg.switch_timeout),
+                    "dedup_window": float(cfg.dedup_window),
+                    "failovers": 0,
+                }
+            if red is not None:
+                st["redundancy"] = red
         return st
 
     # ── 命令 ──────────────────────────────────────────────────────

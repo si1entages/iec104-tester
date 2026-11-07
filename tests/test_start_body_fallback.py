@@ -66,7 +66,7 @@ async def test_master_start_omitted_fields_fall_back_to_config(monkeypatch):
     captured: dict = {}
 
     async def fake_start_master(host, port, addr, reconnect, points,
-                                gi_interval=0.0, tls=None):
+                                gi_interval=0.0, tls=None, **kwargs):
         captured.update(host=host, port=port, addr=addr)
         return {"ok": True}
 

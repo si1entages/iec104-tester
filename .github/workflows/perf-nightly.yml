@@ -1,0 +1,42 @@
+name: Perf Nightly
+
+# 性能/长稳基准默认不参与 CI（见 pyproject addopts），但完全没人跑就会
+# 静默退化。这里每天跑一次短版基准（30s soak + 10s 20 客户端），
+# 失败时保留日志；需要长稳时手动 workflow_dispatch 并调大环境变量。
+on:
+  schedule:
+    - cron: "0 18 * * *" # 02:00 Asia/Shanghai
+  workflow_dispatch:
+
+concurrency:
+  group: perf-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  perf:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      IEC104_SOAK_SECONDS: "30"
+      IEC104_PERF_CLIENTS_SECONDS: "10"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install pytest pytest-asyncio
+      - name: Run perf benchmarks
+        run: |
+          pytest tests/perf -m perf -q -s --basetemp=.pytest-tmp 2>&1 | tee perf.log
+      - name: Upload perf log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: perf-log
+          path: perf.log
+          if-no-files-found: ignore

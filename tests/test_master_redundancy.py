@@ -168,6 +168,24 @@ class TestRedundancyRouting:
         # 但去重键已学习：应用层门控会把同 ASDU 判为重复
         assert mgr.is_duplicate_asdu(_ASDU) is True
 
+    def test_status_snapshot_for_web(self):
+        """E3：Web 状态页读取的冗余快照（活动通道/连接态/切换次数）."""
+        _, mgr = self._manager()
+        st = mgr.status()
+        assert st["enabled"] is True
+        assert st["active"] == "primary"
+        assert st["standby_host"] == "127.0.0.1"
+        assert st["standby_port"] == 2405
+        assert st["primary_connected"] is False
+        assert st["standby_connected"] is False
+        assert st["failovers"] == 0
+
+        mgr._active = mgr._standby
+        mgr._failover_count = 2
+        st = mgr.status()
+        assert st["active"] == "standby"
+        assert st["failovers"] == 2
+
     def test_is_duplicate_asdu_semantics(self):
         eng, mgr = self._manager()
         assert mgr.is_duplicate_asdu(_ASDU) is False        # 首发

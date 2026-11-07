@@ -28,6 +28,11 @@ export function ConnectionPanel() {
   const [tlsCa, setTlsCa] = useState('')
   const [tlsCert, setTlsCert] = useState('')
   const [tlsKey, setTlsKey] = useState('')
+  // 冗余双通道（E3）：配置只在启动时生效；运行中禁用编辑，避免“改了没生效”误解
+  const [redEnabled, setRedEnabled] = useState(false)
+  const [redHost, setRedHost] = useState('127.0.0.1')
+  const [redPort, setRedPort] = useState(2405)
+  const [redSwitchTimeout, setRedSwitchTimeout] = useState(2)
 
   const start = useCommand(api.master.start)
   const stop = useCommandNoArgs(api.master.stop)
@@ -38,6 +43,21 @@ export function ConnectionPanel() {
     if (typeof status.port === 'number') setPort(status.port)
     if (typeof status.addr === 'number') setAddr(status.addr)
   }, [status?.host, status?.port, status?.addr])
+
+  // 冗余配置回填（刷新页面/CLI 配置启动后仍能看到真实备用地址）
+  useEffect(() => {
+    const red = status?.redundancy
+    if (!red) return
+    setRedEnabled(red.enabled)
+    if (red.standby_host) setRedHost(red.standby_host)
+    if (red.standby_port) setRedPort(red.standby_port)
+    if (red.switch_timeout) setRedSwitchTimeout(red.switch_timeout)
+  }, [
+    status?.redundancy?.enabled,
+    status?.redundancy?.standby_host,
+    status?.redundancy?.standby_port,
+    status?.redundancy?.switch_timeout,
+  ])
 
   const report = (result: { ok: boolean; error?: string }): void => {
     if (result.ok) message.success(t('common.cmdSent'))
@@ -82,6 +102,16 @@ export function ConnectionPanel() {
                           ...(tlsCa ? { cafile: tlsCa } : {}),
                           ...(tlsCert ? { certfile: tlsCert } : {}),
                           ...(tlsKey ? { keyfile: tlsKey } : {}),
+                        },
+                      }
+                    : {}),
+                  ...(redEnabled
+                    ? {
+                        redundancy: {
+                          enabled: true,
+                          standby_host: redHost,
+                          standby_port: redPort,
+                          switch_timeout: redSwitchTimeout,
                         },
                       }
                     : {}),
@@ -170,6 +200,71 @@ export function ConnectionPanel() {
               onChange={(e) => setTlsKey(e.target.value)}
             />
           </>
+        ) : null}
+      </Space>
+
+      <Space wrap style={{ marginBottom: 12 }}>
+        <span style={{ color: token.colorTextTertiary }}>{t('conn.redundancy')}</span>
+        <Switch
+          size="small"
+          checked={redEnabled}
+          disabled={running}
+          onChange={setRedEnabled}
+        />
+        {redEnabled ? (
+          <>
+            <Input
+              prefix={t('conn.standbyHost')}
+              aria-label={t('conn.standbyHost')}
+              placeholder="127.0.0.1"
+              style={{ width: 180 }}
+              value={redHost}
+              disabled={running}
+              onChange={(e) => setRedHost(e.target.value)}
+            />
+            <InputNumber
+              prefix={t('conn.standbyPort')}
+              aria-label={t('conn.standbyPort')}
+              min={1}
+              max={65535}
+              style={{ width: 170 }}
+              value={redPort}
+              disabled={running}
+              onChange={(v) => setRedPort(Number(v ?? 2405))}
+            />
+            <InputNumber
+              prefix={t('conn.switchTimeout')}
+              aria-label={t('conn.switchTimeout')}
+              min={0.1}
+              max={60}
+              step={0.5}
+              style={{ width: 180 }}
+              value={redSwitchTimeout}
+              disabled={running}
+              onChange={(v) => setRedSwitchTimeout(Number(v ?? 2))}
+            />
+          </>
+        ) : null}
+        {status?.redundancy?.enabled ? (
+          <Space size={4} wrap>
+            <Tag color="purple">
+              {t('conn.redActive')}:{' '}
+              {status.redundancy.active === 'standby'
+                ? t('conn.redStandby')
+                : t('conn.redPrimary')}
+            </Tag>
+            <Tag color={status.redundancy.primary_connected ? 'success' : 'default'}>
+              {t('conn.redPrimary')} {status.redundancy.primary_connected
+                ? t('conn.redOnline')
+                : t('conn.redOffline')}
+            </Tag>
+            <Tag color={status.redundancy.standby_connected ? 'success' : 'default'}>
+              {t('conn.redStandby')} {status.redundancy.standby_connected
+                ? t('conn.redOnline')
+                : t('conn.redOffline')}
+            </Tag>
+            <Tag>{t('conn.redFailovers', { n: status.redundancy.failovers })}</Tag>
+          </Space>
         ) : null}
       </Space>
 

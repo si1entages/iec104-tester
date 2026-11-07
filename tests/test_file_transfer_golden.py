@@ -33,6 +33,7 @@ from core.protocol.types import CP56Time2a
 
 #: 公共头部（TypeID 之后由各用例拼）：COT=6(ACT,LE) + CA=1(LE) + IOA=100(3,LE)
 _TAIL = bytes([0x06, 0x00, 0x01, 0x00, 0x64, 0x00, 0x00])
+_TAIL_FILE = bytes([0x0D, 0x00, 0x01, 0x00, 0x64, 0x00, 0x00])
 _NOF5 = bytes([0x05, 0x00])          # NOF=5 (LE)
 _LOF1024 = bytes([0x00, 0x04, 0x00])  # LOF=1024=0x000400 (24-bit LE)
 #: CP56Time2a(ms=12345, min=7, hour=8, day=9, month=10, year=26) = 39 30 07 08 09 0A 1A
@@ -49,49 +50,49 @@ def _tt() -> CP56Time2a:
 def test_golden_f_fr_n1_120_body_6():
     """F_FR_NA_1：NOF(2)+LOF(3,LE)+FRQ(1)，信息体 6 字节."""
     assert ASDUBuilder.build_file_ready(1, 100, 5, 1024, 0) == (
-        bytes([120, 0x01]) + _TAIL + _NOF5 + _LOF1024 + bytes([0x00])
+        bytes([120, 0x01]) + _TAIL_FILE + _NOF5 + _LOF1024 + bytes([0x00])
     )
     assert ASDUBuilder.build_file_ready(1, 100, 5, 1024, 0) == bytes.fromhex(
-        "78 01 06 00 01 00 64 00 00 05 00 00 04 00 00".replace(" ", ""))
+        "78 01 0d 00 01 00 64 00 00 05 00 00 04 00 00".replace(" ", ""))
 
 
 def test_golden_f_sr_n1_121_body_7():
     """F_SR_NA_1：NOF(2)+NOS(1)+LOF(3,LE)+SRQ(1)，信息体 7 字节."""
     assert ASDUBuilder.build_section_ready(1, 100, 5, 1, 1024, 0) == (
-        bytes([121, 0x01]) + _TAIL + _NOF5 + bytes([0x01]) + _LOF1024 + bytes([0x00])
+        bytes([121, 0x01]) + _TAIL_FILE + _NOF5 + bytes([0x01]) + _LOF1024 + bytes([0x00])
     )
     assert ASDUBuilder.build_section_ready(1, 100, 5, 1, 1024, 0) == bytes.fromhex(
-        "79 01 06 00 01 00 64 00 00 05 00 01 00 04 00 00".replace(" ", ""))
+        "79 01 0d 00 01 00 64 00 00 05 00 01 00 04 00 00".replace(" ", ""))
 
 
 def test_golden_f_sc_na1_122_body_4():
     """F_SC_NA_1：NOF(2)+NOS(1)+SCQ(1)，信息体 4 字节（SCQ=1 选择文件）."""
     assert ASDUBuilder.build_call_directory(1, 100, 5, 1, 1) == bytes.fromhex(
-        "7a 01 06 00 01 00 64 00 00 05 00 01 01".replace(" ", ""))
+        "7a 01 0d 00 01 00 64 00 00 05 00 01 01".replace(" ", ""))
 
 
 def test_golden_f_ls_na1_123_body_5():
     """F_LS_NA_1：NOF(2)+NOS(1)+LSQ(1)+CHS(1)，信息体 5 字节、末两字节 = LSQ|CHS."""
     assert ASDUBuilder.build_last_section(1, 100, 5, 1, 1, 0xAB) == bytes.fromhex(
-        "7b 01 06 00 01 00 64 00 00 05 00 01 01 ab".replace(" ", ""))
+        "7b 01 0d 00 01 00 64 00 00 05 00 01 01 ab".replace(" ", ""))
 
 
 def test_golden_f_af_na1_124_body_4():
     """F_AF_NA_1：NOF(2)+NOS(1)+AFQ(1)，信息体 4 字节（AFQ=3 肯定节）."""
     assert ASDUBuilder.build_ack_file_section(1, 100, 5, 1, 3) == bytes.fromhex(
-        "7c 01 06 00 01 00 64 00 00 05 00 01 03".replace(" ", ""))
+        "7c 01 0d 00 01 00 64 00 00 05 00 01 03".replace(" ", ""))
 
 
 def test_golden_f_sg_na1_125_body_4_plus_data():
     """F_SG_NA_1：NOF(2)+NOS(1)+LOS(1)+数据，无段号字段，LOS 在第 4 字节."""
     assert ASDUBuilder.build_file_segment(1, 100, 5, 1, b"\xde\xad\xbe\xef") == bytes.fromhex(
-        "7d 01 06 00 01 00 64 00 00 05 00 01 04 deadbeef".replace(" ", ""))
+        "7d 01 0d 00 01 00 64 00 00 05 00 01 04 deadbeef".replace(" ", ""))
 
 
 def test_golden_f_dr_ta1_126_body_13():
     """F_DR_TA_1：NOF(2)+LOF(3,LE)+SOF(1)+CP56Time2a(7)，信息体 13 字节."""
     assert ASDUBuilder.build_directory_entry(1, 100, 5, 1024, 0, _tt()) == bytes.fromhex(
-        "7e 01 06 00 01 00 64 00 00 05 00 00 04 00 00 39 30 07 08 09 0a 1a".replace(" ", ""))
+        "7e 01 0d 00 01 00 64 00 00 05 00 00 04 00 00 39 30 07 08 09 0a 1a".replace(" ", ""))
 
 
 def test_golden_f_sc_nb1_127_body_4():

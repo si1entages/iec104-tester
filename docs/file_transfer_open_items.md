@@ -2,10 +2,24 @@
 
 > 本文把 [`file_transfer_fls.md`](file_transfer_fls.md) §4 与
 > [`user_guide.md`](user_guide.md) §11「已知限制」中的开放项收敛为**可执行的真机核实步骤**。
-> **当前环境无真机，以下结论均为「待核实」，实现未臆测改动。**
+> **真机尚未到位；2026-11-07 已用第三方 lib60870-C v2.4.1 完成一轮实测并回填（见下），
+> 真机窗口仍需按本清单复测。实现默认行为未据第三方单点证据改动。**
 >
 > 配套探针：`python tests/e2e/qa_file_transfer_probe.py`（只读；默认仅目录召唤）。
 > 探针假定主站已 `--mode master` 连接真机并处于 Running。
+>
+> ## 2026-11-07 第三方实测（非真机）
+>
+> 环境：**lib60870-C v2.4.1** `cs104_server_files` 示例（Windows x64，zig cc 构建），
+> 文件提供者 CA=1 / IOA=30000 / NOF=1（TRANSPARENT_FILE）/ LOF=800 / 2 节×400B。
+> 目的：在无真机窗口时用独立实现获得字节级行为；完整原始记录见
+> [`file_transfer_third_party_probe_2026-11-07.md`](file_transfer_third_party_probe_2026-11-07.md)。
+> **真机结论仍需按本清单复测**。
+>
+> 修复前：本项目默认 `F_SC_NB_1(127)+COT=ACT(6)` 被 lib60870 静默忽略；
+> 节流程只回 `F_SR_NB`、不发 SCQ=6，无法驱动多节。上述 3 个兼容性问题已在
+> 2026-11-07 修复（见文末“已修复项”），**默认代码复测通过**：
+> select/request → 2 节 × 400B → 文件接收完成（size=800）。
 
 ## 0. 通用准备
 
@@ -26,7 +40,11 @@
 | 判定标准 | NOF 是否落在 {0,1,2,3,4}；是否连续/按文件递增；文档注明装置采用的版本 |
 | 代码位置 | `core/protocol/types.py::FileReady/SectionReady/DirectoryEntry.file_name`；`core/protocol/file_transfer.py` |
 
-**观察记录**：装置型号/固件 ______；NOF 集合 ______；结论 ______
+**观察记录**：lib60870-C v2.4.1（第三方，非真机）；NOF=1（正选）/ 9（负选）。
+- 正选 NOF=1 → `F_FR COT=13 file_name=1 file_length=800 status=0`；
+- 负选 NOF=9 → `F_FR COT=13 file_name=9 file_length=0 status=128(0x80)`。
+**结论**：该实现按 Ed.2 枚举解释 NOF（1=TRANSPARENT_FILE），选择时 NOF 必须与提供者一致；
+本项目把 NOF 当任意 16 位标识可以传 1，但未做枚举校验/提示。真机需对照手册确认版本。
 
 ## 2. 目录请求的 SCQ/NOF 组合（本实现用 SCQ=5，项目约定）
 
@@ -38,7 +56,10 @@
 | 判定标准 | 收到 ≥1 条 126 + 1 条 123(LSQ=0) = 组合可用；否则需改 `SCQ_REQUEST_DIRECTORY` 常量并重测 |
 | 代码位置 | `core/protocol/types.py::SCQ_NAMES`；`file_transfer.py` 的 `SCQ_REQUEST_DIRECTORY` |
 
-**观察记录**：装置响应 COT______；F_DR 条数 ______；终止标记 LSQ ______；AFQ（如有）______
+**观察记录**：lib60870-C v2.4.1；SCQ=5 目录召唤（无论 COT=6 还是 COT=13）**均无任何回帧**
+（无 F_DR/F_LS/F_AF）；该实现的 file service 只处理 SCQ=1/2/3/6，**没有目录处理器**。
+**结论**：SCQ=5 不是可移植的目录约定；第三方无法验证目录上送。select=1 / request=2 正常。
+目录方式（SCQ/NOF/COT 组合）仍需真机确认，不能据第三方推断。
 
 ## 3. WITH_DEACT 后续动作（LSQ=2/4 之后）
 
@@ -50,7 +71,9 @@
 | 判定标准 | 「不发送 DEACT 也能继续对话」= 当前实现可接受；否则需补发 DEACT 流程 |
 | 代码位置 | `core/protocol/file_transfer.py::handle_last_section`；`MasterEngine` 文件状态机 |
 
-**观察记录**：末帧 LSQ ______；装置是否等待 DEACT ______；再发目录是否正常 ______
+**观察记录**：lib60870-C v2.4.1；实测节结束 `F_LS LSQ=3`、文件结束 `F_LS LSQ=1`（未出现 2/4）；
+主站回 `F_AF POS_ACK_SECTION(3)` 后，装置继续下一节并最终结束；**未观察到等待 COT=8 DEACT**。
+**结论**：该实现不要求 DEACT；当前实现不补发 DEACT 可继续对话（针对 lib60870）。真机需按 LSQ=2/4 复测。
 
 ## 4. 多节流程（真正的多节累积/逐节校验）
 
@@ -62,7 +85,12 @@
 | 判定标准 | 若装置只发单节 → 当前实现可用；若多节 → 记录节数/每节长度/LSQ 组合，作为实现需求 |
 | 代码位置 | `core/protocol/file_transfer.py`；`docs/file_transfer_fls.md` §5 |
 
-**观察记录**：文件 LOF ______；节数 ______；每节段数 ______；LSQ 序列 ______
+**观察记录**：lib60870-C v2.4.1；LOF=800，2 个数据节×400B；每节 2 段（236B+164B）；
+LSQ 序列：节1=3(CHS=184) → 节2=3(CHS=72) → 文件结束节3 LSQ=1(CHS=0)。
+**结论（已修复）**：多节真实存在；主站现已自动执行
+「F_SR → SCQ=6 → F_SG… → F_LS → F_AF(1/3)」，并按**本节**数据校验 CHS；
+第三方 800B 文件默认代码复测 `File received: name=1 size=800`、无 CHS 告警。
+从站侧仍按单节发送（多节分包未实现，非本次清单项）。
 
 ## 5. FRQ/SRQ 显示表（否定标志的位语义）
 
@@ -74,7 +102,10 @@
 | 判定标准 | 原值为 0x01 还是 0x80？据此统一显示表（`FRQ_NAMES`/`SRQ_NAMES`） |
 | 代码位置 | `core/protocol/types.py::FRQ_NAMES/SRQ_NAMES`（如存在）；`docs/file_transfer_fls.md` §2.6 |
 
-**观察记录**：否定时 FRQ=______；SRQ=______；最终采用口径 ______
+**观察记录**：lib60870-C v2.4.1；否定选择 NOF=9 → `F_FR status=128`，肯定 → `status=0`；
+未构造出否定 F_SR，SRQ 未直接观察。
+**结论**：该实现用 **最高位 0x80 = 否定**，与当前 `FRQ_NAMES/SRQ_NAMES` 的 lib60870 口径一致；
+SRQ 可按同源处理，真机再补一次否定节场景。
 
 ## 附：关联待核实项（同源，非用户清单 5 项）
 
@@ -86,8 +117,19 @@
 
 | 日期 | 装置型号/固件 | 项目 | 观察 | 结论 | 是否需要改代码 |
 |------|---------------|------|------|------|----------------|
-| | | 1 NOF | | | |
-| | | 2 SCQ | | | |
-| | | 3 DEACT | | | |
-| | | 4 多节 | | | |
-| | | 5 FRQ/SRQ | | | |
+| 2026-11-07 | lib60870-C v2.4.1（第三方，非真机） | 1 NOF | 正选 NOF=1 → F_FR len=800 status=0；负选 NOF=9 → len=0 status=0x80 | Ed.2 枚举；NOF 必须匹配提供者 | 待真机（可加枚举提示） |
+| 2026-11-07 | 同上 | 2 SCQ | SCQ=5 目录无回帧；select=1/request=2 正常 | SCQ=5 非可移植目录约定；第三方无目录处理器 | 待真机 |
+| 2026-11-07 | 同上 | 3 DEACT | 节 LSQ=3 / 文件 LSQ=1；回 F_AF(3) 后继续；无 COT=8 等待 | 不要求 DEACT（针对 lib60870） | 否（对 lib60870） |
+| 2026-11-07 | 同上 | 4 多节 | 800B / 2 节×400B / 每节 2 段（236+164）/ LSQ=3,3,1 / CHS=184,72,0 | 多节真实存在；已补 SCQ=6 节请求与逐节 CHS；默认代码复测接收完成 | ✅ 已改（主站） |
+| 2026-11-07 | 同上 | 5 FRQ/SRQ | 否定 F_FR status=128(0x80)；肯定 0；SRQ 未观察 | 0x80=否定，与当前显示表一致 | 否 |
+
+### 本轮已修复项（第三方实测暴露，默认代码已改）
+
+1. ✅ **F_SC 类型/COT**：文件 select/request/directory 统一为
+   `F_SC_NA_1(122)+COT=FILE(13)`；`F_SC_NB_1(127)` 仅保留解码兼容。
+2. ✅ **多节驱动**：收到 `F_SR` 自动发 `F_SC(SCQ=6, NOS)`；`F_LS` 按 LSQ 回
+   `F_AF(POS_ACK_FILE=1 / POS_ACK_SECTION=3)`；CHS 按本节段数据校验。
+3. ✅ **旧确认类型**：主站不再发送 `F_FR_NB(128)/F_SR_NB(129)`（仍可接收旧对端）；
+   lib60870 复测不再出现 `F_FR_NB COT=44`。
+
+> 真机仍建议按本清单复测；若目标装置只认 127/旧 NB 语义，再评估兼容模式。

@@ -237,6 +237,10 @@ class MasterEngine(EngineBase):
         """当前点表引用（供 SBO 查询使用），未设置时为 None."""
         return self._point_table
 
+    def redundancy_status(self) -> dict | None:
+        """冗余运行态快照；未启用冗余时返回 None（Web 状态页展示用）."""
+        return self._redundancy.status() if self._redundancy else None
+
     def set_point_table(self, point_table: PointTable | None) -> None:
         """设置点表引用.
 
@@ -619,8 +623,13 @@ class MasterEngine(EngineBase):
         await self._protocol.file_select(ioa, file_name)
 
     async def file_request(self, ioa: int, file_name: int) -> None:
-        """发送文件请求命令 (F_SC_NB_1)."""
+        """发送文件请求命令 (F_SC_NA_1, COT=FILE, SCQ=2)."""
         await self._protocol.file_request(ioa, file_name)
+
+    async def request_section(self, ioa: int, file_name: int,
+                              section_name: int) -> None:
+        """发送节请求 (F_SC_NA_1, COT=FILE, SCQ=6)."""
+        await self._protocol.request_section(ioa, file_name, section_name)
 
     async def file_ack(self, ioa: int, file_name: int,
                         section_name: int = 0, qualifier: int = 1) -> None:

@@ -1,11 +1,11 @@
 """一致性测试套件接入 pytest（C 类：conformance → CI）.
 
 `tests/conformance/test_conformance.py` 是独立的、自建 runner 的一致性套件
-（42 个 case，10 个 `_test_*` 方法，可单独运行）。本文件把它接入 pytest：
+（50 个 case，11 个 `_test_*` 方法，可单独运行）。本文件把它接入 pytest：
 
 - 方法级参数化：每个 `_test_*` 各成一个 pytest 用例，失败时列出具体 case
   （id/name/result/message），便于定位到标准条目；
-- 汇总用例：跑全量并锁死 `total == 42`、无 FAIL/ERROR/SKIP——套件被悄悄删减
+- 汇总用例：跑全量并锁死 `total == 50`、无 FAIL/ERROR/SKIP——套件被悄悄删减
   或某个子项未产生结果都会红灯（防止「0 个用例也算通过」）。
 
 注意：不改动原套件的独立运行方式（`python tests/conformance/test_conformance.py`），
@@ -29,7 +29,7 @@ from tests.conformance.test_conformance import (
 )
 
 # 套件期望的 case 总数（与 PROJECT.md / tests/README 的「42 个用例」一致）
-EXPECTED_TOTAL = 42
+EXPECTED_TOTAL = 50
 
 SUITE_METHODS = [
     "_test_apci_encoding",
@@ -42,6 +42,7 @@ SUITE_METHODS = [
     "_test_flow_control",
     "_test_state_machine",
     "_test_timers",
+    "_test_negative_cases",
 ]
 
 
@@ -72,7 +73,7 @@ def test_conformance_method(method_name: str):
 
 
 def test_conformance_suite_total_and_all_pass():
-    """全量汇总：42 个 case 全部 PASS（防止套件删减 / 静默跳过）."""
+    """全量汇总：50 个 case 全部 PASS（防止套件删减 / 静默跳过）."""
     report = ConformanceTestSuite().run_all()
     assert report.total == EXPECTED_TOTAL, (
         f"一致性套件 case 数变化：{report.total} != {EXPECTED_TOTAL}"

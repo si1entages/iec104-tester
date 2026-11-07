@@ -161,6 +161,8 @@ class FileTransferManager:
         self._on_send_asdu: Callable[[bytes], None] | None = None
         self._on_file_received: Callable[[int, bytes], None] | None = None
         self._on_error: Callable[[str], None] | None = None
+        # 当前节数据（逐节 CHS 校验用；与跨节累积的 _context.data 分开）
+        self._section_data = bytearray()
 
     @property
     def context(self) -> FileTransferContext:
@@ -195,6 +197,7 @@ class FileTransferManager:
         self._context.file_length = data.file_length
         # 新传输边界：清空上一轮残留（D2）
         self._context.data.clear()
+        self._section_data.clear()
         self._context.segment_number = 0
         self._context.lsq = 0
         self._context.state = FileTransferState.FILE_READY
@@ -204,6 +207,7 @@ class FileTransferManager:
         logger.info(f"Section Ready: name={data.file_name} section={data.section_name} length={data.section_length}")
         self._context.section_name = data.section_name
         self._context.section_length = data.section_length
+        self._section_data.clear()
         self._context.state = FileTransferState.SECTION_READY
 
     def handle_file_segment(self, data: FileSegment) -> None:
@@ -212,6 +216,7 @@ class FileTransferManager:
         logger.debug(f"File Segment: name={data.file_name} section={data.section_name} len={len(data.data)}")
         self._context.segment_number += 1
         self._context.data.extend(data.data)
+        self._section_data.extend(data.data)
         self._context.state = FileTransferState.TRANSFERRING
 
     def handle_last_section(self, data: LastSection) -> None:
@@ -231,14 +236,21 @@ class FileTransferManager:
             f"Last Section: name={data.file_name} section={data.section_name} "
             f"LSQ={lsq}({_LSQ_NAMES.get(lsq, '未定义')}) CHS={data.chs}"
         )
+        # 末帧可能用一个新的“文件结束节号”（lib60870 用 section=3），
+        # 此时没有本节段数据，CHS 不应按上一节数据校验。
+        same_section = bool(self._section_data) and (
+            not self._context.section_name
+            or data.section_name == self._context.section_name
+        )
         self._context.lsq = lsq
+        self._context.section_name = data.section_name
         self._context.state = FileTransferState.LAST_SECTION
 
         # CHS 接收侧校验：算法为「该节所有段八位组的算术和 mod 256」（非标准原文，
         # 见模块顶部说明与 docs/file_transfer_fls.md §4.1）。LSQ=0（目录结束标记）
         # 与超出定义域的取值不校验。校验不通过 → **记告警，不丢弃**已收数据。
-        if lsq in LSQ_FILE_COMPLETE or lsq in LSQ_SECTION_COMPLETE:
-            expected = section_checksum(bytes(self._context.data))
+        if (lsq in LSQ_FILE_COMPLETE or lsq in LSQ_SECTION_COMPLETE) and same_section:
+            expected = section_checksum(bytes(self._section_data))
             if data.chs != expected:
                 logger.warning(
                     f"F_LS_NA_1 CHS mismatch: received={data.chs:#04x} "
@@ -252,7 +264,7 @@ class FileTransferManager:
                 self._on_file_received(self._context.file_name, bytes(self._context.data))
         elif lsq in LSQ_SECTION_COMPLETE:
             logger.info(
-                f"F_LS_NA_1 LSQ={lsq}：仅本节传输结束，文件未结束（多节累积未实现）"
+                f"F_LS_NA_1 LSQ={lsq}：仅本节传输结束，文件未结束（继续等待下一节）"
             )
         elif lsq != LSQ_NOT_USED:
             logger.warning(f"F_LS_NA_1 LSQ={lsq} 不在标准定义域 0-4 内（非标对端？）")
@@ -280,14 +292,12 @@ class FileTransferMaster(FileTransferManager):
     """主站文件传输管理器.
 
     实现主站侧的文件传输流程：
-    1. 发送文件选择 (F_SC_NB_1)
-    2. 等待文件准备就绪 (F_FR_NA_1)
-    3. 发送文件准备就绪确认 (F_FR_NB_1)
-    4. 等待节准备就绪 (F_SR_NA_1)
-    5. 发送节准备就绪确认 (F_SR_NB_1)
-    6. 接收段 (F_SG_NA_1)
-    7. 接收最后的节 (F_LS_NA_1)
-    8. 发送确认 (F_AF_NA_1)
+    1. 发送文件选择/请求 (F_SC_NA_1, COT=FILE, SCQ=1/2)
+    2. 等待文件准备就绪 (F_FR_NA_1)；**不**回 F_FR_NB
+    3. 等待节准备就绪 (F_SR_NA_1)
+    4. 发送节请求 (F_SC_NA_1, SCQ=6)
+    5. 接收段 (F_SG_NA_1) 与 F_LS_NA_1
+    6. 按 LSQ 回 F_AF_NA_1：LSQ=1/2 → 肯定文件，LSQ=3/4 → 肯定节
     """
 
     def __init__(self, common_addr: int = 1):
@@ -301,7 +311,7 @@ class FileTransferMaster(FileTransferManager):
         self._context.state = FileTransferState.FILE_SELECTED
         self._context.start_time = time.monotonic()
 
-        asdu_data = ASDUBuilder.build_file_select_call_get(
+        asdu_data = ASDUBuilder.build_call_directory(
             self._common_addr, ioa, file_name, qualifier=SCQ_REQUEST_FILE
         )
         if self._on_send_asdu:
@@ -376,18 +386,28 @@ class FileTransferSlave(FileTransferManager):
         logger.info(f"File request received: file_name={file_name} qualifier={qualifier}")
 
         if qualifier in (SCQ_SELECT_FILE, SCQ_REQUEST_FILE):
-            # 选择文件 / 请求文件：登记并回 F_FR_NA_1（FRQ 肯定）
+            # 选择文件 / 请求文件：登记并回 F_FR_NA_1（FRQ 肯定）。
+            # 标准流程：SELECT(1) → F_FR → REQUEST(2) → F_SR → SECTION(6) → F_SG/F_LS。
+            # 若调用方直接发 REQUEST（跳过 SELECT），这里补发 F_FR 再发 F_SR，
+            # 保证单命令也能推进（内部 API 兼容）。
+            was_ready = (
+                self._context.state == FileTransferState.FILE_READY
+                and self._context.file_name == file_name
+            )
             self._context.file_name = file_name
-            self._context.state = FileTransferState.FILE_SELECTED
             self._context.start_time = time.monotonic()
-
-            # 获取文件数据
             file_data = self._file_data.get(file_name, b'')
             self._context.file_length = len(file_data)
             self._context.data = bytearray(file_data)
+            self._context.state = FileTransferState.FILE_SELECTED
 
-            # 发送文件准备就绪
-            self._send_file_ready(ioa)
+            if qualifier == SCQ_SELECT_FILE:
+                self._send_file_ready(ioa)
+            else:
+                if not was_ready:
+                    # 直接 REQUEST（跳过 SELECT）：补发 F_FR 保证状态完整
+                    self._send_file_ready(ioa)
+                self._send_section_ready(ioa)
         elif qualifier == SCQ_REQUEST_DIRECTORY:
             # SCQ=5 触发目录上送 —— 该组合**未核实**（标准 SCQ=5 为选择节），
             # 保持开放不推断（见 docs/file_transfer_fls.md §4.4）。
@@ -405,8 +425,9 @@ class FileTransferSlave(FileTransferManager):
             # 去激活：多节/去激活流程未实现（开放项，见 docs §4.5/4.6），仅记录
             logger.info(f"Deactivate request (SCQ={qualifier}) noted, no-op (flow not implemented)")
         elif qualifier == SCQ_REQUEST_SECTION:
-            # 请求节：多节流程未实现（开放项，见 docs §4.6），不推断
-            logger.warning("Request section (SCQ=6) not implemented (multi-section flow open)")
+            # 请求节：发送该节全部 F_SG，并以 F_LS 结束（当前实现单节）。
+            # 标准/第三方流程：主站收到 F_SR 后必须发 SCQ=6，否则从站不发数据。
+            self._send_segments(ioa)
         else:
             logger.warning(f"Unsupported file request qualifier: {qualifier}")
 

@@ -23,6 +23,10 @@ import type {
   SchemaResponse,
   SimulationStatusResponse,
   Status,
+  CaptureFramesResponse,
+  CaptureStatus,
+  TestScriptInfo,
+  TestStatusResponse,
 } from './types'
 
 /** 实时日志缓冲上限（与旧原生 UI 的 500 条保持一致）。 */
@@ -47,6 +51,10 @@ export const queryKeys = {
   historyData: (params: HistoryDataParams) => ['history', 'data', params] as const,
   historyFrames: (params: HistoryFramesParams) => ['history', 'frames', params] as const,
   simulationStatus: ['simulation', 'status'] as const,
+  captureStatus: ['capture', 'status'] as const,
+  captureFrames: (offset: number, limit: number) => ['capture', 'frames', offset, limit] as const,
+  testScripts: ['tests', 'scripts'] as const,
+  testStatus: ['tests', 'status'] as const,
 }
 
 // ── 查询 ───────────────────────────────────────────────────────────────
@@ -286,5 +294,41 @@ export function useCommandNoArgs<R extends OkResponse = OkResponse>(fn: () => Pr
   return useMutation<R, Error, void>({
     mutationFn: () => fn(),
     onSettled,
+  })
+}
+
+/** 报文录制/回放状态；录制中 1s 轮询，停止后降低频率。 */
+export function useCaptureStatusQuery() {
+  return useQuery<CaptureStatus>({
+    queryKey: queryKeys.captureStatus,
+    queryFn: api.capture.status,
+    refetchInterval: (query) => (query.state.data?.recording ? 1000 : 5000),
+  })
+}
+
+export function useCaptureFramesQuery(offset: number, limit: number, enabled: boolean) {
+  return useQuery<CaptureFramesResponse>({
+    queryKey: queryKeys.captureFrames(offset, limit),
+    queryFn: () => api.capture.frames(offset, limit),
+    enabled,
+    staleTime: 0,
+  })
+}
+
+/** 测试脚本列表（静态，挂载时取一次）。 */
+export function useTestScriptsQuery() {
+  return useQuery<TestScriptInfo[]>({
+    queryKey: queryKeys.testScripts,
+    queryFn: async () => (await api.tests.scripts()).scripts,
+    staleTime: 30_000,
+  })
+}
+
+/** 测试运行状态；运行中 1s 轮询，空闲 5s。 */
+export function useTestStatusQuery() {
+  return useQuery<TestStatusResponse>({
+    queryKey: queryKeys.testStatus,
+    queryFn: api.tests.status,
+    refetchInterval: (query) => (query.state.data?.running ? 1000 : 5000),
   })
 }

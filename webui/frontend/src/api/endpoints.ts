@@ -9,6 +9,9 @@ import type {
   AuthProbeResponse,
   BatchPointsRequest,
   BitstringRequest,
+  CaptureActionResult,
+  CaptureFramesResponse,
+  CaptureStatus,
   CommandResponse,
   DelayRequest,
   EpRequest,
@@ -48,6 +51,8 @@ import type {
   SessionExport,
   Status,
   StepRequest,
+  TestScriptInfo,
+  TestStatusResponse,
   YcRequest,
   YkRequest,
   YmRequest,
@@ -58,6 +63,15 @@ export const LOGS_EXPORT_URL = '/api/logs/export'
 export const POINTS_CSV_URL = '/api/export/points.csv'
 export const DIAGNOSTICS_EXPORT_URL = '/api/diagnostics/export'
 export const HISTORY_EXPORT_URL = '/api/history/export'
+export const CAPTURE_FILES_URL = '/api/capture/files'
+export const CAPTURE_DOWNLOAD_PATH = '/api/capture/download/{name}'
+export const TEST_REPORT_PATH = '/api/tests/reports/{run_id}/{name}'
+export const captureDownloadUrl = (name: string) =>
+  CAPTURE_DOWNLOAD_PATH.replace('{name}', encodeURIComponent(name))
+export const testReportUrl = (runId: string, name: string) =>
+  TEST_REPORT_PATH
+    .replace('{run_id}', encodeURIComponent(runId))
+    .replace('{name}', encodeURIComponent(name))
 
 function logsQuery(params: LogQueryParams): Record<string, string | number | undefined> {
   return {
@@ -181,5 +195,38 @@ export const api = {
     reset: () => apiPost<OkResponse>('/api/simulation/reset'),
     disconnect: (duration: number) =>
       apiPost<OkResponse>('/api/simulation/disconnect', { duration }),
+  },
+
+  // ── 报文录制/回放（E2，契约 §2.14）──────────────────────────────────
+  capture: {
+    status: () => apiGet<CaptureStatus>('/api/capture/status'),
+    files: () => apiGet<{ ok: boolean; files: import('./types').CaptureFileInfo[] }>(CAPTURE_FILES_URL),
+    start: (name?: string) =>
+      apiPost<CaptureActionResult>('/api/capture/start', name ? { name } : {}),
+    stop: () => apiPost<CaptureActionResult>('/api/capture/stop'),
+    pause: () => apiPost<CaptureActionResult>('/api/capture/pause'),
+    resume: () => apiPost<CaptureActionResult>('/api/capture/resume'),
+    export: (name: string, format: string) =>
+      apiPost<OkResponse & { file: string; frames: number }>('/api/capture/export', { name, format }),
+    load: (name: string) =>
+      apiPost<OkResponse & { file: string; frames: number } & CaptureStatus['playback']>(
+        '/api/capture/load', { name }),
+    frames: (offset = 0, limit = 200) =>
+      apiGet<CaptureFramesResponse>('/api/capture/frames', { offset, limit }),
+    play: (speed: number) =>
+      apiPost<CaptureStatus['playback'] & OkResponse>('/api/capture/play', { speed }),
+    stopPlayback: () => apiPost<CaptureStatus['playback'] & OkResponse>('/api/capture/playback/stop'),
+    pausePlayback: () => apiPost<CaptureStatus['playback'] & OkResponse>('/api/capture/playback/pause'),
+    step: (direction: 'forward' | 'backward') =>
+      apiPost<CaptureStatus['playback'] & OkResponse>('/api/capture/step', { direction }),
+  },
+
+  // ── 自动化测试中心（E1，契约 §2.15）────────────────────────────────
+  tests: {
+    scripts: () => apiGet<{ ok: boolean; scripts: TestScriptInfo[] }>('/api/tests/scripts'),
+    run: (scripts: string[]) => apiPost<OkResponse & { run?: TestStatusResponse['run'] }>('/api/tests/run', { scripts }),
+    stop: () => apiPost<OkResponse>('/api/tests/stop'),
+    status: () => apiGet<TestStatusResponse>('/api/tests/status'),
+    reportUrl: testReportUrl,
   },
 }

@@ -5,6 +5,11 @@ on:
     branches: [main, master]
   pull_request:
 
+# 同一分支的新 push 取消旧 run，避免全矩阵重复占用 runner。
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     runs-on: ubuntu-24.04
@@ -23,12 +28,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.13"]
+        # 支持范围两端 + 当前主力版本；3.14 为本机开发版本，纳入防漂移。
+        python-version: ["3.11", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements.txt
       - name: Install dependencies
         run: |
           pip install PyYAML aiohttp
@@ -38,7 +46,18 @@ jobs:
         # 清空重建），避免默认的共享临时根（如 %TEMP%/pytest-of-<user>）无界累积
         # pytest-N / garbage-* 目录。累积到一定数量会拖慢收集，并在带「批量删除
         # 需确认」类安全钩子的环境里截断输出、把退出码变成 1（假失败）。
-        run: pytest tests/ -q --cov=core --cov-branch --cov-report=term-missing --cov-fail-under=91 --basetemp=.pytest-tmp
+        run: pytest tests/ -q --cov=core --cov=webui --cov-branch --cov-report=term-missing --cov-report=xml --cov-fail-under=91 --basetemp=.pytest-tmp
+      - name: WebUI coverage gate (>=85%)
+        # 后端 core 与 webui 分开设门禁：webui 处理函数众多，合并统计会被 core
+        # 的高覆盖率掩盖。85% 为当前实测（91%）留出的抖动余量。
+        run: coverage report --include="webui/*" --fail-under=85
+      - name: Upload coverage XML
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-xml-${{ matrix.python-version }}
+          path: coverage.xml
+          if-no-files-found: ignore
 
   # 协议层变异冒烟（12 个高价值变异，约 10s）：防止测试对编解码边界“假绿”。
   mutation-smoke:
@@ -128,6 +147,48 @@ jobs:
           path: dist/
           if-no-files-found: error
 
+  # 发布流水线只在打 tag 时跑 onefile；PR 阶段用 Linux onefile 做 dry-run，
+  # 避免「tag 推上去才发现 PyInstaller 单文件路径坏了」。
+  packaging-onefile:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: webui/frontend/package-lock.json
+      - name: Build frontend
+        working-directory: webui/frontend
+        run: |
+          npm ci
+          npm run build
+      - name: Build one-file executables
+        run: |
+          python -m pip install -r requirements.txt pyinstaller
+          python build/build_all.py --skip-frontend --onefile
+      - name: Smoke one-file master
+        shell: bash
+        run: |
+          ./dist/iec104-master --no-browser --no-history --http-port 18765 &
+          PID=$!
+          trap "kill $PID 2>/dev/null || true" EXIT
+          ready=0
+          for i in $(seq 1 90); do
+            sleep 1
+            if python -c 'import json,sys,urllib.request; d=json.load(urllib.request.urlopen("http://127.0.0.1:18765/api/status", timeout=2)); sys.exit(0 if d.get("role")=="master" else 1)' 2>/dev/null; then
+              ready=1; break
+            fi
+          done
+          if [ "$ready" != "1" ]; then echo "one-file master did not become ready"; exit 1; fi
+          curl -fsS -o /dev/null "http://127.0.0.1:18765/app/"
+          test -x ./dist/iec104-slave
+
   frontend:
     runs-on: ubuntu-24.04
     defaults:
@@ -144,8 +205,15 @@ jobs:
         run: npm ci
       - name: Type-check & build
         run: npm run build
-      - name: Unit tests
-        run: npm test
+      - name: Unit tests with coverage
+        run: npm run test:coverage
+      - name: Upload frontend coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-coverage
+          path: webui/frontend/coverage
+          if-no-files-found: ignore
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
         with:

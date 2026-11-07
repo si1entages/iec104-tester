@@ -36,7 +36,31 @@ export interface Status {
   clients?: number
   client_list?: string[]
   simulation?: boolean
+  /** 冗余双通道运行态（仅主站启用时存在）（E3） */
+  redundancy?: RedundancyStatus
   schemaVersion?: number
+}
+
+/** 主站冗余双通道运行态（`MasterRedundancy.status()` 的 TS 投影） */
+export interface RedundancyStatus {
+  enabled: boolean
+  active: 'primary' | 'standby' | null
+  primary_connected: boolean
+  standby_connected: boolean
+  standby_host: string
+  standby_port: number
+  switch_timeout: number
+  dedup_window: number
+  failovers: number
+}
+
+/** `POST /api/master/start` 的冗余配置（省略时沿用 CLI/--config） */
+export interface RedundancyOptions {
+  enabled?: boolean
+  standby_host?: string
+  standby_port?: number
+  switch_timeout?: number
+  dedup_window?: number
 }
 
 export interface Point {
@@ -165,6 +189,7 @@ export interface MasterStartRequest {
   reconnect?: boolean
   gi_interval?: number
   tls?: TlsOptions
+  redundancy?: RedundancyOptions
 }
 
 /** 1–16 = 组召唤；20 = 站召唤（默认） */
@@ -601,3 +626,104 @@ export type WsMessage =
   | WsEnvelope<'frame', Frame>
   | WsEnvelope<'event', EngineEvent>
   | WsEnvelope<'log', LogRow>
+
+
+// ── 报文录制/回放（E2）─────────────────────────────────────────────────
+
+export interface CaptureFileInfo {
+  name: string
+  size: number
+  mtime: number
+}
+
+export interface CaptureFrame {
+  timestamp: number
+  absolute_time: number
+  direction: string
+  frame_type: string
+  length: number
+  hex: string
+  metadata: Record<string, unknown>
+}
+
+export interface CapturePlayback {
+  loaded: boolean
+  file?: string
+  state?: string
+  index?: number
+  total?: number
+  progress?: number
+  duration?: number
+  current?: CaptureFrame | null
+}
+
+export interface CaptureActionResult extends OkResponse {
+  recording?: boolean
+  paused?: boolean
+  frames?: number
+  rx?: number
+  tx?: number
+  dropped?: number
+  elapsed?: number
+  file?: string | null
+}
+
+export interface CaptureStatus {
+  ok: boolean
+  recording: boolean
+  paused: boolean
+  frames: number
+  rx: number
+  tx: number
+  dropped: number
+  elapsed: number
+  file: string | null
+  files: CaptureFileInfo[]
+  playback: CapturePlayback
+}
+
+export interface CaptureFramesResponse {
+  ok: boolean
+  total: number
+  offset: number
+  rows: CaptureFrame[]
+}
+
+
+// ── 自动化测试中心（E1）───────────────────────────────────────────────
+
+export interface TestScriptInfo {
+  id: string
+  name: string
+  description: string
+  role: string
+  steps: number
+  tags?: string[]
+  timeout?: number
+  error?: string
+}
+
+export interface TestReportInfo {
+  name: string
+  format: string
+  size: number
+}
+
+export interface TestRun {
+  id: string
+  status: 'running' | 'passed' | 'failed' | 'stopped' | 'error'
+  scripts: string[]
+  started_at: number
+  ended_at: number | null
+  returncode: number | null
+  summary: { scripts: number; passed: number; failed: number } | null
+  lines: string[]
+  results: { script: string; returncode: number }[]
+  reports: TestReportInfo[]
+}
+
+export interface TestStatusResponse {
+  ok: boolean
+  running: boolean
+  run: TestRun | null
+}
