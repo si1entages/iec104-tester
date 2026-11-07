@@ -3,7 +3,7 @@
 本文件记录对外可见的功能/修复；版本号与 `pyproject.toml`、
 `core/version.py`、`webui/frontend/package.json` 保持一致。
 
-## [Unreleased]
+## [1.3.1] — 2026-11-07
 
 ### Changed
 

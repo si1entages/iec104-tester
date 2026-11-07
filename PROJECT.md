@@ -157,6 +157,11 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - [x] E5 发布体验：`--version`、README 4 张界面截图、`SECURITY.md`、`CHANGELOG.md`
 - [x] F2 一致性负例：新增 8 个畸形 APCI/ASDU 用例（42→50），独立 runner 与 pytest 汇总同步锁死
 
+### TODO（暂缓，等待外部条件）
+
+- [ ] **C4 真机复测**：真机窗口到位后，按 [`docs/file_transfer_open_items.md`](docs/file_transfer_open_items.md) 的 5 项清单（NOF/SCQ/DEACT/多节/FRQ-SRQ）逐项复测并回填。已完成两轮 lib60870-C v2.4.1 第三方回归（2026-11-07，含 v1.3.0 复测），第三方结论不能替代真机。
+- [ ] 清理远端 Dependabot 分支 `dependabot/github_actions/actions-4eb699f393`（PR #5 已合并；GitHub 未自动删除）。
+
 ## 双应用入口（纯 Web UI）
 
 | 产品 | 入口 | 端口默认 |

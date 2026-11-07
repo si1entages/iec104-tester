@@ -388,8 +388,9 @@ graph TD
 | **T47** | 发布体验与负例（E5/F2，2026-11-07） | `--version`、README 4 张截图、SECURITY/CHANGELOG；一致性套件新增 8 个畸形 APCI/ASDU 负例（42→50，pytest 汇总同步锁死） |
 | **T48** | 前端依赖大版本升级（v1.3.0，2026-11-07） | Dependabot PR #6（17 项：React 19/antd 6/TS 7/Vite 8/Vitest 5/ECharts 6 等）+ PR #5（`actions/download-artifact` 7→8）；适配 TS7 去 `baseUrl`（`paths: ./src/*`）、antd6 改 `role=combobox`/`role=tabpanel`/aria-label；Vitest5 覆盖率口径重基线 statements 55 / lines 58 / branches 50 / functions 53；合并后 master CI 10/10 绿 |
 | **T49** | antd 6 弃用告警清零 + C4 回归（2026-11-07） | `Alert message→title`、`Space direction→orientation`、`InputNumber addonAfter→suffix`、`Modal maskClosable→mask.closable`、`Statistic valueStyle→styles.content`；前端 antd 告警 0、128 passed、Playwright 22/22；重建 `webui/static/app`；lib60870 第三方 800B 多节回归通过（真机仍待） |
+| **T50** | C4 真机复测（暂缓，待装置窗口） | 按 `docs/file_transfer_open_items.md` 5 项（NOF/SCQ/DEACT/多节/FRQ-SRQ）逐项复测并回填；已完成两轮 lib60870-C v2.4.1 第三方回归（含 v1.3.0），不替代真机 |
 
-> **累计统计**：T01~T49 **全部完成，待办 0**（T39 第三方实测已回填，真机复测待窗口）。
+> **累计统计**：T01~T49 **全部完成**；**待办 1**（T50 真机复测，暂缓待窗口；T39 第三方实测已回填）。
 
 ---
 
