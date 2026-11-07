@@ -3,7 +3,25 @@
 本文件记录对外可见的功能/修复；版本号与 `pyproject.toml`、
 `core/version.py`、`webui/frontend/package.json` 保持一致。
 
-## [1.2.0] — 2026-11-07 (unreleased)
+## [1.3.0] — 2026-11-07
+
+### Changed
+
+- **前端依赖大版本升级**（Dependabot #6，17 项）：React 19.3、Ant Design 6.6、
+  TypeScript 7.0、Vite 8.3、Vitest 5.1、ECharts 6.1、zustand 5、jsdom 30 等。
+  无协议/API 变更，产物与交互保持一致。
+- TypeScript 7 移除 `tsconfig` 的 `baseUrl`：改用
+  `paths: {"@/*": ["./src/*"]}`。
+- Ant Design 6 移除 `.ant-select-selector` / `.ant-tabs-tabpane-active` 等内部类名：
+  测试改用 `role=combobox` / `role=tabpanel` 与 `aria-label`
+  （`CommandPanel` / `ManualSetPanel` 补充可访问标签）。
+- Vitest 5 + `@vitest/coverage-v8` 5 的覆盖率统计口径变化（旧口径 lines 81%
+  → 新口径约 60%）：阈值按新口径重基线为 statements 55 / lines 58 /
+  branches 50 / functions 53，并在 `vitest.config.ts` 注明原因。
+- CI：`actions/download-artifact` 7→8（#5）。v8 为 ESM，且下载摘要不匹配
+  默认直接失败；本仓库 `path` + `merge-multiple` 用法不变。
+
+## [1.2.0] — 2026-11-07
 
 ### Added
 

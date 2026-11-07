@@ -386,8 +386,9 @@ graph TD
 | **T45** | Web 报文录制/回放（E2，2026-11-07） | `/api/capture/*` 14 端点 +「报文抓包」页：录制启停/暂停、文件列表/下载、i104/json/pcap/pcapng 导出、离线回放/单步/倍速；5 后端 + 2 前端用例 |
 | **T46** | 冗余 UI 与 Web 安全（E3/E4，2026-11-07） | 主站 start 支持 `redundancy`，状态返回活动通道/主备在线/切换次数 + 连接面板配置；`--web-tls-cert/--web-tls-key` HTTPS、CSP/XFO/Referrer-Policy/Permissions-Policy；12 后端 + 1 前端 + 4 安全用例 |
 | **T47** | 发布体验与负例（E5/F2，2026-11-07） | `--version`、README 4 张截图、SECURITY/CHANGELOG；一致性套件新增 8 个畸形 APCI/ASDU 负例（42→50，pytest 汇总同步锁死） |
+| **T48** | 前端依赖大版本升级（v1.3.0，2026-11-07） | Dependabot PR #6（17 项：React 19/antd 6/TS 7/Vite 8/Vitest 5/ECharts 6 等）+ PR #5（`actions/download-artifact` 7→8）；适配 TS7 去 `baseUrl`（`paths: ./src/*`）、antd6 改 `role=combobox`/`role=tabpanel`/aria-label；Vitest5 覆盖率口径重基线 statements 55 / lines 58 / branches 50 / functions 53；合并后 master CI 10/10 绿 |
 
-> **累计统计**：T01~T47 **全部完成，待办 0**（T39 第三方实测已回填，真机复测待窗口）。
+> **累计统计**：T01~T48 **全部完成，待办 0**（T39 第三方实测已回填，真机复测待窗口）。
 
 ---
 
