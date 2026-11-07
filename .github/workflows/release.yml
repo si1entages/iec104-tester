@@ -132,6 +132,9 @@ jobs:
     needs: [meta, build]
     runs-on: ubuntu-24.04
     steps:
+      # gh release view/create 需要当前目录是 git 仓库；release job 只下载产物时
+      # 没有 .git，会报 "fatal: not a git repository"（v1.1.0/v1.2.0 实测）。
+      - uses: actions/checkout@v7
       - name: Download release archives
         uses: actions/download-artifact@v7
         with:
