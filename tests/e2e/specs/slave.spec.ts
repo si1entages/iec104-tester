@@ -23,17 +23,14 @@ async function openSlave(page: Page): Promise<void> {
   await panelInput(page, '目标 IOA').waitFor()
 }
 
-/** 活动页签内的开关（非激活 Tabs 面板也在 DOM 里，必须限定活动面板） */
+/** 活动页签容器：antd 5 用 .ant-tabs-tabpane-active，antd 6 改为 role=tabpanel */
 function activePane(page: Page) {
-  return page.locator('.ant-tabs-tabpane-active')
+  return page.getByRole('tabpanel')
 }
 
 /** 手动置数面板内的带前缀输入框 */
-function panelInput(page: Page, prefix: string) {
-  return page
-    .locator('.ant-input-number-affix-wrapper')
-    .filter({ hasText: prefix })
-    .locator('input')
+function panelInput(page: Page, label: string) {
+  return page.getByLabel(label, { exact: true })
 }
 
 function findPost(posts: CapturedRequest[], path: string): CapturedRequest {

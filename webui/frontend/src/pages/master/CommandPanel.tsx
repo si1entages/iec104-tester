@@ -533,6 +533,7 @@ export function CommandPanel({ point, disabled = false }: Props) {
         <Space wrap>
           <InputNumber
             prefix={t('cmd.targetIoa')}
+            aria-label={t('cmd.targetIoa')}
             min={0}
             value={ioa}
             style={{ width: 190 }}

@@ -126,6 +126,7 @@ export function ManualSetPanel({ point, disabled = false }: Props) {
         return (
           <InputNumber
             prefix={t('msp.value')}
+            aria-label={t('msp.value')}
             step={0.001}
             style={{ width: 200 }}
             value={yc}
@@ -136,6 +137,7 @@ export function ManualSetPanel({ point, disabled = false }: Props) {
         return (
           <InputNumber
             prefix={t('msp.value')}
+            aria-label={t('msp.value')}
             step={1}
             style={{ width: 200 }}
             value={ym}
@@ -146,6 +148,7 @@ export function ManualSetPanel({ point, disabled = false }: Props) {
         return (
           <InputNumber
             prefix={t('msp.value')}
+            aria-label={t('msp.value')}
             min={-64}
             max={63}
             step={1}
@@ -189,6 +192,7 @@ export function ManualSetPanel({ point, disabled = false }: Props) {
         <Space wrap>
           <InputNumber
             prefix={t('cmd.targetIoa')}
+            aria-label={t('cmd.targetIoa')}
             min={0}
             style={{ width: 190 }}
             value={ioa}
