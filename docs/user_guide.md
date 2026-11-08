@@ -37,8 +37,9 @@ IEC 60870-5-104 测试工具是一款面向电力系统 SCADA 调试和测试的
 | 定时器 | t0/t1/t2/t3 四级超时管理 |
 | 状态机 | STARTDT/STOPDT/TESTFR 完整生命周期 |
 | 数据模拟 | 手动/自动遥信遥测变化 |
-| 点表管理 | YAML 导入/导出，可视化编辑 |
+| 点表管理 | YAML 导入/导出，可视化编辑；**SCD/CID/ICD 导入**（IEC 61850-80-1 映射 + CDC 推断，预览后应用） |
 | 报文录制 | 支持 .i104/.json 格式，可导出 **pcap/pcapng**（Wireshark 直接打开） |
+| 透明桥 | `--mode bridge`：真实主站 ↔ 测试器 ↔ 真实子站，字节级透传 + 双向帧旁路解码/录制（现场排障不动既有系统） |
 | 网络模拟 | 丢包、延迟、乱序、损坏等异常（Web 状态页卡片 + CLI `sim_tool.py`） |
 | TLS 传输加密 | 证书/CA 校验、双向认证（mTLS）；**仅传输层加密，不等于 IEC 62351 合规**（见 [`tls.md`](tls.md)） |
 | 历史库 | 默认开启（SQLite 按角色分库），保留期/条数/容量三重清理，`--no-history` 关闭；Web「历史」页可查询与导出 |
@@ -171,6 +172,23 @@ python app.py --mode slave --point-table configs/demo_points.yaml
 # 后台运行子站
 python app.py --mode slave --no-gui --log-level DEBUG --log-file slave.log
 ```
+
+### 场景3.5：透明桥排障（现场旁路观察，T73）
+
+不动既有主站/子站的任何配置：桥监听一个口，**主站改连桥**，桥把流量字节级
+透传给真实子站，同时旁路解码双向帧（每帧打点日志：方向 + APCI/ASDU 摘要），
+可选 `--capture-file` 录制（支持 .json/.pcap，Wireshark 可开）：
+
+```bash
+python app.py --mode bridge --listen-port 2404 \
+    --upstream-host 192.168.1.9 --upstream-port 2404 \
+    --capture-file bridge.pcap --log-file bridge.log
+```
+
+- 转发永远优先于观察：帧解析失败只影响日志/录制完整性，**不影响透传**；
+- 多主站可同时各占一条上游连接；上游不可达时客户端连接被立即关闭，
+  由主站按既有重连逻辑重试；
+- Web UI 桥接页（启停/实时视图）为后续迭代（T74）。
 
 ### 场景4：局域网访问与访问令牌（可选）
 

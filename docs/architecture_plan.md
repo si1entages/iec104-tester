@@ -424,7 +424,9 @@ graph TD
 
 | **T72** | SCD/CID/ICD 点表导入（IEC 61850 → 104）（2026-11-08） | 用户选定迭代方向②。① **映射内核** `core/data/scd_import.py`：双路径——IEC 61850-80-1 `Private(type=IEC_60870_5_104)/Address(casdu,ioa,ti)` **精确映射优先**（ti → 点类别/子类型按本仓 `TypeID` 对表，ti 优先于 CDC——工程中存在 ENS 映射标度化遥测等先例）；无映射按 DOType `cdc` **推断**（SPC/DPS/MV 系/BCR/BSC→yx/yc/ym/step），IOA 按类别基数自动分配（yx=1/yc=4097/yk=8193/ym=12289/step=16385，可覆盖）；多公共地址取众数 + 明细告警、显式 `common_addr` 可覆盖；IOA 冲突/越界/不支持 ti（比特串、保护事件）全部告警不静默。iterparse 流式解析（数十 MB SCD 可用），SDI/DAI/BDA 嵌套路径完整保留（`Oper.ctlVal`、`cVal.mag.f`）。② **端点** `POST /api/scd/preview`：无副作用预览（返回可导入的点表 YAML + 分类计数 + 告警），契约 §2.4a、前端 `ScdPreviewResponse` 契约 schema + 编译期键集比对。③ **UI**（Carbon/PF 子站工作台点表面板标题行，经典版按冻结承诺不加）：SCD 走预览（告警+计数+可编辑 YAML）→ 应用走既有 `/api/points/import?format=yaml`；YAML/CSV/JSON 直接导入。④ fixture 样例覆盖精确/推断/多 casdu/IOA 冲突/不支持 ti。验证：后端 **1578 passed**（全量，含 16 项 SCD：端点与 `PointTable.load_yaml` 回环）+ 真实厂商 SCD（Schneider Electric SET，58KB/65 信号/混合命名空间）实弹解析通过；e2e **44 passed** 全量（新增「SCD 导入：80-1 预览→应用生效」真实后端用例）；ruff、typecheck/build、i18n 0、前端 133 passed；Dependabot 残留分支已清理（PR #5 核实 MERGED 后删除） |
 
-> **累计统计**：T01~T49、T51~T72 **全部完成**；**待办 1**（T50 真机复测，暂缓待窗口；T39 第三方实测已回填）。
+| **T73** | 透明桥/旁路监听：真实主站 ↔ 测试器 ↔ 真实子站（2026-11-08） | 用户选定迭代方向③。① **内核** `core/engine/tcp_bridge.py`：`TcpBridge`（asyncio）字节级透传——转发先行、解析纯旁路（观察者异常绝不影响数据路径）；双向独立 APCI 切帧（`FrameSplitter`：半包跨段缓存、脏字节丢 1 字节重同步并计数）；方向约定 `tx`=主站→子站/`rx`=子站→主站，回调与引擎 `on_frame(data,direction,client_id)` 同签名（直挂 capture/WS）；多客户端各占独立上游连接，上游不可达即关客户端由主站按既有逻辑重连；`describe_frame` 单帧摘要（APCI + ASDU 类型/CA/COT，解析失败回退 raw）。② **CLI** `--mode bridge`（headless 现场可用）：`--listen-host/port` + `--upstream-host/port` + `--capture-file`（复用 `PacketRecorder`，支持 .json/.pcap）；帧日志逐帧打点；绑定失败给人话一行（exit 1）而非 traceback。③ Web UI 桥接页拆至 **T74**（需角色管道改造）。验证：pytest **11 项**（切帧器单元 6 + 真主站↔桥↔真子站全链路集成：STARTDT/GI 往返、STARTDT_CON 透传内容校验、capture 落盘链路）+ CLI 实弹（真子站+桥+真主站，帧日志与录制文件产物核对）；后端全量 **1589 passed**、e2e **44 passed**（app.py 模式改动回归）、ruff 通过 |
+
+> **累计统计**：T01~T49、T51~T73 **全部完成**；**待办 2**（T50 真机复测、T74 桥接 Web UI 页，均待窗口/排期；T39 第三方实测已回填）。
 
 ---
 

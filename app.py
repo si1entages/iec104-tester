@@ -3,6 +3,7 @@
 纯 Web 形态：浏览器作为唯一 UI，入口负责启动本地 Web 服务并按需打开浏览器。
 单文件发布入口：默认单进程双角色、一个 8765 端口，打开一个工作台（左侧菜单
 切换主站/子站）；也支持 `--mode master|slave` 只启动单角色。
+透明桥（T73）：`--mode bridge`（真实主站 ↔ 测试器 ↔ 真实子站旁路观察，headless）。
 提供三类运行方式：
   - Web UI（默认）：`python app.py`（both）/ `--mode master|slave`
   - headless 引擎 CLI：`python app.py --mode slave --no-gui`
@@ -408,8 +409,29 @@ def cli(default_role: str | None = None) -> int:
         help="打印版本号并退出"
     )
     parser.add_argument(
-        "--mode", choices=["master", "slave", "both"], default=default_role,
-        help="运行模式: master(主站) / slave(子站) / both(默认；单页工作台)"
+        "--mode", choices=["master", "slave", "both", "bridge"], default=default_role,
+        help="运行模式: master(主站) / slave(子站) / both(默认；单页工作台) / "
+             "bridge(透明桥：主站↔测试器↔子站旁路观察，headless)"
+    )
+    parser.add_argument(
+        "--listen-host", type=str, default=None,
+        help="[bridge] 监听地址（面向真实主站，默认 0.0.0.0）"
+    )
+    parser.add_argument(
+        "--listen-port", type=int, default=None,
+        help="[bridge] 监听端口（主站改连此口；默认 2404）"
+    )
+    parser.add_argument(
+        "--upstream-host", type=str, default=None,
+        help="[bridge] 上游子站地址（必填）"
+    )
+    parser.add_argument(
+        "--upstream-port", type=int, default=None,
+        help="[bridge] 上游子站端口（默认 2404）"
+    )
+    parser.add_argument(
+        "--capture-file", type=str, default=None,
+        help="[bridge] 旁路帧录制文件（按扩展名分派格式：.bin/.json/.pcap；可选）"
     )
     parser.add_argument(
         "--config", type=str, default=None,
@@ -537,6 +559,14 @@ def cli(default_role: str | None = None) -> int:
     setup_logging(args.log_level, args.log_file)
     logger = logging.getLogger("iec104")
     logger.info("Starting IEC 60870-5-104 Tester...")
+
+    # 透明桥模式（T73）：headless 旁路观察器，不加载点表/历史库/Web UI，
+    # 也不消费 AppConfig 语义（桥两侧为既有明文/TLS 链路的透传，TLS 桥接为后续项）。
+    if args.mode == "bridge":
+        if not args.upstream_host:
+            print("--mode bridge 需要 --upstream-host（真实子站地址）", flush=True)
+            return 2
+        return _run_bridge(args, logger)
 
     # 配置
     from core.config import AppConfig, load_config
@@ -703,6 +733,77 @@ def cli(default_role: str | None = None) -> int:
             db.close()
         if history_db is not None and history_db not in history_dbs.values():
             history_db.close()
+
+
+def _run_bridge(args, logger) -> int:
+    """透明桥模式（T73）：真实主站 ↔ 测试器 ↔ 真实子站.
+
+    字节级透传 + 旁路观察（每帧打点日志：方向 + APCI/ASDU 摘要）；
+    ``--capture-file`` 可选旁路录制（复用 CaptureRecorder，按扩展名分派格式）。
+    现场排障用法：子站地址不动，主站改连桥监听口::
+
+        python app.py --mode bridge --listen-port 2404 \\
+            --upstream-host 192.168.1.9 --upstream-port 2404 \\
+            --capture-file bridge.pcap
+    """
+    import asyncio
+
+    from core.engine.tcp_bridge import BridgeConfig, TcpBridge, describe_frame
+
+    cfg = BridgeConfig(
+        listen_host=args.listen_host or "0.0.0.0",
+        listen_port=args.listen_port or 2404,
+        upstream_host=args.upstream_host,
+        upstream_port=args.upstream_port or 2404,
+    )
+
+    async def run():
+        recorder = None  # PacketRecorder（可选 --capture-file）
+
+        def on_frame(data: bytes, direction: str, client_id: str) -> None:
+            tag = "主站→子站" if direction == "tx" else "子站→主站"
+            logger.info("[%s] %s %s (%dB)", client_id, tag, describe_frame(data), len(data))
+            if recorder is not None:
+                recorder.record_frame(data, direction, metadata={"client_id": client_id})
+
+        bridge = TcpBridge(cfg, on_frame=on_frame)
+        try:
+            await bridge.start()
+        except OSError as e:
+            # 监听端口被占等绑定失败：给一行人话，不甩 traceback
+            logger.error(
+                "桥接监听失败 %s:%d: %s（端口被占用或无权限）",
+                cfg.listen_host, cfg.listen_port, e)
+            return 1
+        print(
+            f"桥接已启动: 主站 → {cfg.listen_host}:{bridge.listen_port} "
+            f"→ 子站 {cfg.upstream_host}:{cfg.upstream_port}（Ctrl+C 停止）",
+            flush=True,
+        )
+        if args.capture_file:
+            from core.capture.recorder import PacketRecorder
+
+            recorder = PacketRecorder()
+            recorder.start(
+                args.capture_file,
+                description=f"bridge {cfg.listen_port}→{cfg.upstream_host}:{cfg.upstream_port}",
+            )
+            print(f"旁路录制: {args.capture_file}", flush=True)
+        try:
+            while True:
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await bridge.stop()
+            if recorder is not None:
+                recorder.stop()
+
+    try:
+        return asyncio.run(run())
+    except KeyboardInterrupt:
+        logger.info("Bridge stopped by user")
+        return 0
 
 
 def _run_tests(script_path: str, logger, report_dir: str = "test_reports") -> int:

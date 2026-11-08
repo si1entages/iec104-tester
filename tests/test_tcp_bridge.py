@@ -1,0 +1,209 @@
+"""透明桥（T73）测试：切帧器单元 + 真主站↔桥↔真子站全链路集成."""
+
+from __future__ import annotations
+
+import asyncio
+
+import pytest
+
+from core.data.point_table import PointTable
+from core.engine.master import MasterEngine
+from core.engine.slave import SlaveEngine
+from core.engine.tcp_bridge import BridgeConfig, FrameSplitter, TcpBridge, describe_frame
+from core.protocol.apci import APCICodec
+
+# ── FrameSplitter 单元 ──────────────────────────────────────────────────
+
+
+def test_splitter_partial_then_complete():
+    s = FrameSplitter()
+    frame = APCICodec.startdt_act()  # U 帧：68 04 07 00 00 00
+    assert s.feed(frame[:3]) == []
+    assert s.feed(frame[3:]) == [frame]
+
+
+def test_splitter_coalesced_and_split_mix():
+    """多帧粘连、跨段分割混着来也要切对."""
+    f1 = APCICodec.startdt_act()
+    f2 = APCICodec.encode_s(rx_seq=5)
+    f3 = APCICodec.stopdt_act()
+    s = FrameSplitter()
+    assert s.feed(f1 + f2) == [f1, f2]
+    assert s.feed(f3[:5]) == []          # 半包
+    assert s.feed(f3[5:]) == [f3]        # 补齐后吐出
+
+
+def test_splitter_garbage_resync_count():
+    s = FrameSplitter()
+    frame = APCICodec.startdt_act()
+    assert s.feed(b"\x00\x00" + frame) == [frame]
+    assert s.resyncs == 2
+
+
+def test_splitter_all_garbage_drops_all():
+    s = FrameSplitter()
+    assert s.feed(b"\xff\xfe\xfd") == []
+    assert s.resyncs == 3
+
+
+def test_splitter_bad_length_resync():
+    s = FrameSplitter()
+    frame = APCICodec.startdt_act()
+    # 68 01（长度域非法）→ 丢 1 字节重同步；随后 0x01 也是脏字节再丢 1 字节，
+    # 之后帧头出现、真帧完整切出——透传与观察互不影响
+    assert s.feed(b"\x68\x01" + frame) == [frame]
+    assert s.resyncs == 2
+
+
+# ── describe_frame（旁路摘要，绝不抛异常）────────────────────────────────
+
+
+def test_describe_frame_u_and_garbage():
+    u = describe_frame(APCICodec.startdt_act())
+    assert "U" in u
+    # 垃圾数据回退 raw，不抛
+    assert describe_frame(b"\x68\xff\xff\xff").startswith("raw(")
+
+
+# ── 全链路集成：真主站 ↔ 桥 ↔ 真子站 ────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_bridge_end_to_end_with_real_engines():
+    """主站经桥连子站：STARTDT + 总召唤全链路透传，双向帧被旁路观察到."""
+    pt = PointTable()
+    pt.generate_demo_points(yx_count=5, yc_count=3, yk_count=1, ym_count=1)
+
+    slave = SlaveEngine(port=0, point_table=pt)
+    await slave.start()
+    upstream_port = slave._server._server.sockets[0].getsockname()[1]
+
+    observed: list[tuple[str, bytes]] = []
+    bridge = TcpBridge(
+        BridgeConfig(listen_host="127.0.0.1", listen_port=0,
+                     upstream_host="127.0.0.1", upstream_port=upstream_port),
+        on_frame=lambda data, direction, client_id: observed.append((direction, data)),
+    )
+    await bridge.start()
+    bridge_port = bridge.listen_port
+    assert bridge_port != 0
+
+    master = MasterEngine(host="127.0.0.1", port=bridge_port, common_addr=1,
+                          point_table=pt, auto_gi=True)
+    await master.start()
+
+    try:
+        # 等 STARTDT + 总召唤往返（上限 10s）
+        for _ in range(100):
+            if bridge.stats.frames_dn >= 2 and bridge.stats.frames_up >= 2:
+                break
+            await asyncio.sleep(0.1)
+        assert bridge.stats.frames_dn >= 2, f"下行帧不足: {bridge.stats.as_dict()}"
+        assert bridge.stats.frames_up >= 2, f"上行帧不足: {bridge.stats.as_dict()}"
+
+        # 双方向都被观察到；client_id 标签一致
+        assert {d for d, _ in observed} == {"tx", "rx"}
+
+        # 上行第一帧是子站的 STARTDT_CON（U 帧）——透传内容正确
+        first_rx = next(data for d, data in observed if d == "rx")
+        apci, _ = APCICodec.decode(first_rx)
+        assert apci.is_u_frame and apci.is_startdt_con
+
+        # 下行有总召唤请求（I 帧）
+        dn_i_frames = [data for d, data in observed
+                       if d == "tx" and APCICodec.decode(data)[0].is_i_frame]
+        assert dn_i_frames, "下行应包含总召唤 I 帧"
+    finally:
+        await master.stop()
+        await bridge.stop()
+        await slave.stop()
+
+    # 停止后统计保留（只增计数），监听已关
+    assert bridge._server is None
+    assert bridge.stats.clients_total == 1
+
+
+@pytest.mark.asyncio
+async def test_bridge_upstream_unreachable_closes_client():
+    """上游不可达：客户端连接被立即关闭（主站按既有重连逻辑重试），不挂起."""
+    bridge = TcpBridge(BridgeConfig(
+        listen_host="127.0.0.1", listen_port=0,
+        upstream_host="127.0.0.1", upstream_port=1,  # 不可达端口
+        connect_timeout=1.0,
+    ))
+    await bridge.start()
+    port = bridge.listen_port
+
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    # 上游失败 → 服务端关连接 → read 返回 EOF
+    try:
+        data = await asyncio.wait_for(reader.read(100), timeout=5.0)
+        assert data == b""  # EOF
+    finally:
+        writer.close()
+    for _ in range(20):
+        if bridge.stats.upstream_errors >= 1:
+            break
+        await asyncio.sleep(0.1)
+    assert bridge.stats.upstream_errors == 1
+    await bridge.stop()
+
+
+@pytest.mark.asyncio
+async def test_bridge_start_twice_raises():
+    bridge = TcpBridge(BridgeConfig(listen_port=0))
+    await bridge.start()
+    try:
+        with pytest.raises(RuntimeError, match="already started"):
+            await bridge.start()
+    finally:
+        await bridge.stop()
+
+
+def test_describe_frame_i_includes_asdu_summary():
+    """I 帧摘要带 ASDU 概要（曾因字段名写错静默回退——回归锁定）."""
+    apdu = APCICodec.encode_i(
+        tx_seq=0, rx_seq=1,
+        asdu_data=bytes([100, 1, 6, 0, 1, 0, 0, 0, 0, 20]),  # C_IC_NA_1 act ca=1 qoi=20
+    )
+    s = describe_frame(apdu)
+    assert "C_IC_NA_1" in s and "ca=1" in s and "cot=6" in s
+
+
+@pytest.mark.asyncio
+async def test_bridge_capture_recording(tmp_path):
+    """on_frame → PacketRecorder：stop 时落盘（CLI --capture-file 同一链路）."""
+    from core.capture.recorder import PacketRecorder
+
+    pt = PointTable()
+    pt.generate_demo_points(yx_count=3, yc_count=2, yk_count=0, ym_count=0)
+    slave = SlaveEngine(port=0, point_table=pt)
+    await slave.start()
+    upstream_port = slave._server._server.sockets[0].getsockname()[1]
+
+    cap = tmp_path / "bridge.json"
+    recorder = PacketRecorder()
+    recorder.start(cap, description="pytest bridge")
+
+    bridge = TcpBridge(
+        BridgeConfig(listen_host="127.0.0.1", listen_port=0,
+                     upstream_host="127.0.0.1", upstream_port=upstream_port),
+        on_frame=lambda data, direction, cid: recorder.record_frame(
+            data, direction, metadata={"client_id": cid}),
+    )
+    await bridge.start()
+    master = MasterEngine(host="127.0.0.1", port=bridge.listen_port, common_addr=1,
+                          point_table=pt, auto_gi=True)
+    await master.start()
+    try:
+        for _ in range(100):
+            if bridge.stats.frames_up >= 2 and bridge.stats.frames_dn >= 2:
+                break
+            await asyncio.sleep(0.1)
+        await master.stop()
+        await bridge.stop()
+        total = recorder.stop()
+        assert total >= 4
+        assert cap.exists() and cap.stat().st_size > 0
+    finally:
+        await slave.stop()
