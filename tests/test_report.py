@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 
 import pytest
-import pytest_asyncio
 from aiohttp.test_utils import TestClient, TestServer
 
 from core.protocol.apci import APCICodec
