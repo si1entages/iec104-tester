@@ -43,6 +43,15 @@ const ROOT = path.resolve(__dirname, '..', '..')
 const OFF = Number(process.env.E2E_PORT_OFFSET ?? 0)
 const PORT = (base: number): number => base + OFF
 
+// CI 的英文 Windows 默认控制台代码页是 cp1252：后端启动日志含中文时
+// charmap 编码直接 UnicodeEncodeError 崩溃（webServer 启动失败）。
+// 强制 Python 子进程走 UTF-8（本地/Linux 无副作用），stdio 与文件系统编码一并覆盖。
+const SERVER_ENV = {
+  ...process.env,
+  PYTHONUTF8: '1',
+  PYTHONIOENCODING: 'utf-8',
+}
+
 export default defineConfig({
   testDir: path.resolve(__dirname, 'specs'),
   outputDir: path.resolve(__dirname, '.playwright-artifacts'),
@@ -68,6 +77,7 @@ export default defineConfig({
       command: `${PY} app.py --mode slave --no-browser --http-port ${PORT(8766)}`,
       url: `http://127.0.0.1:${PORT(8766)}/api/status`,
       cwd: ROOT,
+      env: SERVER_ENV,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
     },
@@ -75,6 +85,7 @@ export default defineConfig({
       command: `${PY} app.py --mode master --no-browser --http-port ${PORT(8765)}`,
       url: `http://127.0.0.1:${PORT(8765)}/api/status`,
       cwd: ROOT,
+      env: SERVER_ENV,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
     },
@@ -83,6 +94,7 @@ export default defineConfig({
       command: `${PY} app.py --mode both --no-browser --no-history --http-port ${PORT(8767)}`,
       url: `http://127.0.0.1:${PORT(8767)}/api/status`,
       cwd: ROOT,
+      env: SERVER_ENV,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
     },
@@ -91,6 +103,7 @@ export default defineConfig({
       command: `${PY} app.py --mode master --no-browser --no-history --http-port ${PORT(8768)}`,
       url: `http://127.0.0.1:${PORT(8768)}/api/status`,
       cwd: ROOT,
+      env: SERVER_ENV,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
     },

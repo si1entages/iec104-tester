@@ -40,6 +40,13 @@ export default defineConfig({
         'src/test/**',
         'src/main.tsx',
         'src/api/types.ts',
+        // 三套 UI 壳层（pf/carbon/kit，T69~T71）：约 1.2 万行视图代码，单元测试
+        // 不覆盖（jsdom 无法验证真实渲染/样式），由 8 个 Playwright 门禁看护
+        // （契约/巡检/文本与非文本对比度/视觉基线/e2e 全量）。覆盖率门禁继续
+        // 看护共享数据层与经典版（有 22 个组件测试文件）。
+        'src/pf/**',
+        'src/carbon/**',
+        'src/kit/**',
       ],
       // Vitest 5 / V8 的统计口径比旧版更严格（箭头函数/对象字面量不再因模块
       // 加载被算作已覆盖），迁移后实测 statements 57.5 / lines 60.5 /
