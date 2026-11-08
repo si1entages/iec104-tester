@@ -5,9 +5,13 @@ from __future__ import annotations
 import re
 
 import pytest
+import pytest_asyncio
+from aiohttp.test_utils import TestClient, TestServer
 
 from core.protocol.apci import APCICodec
+from webui.bridge import EngineBridge
 from webui.report import build_session_report_html
+from webui.server import create_app
 
 
 def _fake_status() -> dict:
@@ -74,11 +78,6 @@ def test_report_is_self_contained():
 @pytest.mark.asyncio
 async def test_report_endpoint():
     """GET /api/export/report.html：attachment HTML + limit 校验."""
-    import pytest_asyncio
-    from aiohttp.test_utils import TestClient, TestServer
-    from webui.bridge import EngineBridge
-    from webui.server import create_app
-
     bridge = EngineBridge("master")
     bridge.ensure_demo_points()
     app = create_app(bridge)
