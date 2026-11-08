@@ -3,6 +3,47 @@
 本文件记录对外可见的功能/修复；版本号与 `pyproject.toml`、
 `core/version.py`、`webui/frontend/package.json` 保持一致。
 
+## [1.4.0] — 2026-11-08
+
+### Added
+
+- **三套界面共存，同地址即时切换**：`/app/` 内在 **Carbon**（IBM Carbon Design
+  System）、PatternFly 6 与 经典版（v1.3.1 antd 界面冻结快照）之间页内切换——
+  不刷新、不改 URL，连接/页面/深浅主题/语言保持；右下角 UI 圆钮或 `?kit=` 指定，
+  三套覆盖同样的页面与全部主站命令/子站面板。
+- **单文件双角色单页工作台**：`iec104-tester` 双击默认同时启动主站+子站，单进程
+  单端口 8765，左侧菜单原生切换主站/子站工作台（无 iframe、无双端口）；
+  `--mode master|slave|both` 仍可单角色运行；角色切换不清点表/报文缓存。
+- 子站模拟控制支持 **YX/YC 独立开启**（只模拟遥信或只模拟遥测），
+  `POST /api/slave/sim` 新增 `yx_enabled`/`yc_enabled` 并在状态中回显。
+- 自动化 UI 门禁进 Playwright：API 契约（真实后端 × schema 全端点）、界面巡检
+  （8 页 × 3 视口 × 中英/深浅）、WCAG AA 文本与非文本对比度、视觉基线回归。
+
+### Changed
+
+- **默认界面改为 Carbon**：`?kit=` → localStorage → 默认 `carbon`，存量 pf 偏好
+  视为未设置、跟随新默认；三套头部统一收敛为语言切换 + 明/暗图标切换。
+- **品质位按 IEC 60870-5-101 标准化**：`IV/NT/SB/BL/OV` 位定义与 `/api/points`
+  品质字符串（`GOOD`、`IV|NT` 等）对齐标准；子站注入面板支持五位置（含 SB）。
+- 界面按 `docs/design_guidelines.md` 落地：品质标签语义色、数值右对齐、单位与
+  小数位、危险操作 danger 方向、四态（加载/空/错误/降级）完备。
+- 主站工作台选中行与趋势 watch 在切页/切套件后保留；「加入趋势」立即以当前值
+  作为首个采样。
+
+### Fixed
+
+- 报文查看器悬停翻译恒显示「翻译失败」：前端误读 `/api/frames/decode` 响应形状
+  （自功能上线即存在），已对齐扁平 `{ok,format,segments}` 契约并加真实后端回归。
+- 趋势图加入点位后曲线一直为空：图表容器为条件渲染、一次性初始化逻辑读到空
+  引用后不再重试（三套界面同根因），现随容器出现重试初始化；隐藏页签 0×0 画布
+  一并修复。
+- 主站命令面板「当前值」冻结在选中瞬间，现跟随 WS 刷新。
+
+### Verified
+
+- 后端 pytest **1562 passed**；前端单测 **133 passed**（32 文件）；Playwright e2e
+  **43 passed** 全量；typecheck/build、i18n 清单 0、对比度硬失败 0。
+
 ## [1.3.1] — 2026-11-07
 
 ### Changed
