@@ -63,10 +63,14 @@ def test_cot_group_number_boundaries():
 
 
 def test_quality_descriptor_str_all_flags():
-    assert str(QualityDescriptor(0x71)) == "OV|BL|NT|IV"   # OV+BL+NT+IV
-    assert str(QualityDescriptor(0x70)) == "BL|NT|IV"
+    # 标准位：OV=0x01 BL=0x10 SB=0x20 NT=0x40 IV=0x80；按严重度排列
+    assert str(QualityDescriptor(0x71)) == "NT|SB|BL|OV"   # NT+SB+BL+OV
+    assert str(QualityDescriptor(0x70)) == "NT|SB|BL"
+    assert str(QualityDescriptor(0x80)) == "IV"
+    assert str(QualityDescriptor(0xF1)) == "IV|NT|SB|BL|OV"
     assert str(QualityDescriptor(0)) == "GOOD"
-    assert QualityDescriptor(0x7F).to_int() == 0x7F
+    assert QualityDescriptor(0xFF).to_int() == 0xFF
+    assert QualityDescriptor(0x80).to_int() == 0x80
 
 
 def test_time_tag_short_inputs_raise():

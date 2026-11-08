@@ -74,7 +74,9 @@ class PointService:
         for p in self.table.get_all_yc():
             out.append({"ioa": p.ioa, "type": "YC", "name": p.name, "group": p.group,
                         "enabled": p.enabled, "value": 0.0,
-                        "subtype": p.data_type.value})
+                        "subtype": p.data_type.value,
+                        # 设计规范 §5.3：界面按声明的小数位与单位显示遥测值
+                        "unit": p.unit, "decimal_places": p.decimal_places})
         for p in self.table.get_all_yk():
             out.append({"ioa": p.ioa, "type": "YK", "name": p.name, "group": p.group,
                         "enabled": p.enabled, "value": "—",

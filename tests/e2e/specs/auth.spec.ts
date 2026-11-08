@@ -6,7 +6,7 @@
  */
 import { expect, test } from '@playwright/test'
 
-import { MASTER } from './helpers'
+import { MASTER , appUrl } from './helpers'
 
 test('AuthGate：令牌探测、输入与持久化', async ({ page }) => {
   await page.route('**/api/auth', async (route) => {
@@ -17,7 +17,7 @@ test('AuthGate：令牌探测、输入与持久化', async ({ page }) => {
     await route.fulfill({ json: { ok: true, required: true, valid } })
   })
 
-  await page.goto(`${MASTER}/app/`, { waitUntil: 'domcontentloaded' })
+  await page.goto(appUrl(MASTER), { waitUntil: 'domcontentloaded' })
   await expect(page.getByText('需要访问令牌')).toBeVisible()
   await expect(page.getByPlaceholder('访问令牌')).toBeVisible()
 
@@ -25,7 +25,7 @@ test('AuthGate：令牌探测、输入与持久化', async ({ page }) => {
   await page.getByRole('button', { name: /进\s*入/ }).click()
 
   // 页面会 reload；reload 后 /api/auth 带 X-Auth-Token 头 → valid=true
-  await expect(page.getByRole('menuitem', { name: '主站工作台' })).toBeVisible({
+  await expect(page.locator('.pf-v6-c-nav__link').filter({ hasText: '主站工作台' })).toBeVisible({
     timeout: 20_000,
   })
   const stored = await page.evaluate(() => localStorage.getItem('iec104_token'))

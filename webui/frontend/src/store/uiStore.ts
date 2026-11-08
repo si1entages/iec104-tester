@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 
+import { setActiveRole as setApiActiveRole } from '../api/client'
+import type { Point, Role } from '../api/types'
 import type { Locale } from '../i18n'
 import { applyThemeToDom, resolveInitialTheme, saveThemePreference } from '../lib/themePreference'
 import type { ThemeMode } from '../lib/themePreference'
@@ -26,6 +28,14 @@ function resolveInitialLocale(): Locale {
 interface UiState {
   page: PageKey
   setPage: (page: PageKey) => void
+
+  /** 当前工作台角色（决定 API/WS 走 /api 还是 /slave/api） */
+  activeRole: Role
+  setActiveRole: (role: Role) => void
+
+  /** 可用角色（来自 GET /api/schema；单角色模式只有一个） */
+  availableRoles: Role[]
+  setAvailableRoles: (roles: Role[]) => void
 
   /** 主题（深/浅）：初始值在模块加载时同步解析（渲染前，无闪屏）；切换即持久化 */
   theme: ThemeMode
@@ -62,11 +72,31 @@ interface UiState {
    */
   liveRefreshMs: number
   setLiveRefreshMs: (ms: number) => void
+
+  /**
+   * 主站工作台的点表选中行与趋势 watch 列表（T70 反馈）：
+   * 放在共享 store 里，切换页面/套件后回来不丢，趋势曲线无需重新加入。
+   * Point 对象只取 type/ioa/name 等标识字段，值仍以点表缓存为准。
+   */
+  selectedPoint: Point | null
+  setSelectedPoint: (point: Point | null) => void
+
+  trendWatched: Point[]
+  setTrendWatched: (points: Point[]) => void
 }
 
 export const useUiStore = create<UiState>((set) => ({
   page: 'status',
   setPage: (page) => set({ page }),
+
+  activeRole: 'master',
+  setActiveRole: (activeRole) => {
+    setApiActiveRole(activeRole)
+    set({ activeRole })
+  },
+
+  availableRoles: [],
+  setAvailableRoles: (availableRoles) => set({ availableRoles }),
 
   // 模块加载即解析（跟随系统/localStorage），保证 ConfigProvider 首帧就用对算法
   theme: resolveInitialTheme(),
@@ -103,4 +133,10 @@ export const useUiStore = create<UiState>((set) => ({
 
   liveRefreshMs: 1000,
   setLiveRefreshMs: (liveRefreshMs) => set({ liveRefreshMs }),
+
+  selectedPoint: null,
+  setSelectedPoint: (selectedPoint) => set({ selectedPoint }),
+
+  trendWatched: [],
+  setTrendWatched: (trendWatched) => set({ trendWatched }),
 }))

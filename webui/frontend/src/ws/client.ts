@@ -1,4 +1,4 @@
-import { getToken } from '../api/client'
+import { getApiBase, getToken } from '../api/client'
 import type { WsMessage } from '../api/types'
 
 export type WsStatus = 'idle' | 'connecting' | 'open' | 'closed'
@@ -161,7 +161,9 @@ export class WsClient {
 export function resolveWsUrl(path = '/ws'): string {
   const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
   const token = getToken()
-  const sep = path.includes('?') ? '&' : '?'
+  const base = getApiBase()
+  const wsPath = base ? `${base}${path}` : path
+  const sep = wsPath.includes('?') ? '&' : '?'
   const suffix = token ? `${sep}token=${encodeURIComponent(token)}` : ''
-  return `${scheme}://${window.location.host}${path}${suffix}`
+  return `${scheme}://${window.location.host}${wsPath}${suffix}`
 }

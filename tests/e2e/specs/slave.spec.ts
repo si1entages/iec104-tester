@@ -23,14 +23,19 @@ async function openSlave(page: Page): Promise<void> {
   await panelInput(page, '目标 IOA').waitFor()
 }
 
-/** 活动页签容器：antd 5 用 .ant-tabs-tabpane-active，antd 6 改为 role=tabpanel */
+/** 活动页签容器（PF Tabs 同样使用 role=tabpanel） */
 function activePane(page: Page) {
   return page.getByRole('tabpanel')
 }
 
-/** 手动置数面板内的带前缀输入框 */
+/** 手动置数面板内的输入框（PF FormGroup 的 label 绑定 fieldId） */
 function panelInput(page: Page, label: string) {
   return page.getByLabel(label, { exact: true })
+}
+
+/** 置数类型：PF 用原生 select */
+async function pickKind(page: Page, kind: string): Promise<void> {
+  await page.locator('#pf-msp-kind').selectOption(kind)
 }
 
 function findPost(posts: CapturedRequest[], path: string): CapturedRequest {
@@ -54,10 +59,10 @@ test.afterAll(async ({ request }) => {
 test('YX 置数：请求体 {ioa, value} 正确', async ({ page }) => {
   await openSlave(page)
   const posts = capturePosts(page)
-  await page.getByText('遥信 YX', { exact: true }).click()
+  await pickKind(page, 'YX')
   await panelInput(page, '目标 IOA').fill('1')
-  // 默认 ON → 点一次切到 OFF，断言 value=false（活动页签内唯一的开关）
-  await activePane(page).locator('.ant-switch').first().click()
+  // 切到 OFF，断言 value=false
+  await page.locator('#pf-msp-yx').selectOption('off')
   await page.getByRole('button', { name: '下发置数' }).click()
   const body = findPost(posts, '/api/slave/yx').body!
   expect(body.ioa).toBe(1)
@@ -67,7 +72,7 @@ test('YX 置数：请求体 {ioa, value} 正确', async ({ page }) => {
 test('YC 置数：浮点值透传', async ({ page }) => {
   await openSlave(page)
   const posts = capturePosts(page)
-  await page.getByText('遥测 YC', { exact: true }).click()
+  await pickKind(page, 'YC')
   await panelInput(page, '目标 IOA').fill('101')
   await panelInput(page, '值').fill('12.34')
   await page.getByRole('button', { name: '下发置数' }).click()
@@ -79,7 +84,7 @@ test('YC 置数：浮点值透传', async ({ page }) => {
 test('YM 置数：整数值', async ({ page }) => {
   await openSlave(page)
   const posts = capturePosts(page)
-  await page.getByText('电度 YM', { exact: true }).click()
+  await pickKind(page, 'YM')
   await panelInput(page, '目标 IOA').fill('301')
   await panelInput(page, '值').fill('7')
   await page.getByRole('button', { name: '下发置数' }).click()
@@ -91,7 +96,7 @@ test('YM 置数：整数值', async ({ page }) => {
 test('STEP 置数：输入 200 被夹紧到 63（-64..63 红线）', async ({ page }) => {
   await openSlave(page)
   const posts = capturePosts(page)
-  await page.getByText('步位置 STEP', { exact: true }).click()
+  await pickKind(page, 'STEP')
   await panelInput(page, '目标 IOA').fill('401')
   const valueInput = panelInput(page, '值')
   await valueInput.fill('200')
@@ -108,13 +113,46 @@ test('应答行为配置：wrong_cot + drop_rate 请求体正确', async ({ page
   await page.getByRole('tab', { name: '应答行为' }).click()
   const wrongCot = page.getByRole('switch', { name: '返回错误 COT（wrong_cot）' })
   await wrongCot.waitFor()
-  await wrongCot.click()
-  // 丢帧比例 drop_rate：错误注入分组里的第一个数字输入框
-  const dropRate = activePane(page).locator('.ant-input-number input').first()
+  await wrongCot.click({ force: true })
+  // 丢帧比例 drop_rate：错误注入分组（默认展开）
+  const dropRate = page.locator('#pf-rp-droprate')
   await dropRate.fill('0.5')
   await page.getByRole('button', { name: '应用配置' }).click()
   const body = findPost(posts, '/api/slave/response').body!
   const errors = body.errors as Record<string, unknown>
   expect(errors.wrong_cot).toBe(true)
   expect(Number(errors.drop_rate)).toBeCloseTo(0.5, 5)
+})
+
+test('点表提示文案完整可见（不被标题栏裁掉）', async ({ page }) => {
+  await openSlave(page)
+  const hint = page.getByTestId('points-hint')
+  await expect(hint).toBeVisible()
+  await expect(hint).toHaveText('单击行以选中并手动置数')
+  // 文本没有被容器裁切：内容宽度不超过可视宽度
+  expect(await hint.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+})
+
+test('模拟控制：YX/YC 可独立开启（只开 YX 时请求 yc_enabled=false）', async ({ page }) => {
+  await openSlave(page)
+  const posts = capturePosts(page)
+  await page.getByRole('tab', { name: '模拟控制' }).click()
+
+  const yx = page.locator('#pf-sim-yx')
+  const yc = page.locator('#pf-sim-yc')
+  await yx.waitFor()
+  await expect(yx).toBeChecked()
+  await expect(yc).toBeChecked()
+  await yc.click({ force: true })
+  await expect(yc).not.toBeChecked()
+
+  await page.getByRole('button', { name: '启动模拟' }).click()
+  await expect.poll(() => posts.filter((p) => p.path === '/api/slave/sim')).toHaveLength(1)
+  const startPost = posts.filter((p) => p.path === '/api/slave/sim')[0]
+  expect(startPost.body!.yx_enabled).toBe(true)
+  expect(startPost.body!.yc_enabled).toBe(false)
+
+  // 收尾：停止模拟，避免影响后续用例
+  await expect(page.getByRole('button', { name: '停止模拟' })).toBeEnabled()
+  await page.getByRole('button', { name: '停止模拟' }).click()
 })

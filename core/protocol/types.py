@@ -178,53 +178,65 @@ class COT(enum.IntEnum):
 # ═══════════════════════════════════════════════════════════════════
 
 class QualityFlag(enum.IntFlag):
-    """Quality descriptor flags — IEC 60870-5-104 Table 1-45/46."""
-    OV = 0x01       # bit0: 溢出位
-    # bit1-2: 保留
+    """Quality descriptor flags — IEC 60870-5-101 QDS/SIQ/DIQ.
+
+    位序（bit7..bit0）：``IV NT SB BL 0 0 0 OV``。OV 只用于 QDS；
+    SIQ/DIQ 的 bit0 是值本身。
+    """
+    OV = 0x01       # bit0: 溢出位 (Overflow)
+    # bit1-3: 保留
     BL = 0x10       # bit4: 闭锁位 (Blocked)
-    NT = 0x20       # bit5: 非当前值 (Not Topical)
-    IV = 0x40       # bit6: 无效位 (Invalid)
-    # bit7: 保留
+    SB = 0x20       # bit5: 取代位 (Substituted)
+    NT = 0x40       # bit6: 非当前值 (Not Topical)
+    IV = 0x80       # bit7: 无效位 (Invalid)
 
 
 @dataclass
 class QualityDescriptor:
-    """品质描述词解析."""
+    """品质描述词解析（位定义见 :class:`QualityFlag`）."""
     raw: int = 0
 
     @property
     def overflow(self) -> bool:
-        return bool(self.raw & 0x01)
+        return bool(self.raw & QualityFlag.OV)
 
     @property
     def blocked(self) -> bool:
-        return bool(self.raw & 0x10)
+        return bool(self.raw & QualityFlag.BL)
+
+    @property
+    def substituted(self) -> bool:
+        return bool(self.raw & QualityFlag.SB)
 
     @property
     def not_topical(self) -> bool:
-        return bool(self.raw & 0x20)
+        return bool(self.raw & QualityFlag.NT)
 
     @property
     def invalid(self) -> bool:
-        return bool(self.raw & 0x40)
+        return bool(self.raw & QualityFlag.IV)
 
     @property
     def is_good(self) -> bool:
         return self.raw == 0
 
     def to_int(self) -> int:
-        return self.raw & 0x7F
+        """回到线上字节（必须保留 bit7：IV=0x80 不能被截掉）."""
+        return self.raw & 0xFF
 
     def __str__(self) -> str:
+        # 按严重度排列：无效 > 非当前 > 取代 > 闭锁 > 溢出
         flags = []
-        if self.overflow:
-            flags.append("OV")
-        if self.blocked:
-            flags.append("BL")
-        if self.not_topical:
-            flags.append("NT")
         if self.invalid:
             flags.append("IV")
+        if self.not_topical:
+            flags.append("NT")
+        if self.substituted:
+            flags.append("SB")
+        if self.blocked:
+            flags.append("BL")
+        if self.overflow:
+            flags.append("OV")
         return "|".join(flags) if flags else "GOOD"
 
 

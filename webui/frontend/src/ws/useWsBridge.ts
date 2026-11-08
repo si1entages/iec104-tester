@@ -44,6 +44,7 @@ export function useWsBridge(): void {
   const setDroppedFrames = useUiStore((s) => s.setDroppedFrames)
   const setSendBackpressure = useUiStore((s) => s.setSendBackpressure)
   const setResyncing = useUiStore((s) => s.setResyncing)
+  const activeRole = useUiStore((s) => s.activeRole)
 
   useEffect(() => {
     let awaitingSnapshot = true
@@ -71,7 +72,7 @@ export function useWsBridge(): void {
 
     const applyStatus = (status: unknown): void => {
       if (!isStatus(status)) return
-      queryClient.setQueryData(queryKeys.status, status)
+      queryClient.setQueryData(queryKeys.status(), status)
       if (typeof status.schemaVersion === 'number') {
         setSchemaWarning(describeSchemaMismatch(status.schemaVersion))
       }
@@ -97,7 +98,7 @@ export function useWsBridge(): void {
 
           if (data && isPointsResponse(data)) {
             const changed: Point[] = []
-            queryClient.setQueryData<Point[]>(queryKeys.points, (prev) =>
+            queryClient.setQueryData<Point[]>(queryKeys.points(), (prev) =>
               mergePointValues(prev, data.points, changed),
             )
             recordTrend(changed)
@@ -128,7 +129,7 @@ export function useWsBridge(): void {
           if (patches.length > 0) {
             // 主路径：事件直接携带点值，就地更新，不联网
             const changed: Point[] = []
-            queryClient.setQueryData<Point[]>(queryKeys.points, (prev) =>
+            queryClient.setQueryData<Point[]>(queryKeys.points(), (prev) =>
               applyPatches(prev, patches, changed),
             )
             recordTrend(changed)
@@ -204,5 +205,6 @@ export function useWsBridge(): void {
     setDroppedFrames,
     setSendBackpressure,
     setResyncing,
+    activeRole,
   ])
 }

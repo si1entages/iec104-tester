@@ -53,36 +53,31 @@ def test_pick_port_skips_excluded_port() -> None:
 
 
 def test_demo_commands_are_isolated_and_auto_configured() -> None:
-    slave, master = _demo_commands(
+    cmd = _demo_commands(
         _args(config="configs/demo.yaml", point_table="point_table.yaml"),
-        master_http=18765, slave_http=18766, iec_port=24040,
+        http_port=18765, iec_port=24040,
     )
 
-    assert slave[:2] == master[:2]
-    assert "slave" in slave and "master" in master
-    for cmd, http_port in ((slave, 18766), (master, 18765)):
-        assert "--no-browser" in cmd
-        assert "--no-history" in cmd  # 演示不落盘历史库
-        assert cmd[cmd.index("--http-port") + 1] == str(http_port)
-        assert cmd[cmd.index("--port") + 1] == "24040"
-        assert cmd[cmd.index("--host") + 1] == "127.0.0.1"
-        assert cmd[cmd.index("--config") + 1] == "configs/demo.yaml"
-        assert cmd[cmd.index("--point-table") + 1] == "point_table.yaml"
+    assert "--mode" in cmd and cmd[cmd.index("--mode") + 1] == "both"
+    assert "--no-browser" in cmd
+    assert "--no-history" in cmd  # 演示不落盘历史库
+    assert cmd[cmd.index("--http-port") + 1] == "18765"
+    assert cmd[cmd.index("--port") + 1] == "24040"
+    assert cmd[cmd.index("--host") + 1] == "127.0.0.1"
+    assert cmd[cmd.index("--config") + 1] == "configs/demo.yaml"
+    assert cmd[cmd.index("--point-table") + 1] == "point_table.yaml"
 
 
 def test_demo_commands_omit_optional_paths() -> None:
-    slave, master = _demo_commands(
-        _args(), master_http=18765, slave_http=18766, iec_port=24040,
-    )
-    for cmd in (slave, master):
-        assert "--config" not in cmd
-        assert "--point-table" not in cmd
+    cmd = _demo_commands(_args(), http_port=18765, iec_port=24040)
+    assert "--config" not in cmd
+    assert "--point-table" not in cmd
 
 
-def _get_status(port: int) -> dict | None:
+def _get_status(port: int, path: str = "/api/status") -> dict | None:
     try:
         with urllib.request.urlopen(
-            f"http://127.0.0.1:{port}/api/status", timeout=1
+            f"http://127.0.0.1:{port}{path}", timeout=1
         ) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except Exception:
@@ -99,13 +94,15 @@ def _wait(predicate, timeout: float = 45.0) -> bool:
 
 
 def test_demo_starts_both_roles_and_stops_cleanly() -> None:
-    """真启动 `--demo`：两个 Web 角色可用、主站自动连上、到时回收子进程."""
-    master_http, slave_http = _free_port_pair()
+    """真启动 `--demo`：单进程双角色、主站自动连上、到时回收进程."""
+    http_port = _free_port()
     iec_port = _free_port()
+    while iec_port == http_port:
+        iec_port = _free_port()
     proc = subprocess.Popen(
         [
             sys.executable, str(ROOT / "app.py"), "--demo", "--no-browser",
-            "--demo-seconds", "8", "--http-port", str(master_http),
+            "--demo-seconds", "8", "--http-port", str(http_port),
             "--port", str(iec_port),
         ],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
@@ -126,15 +123,16 @@ def test_demo_starts_both_roles_and_stops_cleanly() -> None:
             return "\n".join(output_lines[-40:])
 
         assert _wait(
-            lambda: _get_status(master_http) and _get_status(slave_http),
+            lambda: _get_status(http_port)
+            and _get_status(http_port, "/slave/api/status"),
             timeout=60,
-        ), f"演示 Web 角色未就绪\n{_tail()}"
+        ), f"演示主/子站未就绪\n{_tail()}"
         assert _wait(
-            lambda: bool((_get_status(master_http) or {}).get("running")), timeout=30
+            lambda: bool((_get_status(http_port) or {}).get("running")), timeout=30
         ), f"主站未自动连接\n{_tail()}"
 
-        master = _get_status(master_http) or {}
-        slave = _get_status(slave_http) or {}
+        master = _get_status(http_port) or {}
+        slave = _get_status(http_port, "/slave/api/status") or {}
         assert master.get("role") == "master" and slave.get("role") == "slave"
         assert master.get("points", 0) > 0
 
@@ -142,14 +140,12 @@ def test_demo_starts_both_roles_and_stops_cleanly() -> None:
         reader.join(timeout=2)
         output = "\n".join(output_lines)
         assert proc.returncode == 0, output
-        assert "主站 UI" in output and "子站 UI" in output
+        assert "工作台（主站/子站同一页面）" in output
     finally:
         if proc.poll() is None:
             proc.kill()
             proc.wait(timeout=5)
 
-    # 子进程已随演示退出回收：两个 HTTP 端口都不再响应
-    assert _wait(
-        lambda: _get_status(master_http) is None and _get_status(slave_http) is None,
-        timeout=15,
-    ), "演示退出后仍残留子进程/端口"
+    # 进程已随演示退出回收：唯一 HTTP 端口不再响应
+    assert _wait(lambda: _get_status(http_port) is None, timeout=15), \
+        "演示退出后仍残留子进程/端口"

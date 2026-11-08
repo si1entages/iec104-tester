@@ -38,7 +38,7 @@
 - **文件传输**（F_FR/F_SR/F_SC/F_LS/F_AF/F_SG/F_DR 及 F_*_NB 确认）字节级语义已按多个独立参考实现逐字节核实（详见 [`docs/file_transfer_fls.md`](docs/file_transfer_fls.md)）
 - **TLS 传输层加密**（证书/CA 校验、双向认证 mTLS；⚠ 仅传输层加密，**不等于 IEC 62351 合规**，边界见 [`docs/tls.md`](docs/tls.md)）
 
-### Web UI（ISA-101 浅色工业风，支持深色/浅色主题切换）
+### Web UI（ISA-101 工业风格，深色/浅色双主题）
 
 - **主站工作台**：十万行点表虚拟滚动（只渲染可视窗口）、命令面板（系统命令/遥控/设点/步/比特串/延时/参数/文件命令）、实时报文查看器（悬停 HEX 逐段翻译）、点位趋势图（只采样被订阅点位）
 - **子站工作台**：点表编辑与手动置数、**应答行为配置**（延迟/丢帧/损坏/不响应/品质/错误 COT）、数据模拟（手动/自动、YX/YC 范围模式）
@@ -80,28 +80,31 @@
 
 ### 打包与发布
 
-- `python build/build_all.py` 一键产出 **`dist/iec104-master` / `dist/iec104-slave`** 两个免安装目录（含 Web 前端、配置、资源），双击 exe 即用；`--onefile` 可产出单文件 exe
-- 打 `v*` tag 触发双平台发布流水线：版本校验 → Windows/Linux onefile → 启动冒烟 → `SHA256SUMS` → GitHub Release（详见 [`docs/user_guide.md`](docs/user_guide.md)）
+- `python build/build_all.py` 一键产出**一个**免安装目录 **`dist/iec104-tester/`**（含 Web 前端、配置、资源）；`--onefile` 产出**单个** `iec104-tester.exe`（Linux 为 `iec104-tester`）
+- 双击 exe 默认**同时启动主站+子站**，只打开**一个页面**：左侧「主站工作台 / 子站工作台」两个菜单，点哪个就在同一页面显示哪个；也可命令行运行 `iec104-tester --mode master|slave|both`
+- 打 `v*` tag 触发双平台发布流水线：版本校验 → Windows/Linux onefile → **同一 exe 的主站/子站启动冒烟** → `SHA256SUMS` → GitHub Release（详见 [`docs/user_guide.md`](docs/user_guide.md)）
 
 ## 🚀 快速开始
 
 ```bash
 pip install -r requirements.txt
 
-# 启动主站 / 子站 Web 服务（各自自动打开浏览器）
+# 直接运行：默认同时启动主站+子站，打开一个单页工作台
+python app.py
+
+# 显式指定角色（单角色模式，各自自动打开浏览器）
 python app.py --mode master    # 主站，默认 http://127.0.0.1:8765/
 python app.py --mode slave     # 子站，默认 http://127.0.0.1:8766/
-
-# 或使用瘦入口脚本（等价）
-python apps/web_master.py
-python apps/web_slave.py
+python app.py --mode both      # 默认：单页工作台（左侧两个角色菜单）
 
 # 无窗口/服务器场景：不自动开浏览器，仅打印地址
 python app.py --mode master --no-browser --http-port 8765
 ```
 
 服务启动后会在默认浏览器自动打开对应页面；用 `--no-browser` 可关闭自动打开。
-联调：开两个终端分别启动主站与子站 → 子站页「启动监听」→ 主站页「连本地」→「立即总召」。
+`both` 模式是**单进程双角色、一个 HTTP 端口（8765）**：主站 API 在 `/api/*`，
+子站 API/WS 在 `/slave/api/*`、`/slave/ws`；页面内左侧菜单切换，不再有 8766/iframe。
+子站菜单「启动监听」→ 主站菜单「连本地」→「立即总召」即可联调。
 
 ### 一键环回演示（推荐首次体验）
 
@@ -109,8 +112,8 @@ python app.py --mode master --no-browser --http-port 8765
 python app.py --demo
 ```
 
-一条命令在本机同时启动子站与主站（不同 HTTP 端口），自动完成「子站监听 → 主站连接 →
-总召」，并打开主站页面；历史库自动关闭，Ctrl+C 停止全部进程。
+一条命令在本机启动单进程双角色（一个 HTTP 端口），自动完成「子站监听 → 主站连接 →
+总召」，并打开工作台；历史库自动关闭，Ctrl+C 停止进程。
 
 ### 手动联调示例（两个终端）
 
@@ -194,7 +197,7 @@ python sim_tool.py --preset poor_wifi --mode master --host 127.0.0.1
 | `--no-history` | 关闭历史库（默认开启） | false |
 | `--no-gui` | headless CLI 模式（仅日志输出） | false |
 | `--test` | 运行自动化测试脚本 (YAML 文件或目录) | — |
-| `--http-port` | Web UI HTTP 端口 | 主站 8765 / 子站 8766 |
+| `--http-port` | Web UI HTTP 端口 | both/master 8765；单独 `--mode slave` 8766 |
 | `--http-host` | Web UI 监听地址（0.0.0.0 会暴露到局域网） | 127.0.0.1 |
 | `--auth-token` | Web API 访问令牌（可选；亦可读环境变量 `IEC104_AUTH_TOKEN`） | — |
 | `--web-tls-cert` / `--web-tls-key` | Web UI HTTPS 证书 / 私钥 (PEM)；设置后 Web 服务走 HTTPS | — |
@@ -254,8 +257,8 @@ python tools/mutation_smoke.py          # 协议层变异冒烟（12/12 必须�
 
 ```
 iec104-tester/
-├── app.py                 # CLI/Web 兼容入口（含 --demo 一键环回）
-├── apps/                  # 瘦入口 web_master / web_slave（打包入口）
+├── app.py                 # CLI/Web 兼容入口（含 --demo 一键环回、--mode both）
+├── apps/                  # 源码瘦入口 web_master / web_slave（打包统一用根 app.py）
 ├── webui/                 # aiohttp REST+WS + React 前端（构建产物在 webui/static/app/）
 │   ├── bridge.py          # 引擎桥
 │   ├── diagnostics.py     # 一键诊断包
@@ -284,6 +287,7 @@ iec104-tester/
 ## 📖 文档
 
 - 用户手册：[`docs/user_guide.md`](docs/user_guide.md)（含 Web UI 各工作台、一键演示、诊断包、TLS、历史库、配置参考、已知限制）
+- 界面设计规范：[`docs/design_guidelines.md`](docs/design_guidelines.md)（组件模式/颜色语义/点表/告警/IEC104 语义映射/命令安全/无障碍/评审清单 + 现有页面差距项）
 - TLS 边界与排查：[`docs/tls.md`](docs/tls.md)
 - 文件传输字节语义核实：[`docs/file_transfer_fls.md`](docs/file_transfer_fls.md)
 - 文件传输真机核实清单/探针：[`docs/file_transfer_open_items.md`](docs/file_transfer_open_items.md)

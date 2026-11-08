@@ -148,7 +148,7 @@ class TestBackwardCompatibleApi:
         params = list(inspect.signature(run_server).parameters)
         assert params == ["role", "host", "port", "point_table",
                           "connection", "history_db", "app_config",
-                          "auth_token", "ssl_context"]
+                          "auth_token", "ssl_context", "history_dbs"]
 
 
 class TestWebModeEndToEnd:

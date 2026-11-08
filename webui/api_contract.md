@@ -56,12 +56,30 @@
 - **参数校验失败**返回 HTTP **400**，body 同样为 `{"ok": false, "error": "..."}`。
 - 请求体为 JSON（`Content-Type: application/json`）；标注「原始文本」的端点除外。
 - 「必填」列中未标注的字段均有默认值，可省略。
+- **合并模式（单进程双角色）**：主站 API/WS 保持 `/api/*`、`/ws`；子站挂在
+  `/slave/api/*`、`/slave/ws`。`GET /api/schema` 的 `roles` / `slaveApiPrefix`
+  告知前端可用角色与前缀；单角色模式下子站仍直接使用 `/api/*`。
+
+### 2.0 消费方运行时校验（2026-11-07）
+
+前端不再只靠本文档和手写类型对齐，而是把契约变成**可执行代码**：
+
+| 层 | 位置 | 行为 |
+|----|------|------|
+| schema DSL | `webui/frontend/src/api/contract.ts` | 零依赖组合子（obj/arr/optional/unionOf…），失败抛 `ApiContractError`，带 JSON 路径 |
+| 响应 schema | `webui/frontend/src/api/contracts.ts` | 覆盖全部 JSON 端点的响应形状；`struct` 推断出返回类型 |
+| 客户端校验 | `webui/frontend/src/api/client.ts` | `apiGet/apiPost/apiPostText` **每次响应都校验**；schema 不符即抛错，不再静默读 `undefined` |
+| 编译期锁 | `contracts.ts::ContractKeyChecks` | schema 字段集与 `types.ts` 响应接口逐项比对，多/少字段直接 `tsc` 失败 |
+| 真实后端 e2e | `tests/e2e/specs/api-contract.spec.ts` | 用**同一份 schema** 校验真实 aiohttp 响应（主站/子站/连接后运行态） |
+
+约定：未知字段忽略（后端纯新增不破坏前端）；业务失败统一 `{ok:false, error:string}`；
+新增/修改响应字段时必须同步 `contracts.ts` 与 `types.ts`，否则编译或 CI 失败。
 
 ### 2.1 状态与点表
 
 | 方法 | 路径 | 请求 | 响应 |
 |------|------|------|------|
-| GET | `/api/schema` | — | `{ok, schemaVersion, wsKinds: string[], wsSchemaKey}` |
+| GET | `/api/schema` | — | `{ok, schemaVersion, wsKinds: string[], wsSchemaKey, roles: Role[], slaveApiPrefix?}`（合并模式下 `roles=[master,slave]`、`slaveApiPrefix="/slave"`） |
 | GET | `/api/status` | — | `Status`（见 §4.1） |
 | GET | `/api/points` | — | `{points: Point[]}`（见 §4.2） |
 | GET | `/api/recent` | — | `{frames: Frame[], events: EngineEvent[]}`（见 §4.3 / §4.4） |
@@ -115,7 +133,7 @@
 | POST | `/api/slave/ps` | `ioa: int (≥0)`, `states: int[]`（长度 1–8，元素 0/1） | `{ok, error?}` |
 | POST | `/api/slave/response` | `ResponseBehavior` 字典（任意键，未启动时可暂存） | `{ok, error?}` |
 | GET | `/api/slave/response` | — | `{ok, response: ResponseBehavior}`（见 §4.8；未启动时返回暂存/默认值） |
-| POST | `/api/slave/sim` | `enabled: bool`, `yx_interval?`, `yc_interval?`, `yx_change_rate?`, `yc_change_range?`, `yx_scope?: "selected"\|"all"`, `yc_scope?: "selected"\|"all"`, `yx_ioas?: int[]`, `yc_ioas?: int[]` | `{ok, error?}` |
+| POST | `/api/slave/sim` | `enabled: bool`, `yx_enabled?: bool=true`, `yc_enabled?: bool=true`（至少一项为 true）, `yx_interval?`, `yc_interval?`, `yx_change_rate?`, `yc_change_range?`, `yx_scope?: "selected"\|"all"`, `yc_scope?: "selected"\|"all"`, `yx_ioas?: int[]`, `yc_ioas?: int[]` | `{ok, error?}` |
 
 > 模拟改造（第二批 ⑤）：
 > - `yx_change_rate` 语义为**每周期翻转概率**（0~1，每周期对范围内每个 YX 点独立判定）；
@@ -125,6 +143,9 @@
 > - `yx_scope`/`yc_scope`（YX/YC 独立，默认 `"all"`）：`"all"`=全部点；
 >   `"selected"`=仅 `yx_ioas`/`yc_ioas` 列出的点，**scope=selected 时对应 ioas
 >   须为非空 int 数组（≥0），否则 `{ok:false}`**；点表外的 IOA 被跳过（上送 info 日志）。
+> - `yx_enabled`/`yc_enabled`（默认均 true）：可**只模拟遥信或只模拟遥测**；两者都为
+>   false 时拒绝启动。被关闭的类型即使 `scope="selected"` 也不要求 `ioas`，且模拟
+>   循环中不产生该类报文。`GET /api/status` 会回显 `simulation_yx`/`simulation_yc`。
 
 ### 2.4 点表批量与导入导出
 
@@ -135,7 +156,7 @@
 | POST | `/api/points/yaml` | 原始 YAML 文本（非 JSON） | `{ok, error?, ...}` |
 | POST | `/api/points/import` | 原始文本；`?format=csv\|yaml\|json\|auto`（默认 `auto` 按内容嗅探） | `{ok, error?, ...}` |
 | GET | `/api/export/points.csv` | — | `text/csv` 文本 |
-| GET | `/api/export/session.json` | — | `{role, status: Status, frames: Frame[], events: EngineEvent[]}` |
+| GET | `/api/export/session.json` | — | `{role, status: Status, frames: WsEnvelope<'frame', Frame>[], events: WsEnvelope<'event', EngineEvent>[]}`（`recent()` 原样导出） |
 
 > 说明：`/api/points/import` 的 `auto` 嗅探顺序为 —— 以 `{` 开头 → `json`；
 > 首行含 `,` 且含 `type` → `csv`；否则 → `yaml`。
@@ -151,8 +172,8 @@
 
 | 方法 | 路径 | 请求 | 响应 |
 |------|------|------|------|
-| GET | `/api/master/param_state` | query：`ioa: int (≥0)` | `{ok, ioa, state: ParameterStateEntry \| null}` |
-| GET | `/api/master/params` | — | `{ok, params: ParameterStateEntry[]}` |
+| GET | `/api/master/param_state` | query：`ioa: int (≥0)` | `{ok: true, ioa, state: ParameterStateEntry \| null}` 或 `{ok: false, error}`（未连接） |
+| GET | `/api/master/params` | — | `{ok: true, params: ParameterStateEntry[]}` 或 `{ok: false, error}`（未连接） |
 
 > `state` 为该 IOA 的装载/激活状态**快照**；从未下发过参数命令时为 `null`。
 > 结构见 §4.6。参数命令（`POST /api/master/param`）下发后即可查询其
@@ -318,6 +339,8 @@
   clients?: number           // 子站：客户端数
   client_list?: string[]
   simulation?: boolean
+  simulation_yx?: boolean  // 当前模拟是否包含遥信
+  simulation_yc?: boolean  // 当前模拟是否包含遥测
   schemaVersion?: number
 }
 ```

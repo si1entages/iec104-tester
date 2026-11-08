@@ -1,0 +1,164 @@
+/*
+ * Carbon 套件补充样式。
+ *
+ * 颜色一律引用 `--cds-*` token（tests/test_frontend_style_tokens.py 禁止裸 hex/rgb）；
+ * 主题（浅 g10 / 深 g100）由 CarbonApp 把主题类挂到 <html>，portal（弹窗/浮层）也能取到。
+ */
+
+/* 与另两套件一致的等宽数字：报文 HEX、时间戳、IOA、数值列共用 */
+.mono {
+  font-family: ui-monospace, SFMono-Regular, 'Cascadia Mono', Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 应用壳：Header/SideNav 固定定位之外的主区域底色 */
+.cds-app-shell {
+  min-height: 100vh;
+  background: var(--cds-background);
+}
+
+.app-main {
+  margin-left: 256px;
+  padding: 3.5rem 1.75rem 4rem;
+  min-height: 100vh;
+  color: var(--cds-text-secondary);
+}
+
+/* 窄屏收起侧边栏（与 Carbon SideNav 折叠态一致：0 宽） */
+@media (max-width: 672px) {
+  .app-main {
+    margin-left: 0;
+  }
+}
+
+/* 键盘可达：自绘表格行（tabIndex）在 Carbon 组件默认焦点样式之外 */
+.cds-app-shell :where([tabindex]):focus-visible {
+  outline: 2px solid var(--cds-focus);
+  outline-offset: -2px;
+}
+
+/* 品牌标记：Header 标题前的小方块（取交互主色 token） */
+.app-brand-mark {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-inline-end: 8px;
+  border-radius: 3px;
+  background: var(--cds-border-interactive);
+}
+
+/* 页面内的段落/表单间距（避免逐处内联） */
+.app-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.app-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.app-panel-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--cds-text-primary);
+}
+
+.app-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+.app-stat-label {
+  font-size: 12px;
+  color: var(--cds-text-secondary);
+}
+
+.app-stat-value {
+  margin-top: 6px;
+  font-size: 28px;
+  font-weight: 300;
+  color: var(--cds-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.app-stat-unit {
+  margin-inline-start: 6px;
+  font-size: 0.5em;
+  opacity: 0.7;
+}
+
+.app-kv {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 4px 24px;
+}
+
+.app-kv-row {
+  display: flex;
+  gap: 12px;
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.app-kv-term {
+  color: var(--cds-text-secondary);
+  min-width: 96px;
+}
+
+.app-kv-value {
+  color: var(--cds-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 键值项的关键数字用等宽 */
+.app-kv-value.mono {
+  font-size: 12px;
+}
+
+/* 表格外框：横向滚动；表格本身仍是 Carbon data-table 语义 */
+.app-table-scroll {
+  overflow-x: auto;
+}
+
+.app-table-scroll .cds--data-table-container {
+  overflow-x: auto;
+}
+
+/* 虚拟点表的行定位容器（同 PF 方案：表头在滚动容器外） */
+.app-table-frame {
+  border: 1px solid var(--cds-border-subtle);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.app-hint {
+  font-size: 12px;
+  opacity: 0.75;
+  margin-bottom: 4px;
+}
+
+/* 自绘日志/脚本输出区（pre） */
+.app-log {
+  margin: 0;
+  padding: 8px;
+  max-height: 340px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--cds-layer);
+  color: var(--cds-text-secondary);
+}
+
+/* 徽标容器的纵向节奏 */
+.app-gap {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}

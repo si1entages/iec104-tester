@@ -42,6 +42,7 @@ from ..protocol.types import (
     FileSelectCallGet,
     LastSection,
     QualityDescriptor,
+    QualityFlag,
     SectionReadyAck,
     TypeID,
 )
@@ -88,6 +89,7 @@ class ResponseBehavior:
     # 品质注入
     force_invalid: bool = False
     force_blocked: bool = False
+    force_substituted: bool = False
     force_not_topical: bool = False
     force_overflow: bool = False
 
@@ -114,6 +116,7 @@ class ResponseBehavior:
             wrong_cot=bool(errors.get("wrong_cot", False)),
             force_invalid=bool(quality.get("invalid", False)),
             force_blocked=bool(quality.get("blocked", False)),
+            force_substituted=bool(quality.get("substituted", False)),
             force_not_topical=bool(quality.get("not_topical", False)),
             force_overflow=bool(quality.get("overflow", False)),
             reject_startdt=bool(conn.get("reject_startdt", False)),
@@ -123,17 +126,19 @@ class ResponseBehavior:
         )
 
     def quality_mask(self) -> int:
-        """合并品质描述词位（IV=0x80, NT=0x40, SB=0x10, OV=0x04）。"""
+        """合并品质描述词位（IEC 60870-5-101：IV=0x80, NT=0x40, SB=0x20, BL=0x10, OV=0x01）."""
         mask = 0
         if self.force_invalid:
-            mask |= 0x80
+            mask |= QualityFlag.IV
         if self.force_not_topical:
-            mask |= 0x40
+            mask |= QualityFlag.NT
         if self.force_blocked:
-            mask |= 0x10
+            mask |= QualityFlag.BL
+        if self.force_substituted:
+            mask |= QualityFlag.SB
         if self.force_overflow:
-            mask |= 0x04
-        return mask
+            mask |= QualityFlag.OV
+        return int(mask)
 
     def has_delay(self) -> bool:
         return self.gi_delay > 0 or self.command_delay > 0 or self.data_delay > 0

@@ -133,7 +133,9 @@ export function mergePointValues(
       a.name === b.name &&
       a.quality === b.quality &&
       a.subtype === b.subtype &&
-      a.sbo === b.sbo
+      a.sbo === b.sbo &&
+      a.unit === b.unit &&
+      a.decimal_places === b.decimal_places
     ) {
       continue
     }

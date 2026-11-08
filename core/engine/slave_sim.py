@@ -88,6 +88,8 @@ class SlaveSimulator:
         yc_scope: str = "all",
         yx_ioas: list[int] | None = None,
         yc_ioas: list[int] | None = None,
+        yx_enabled: bool = True,
+        yc_enabled: bool = True,
     ) -> None:
         """启动自动数据模拟.
 
@@ -100,18 +102,22 @@ class SlaveSimulator:
             yx_scope / yc_scope: 模拟范围 ``"all"``（全部点）或 ``"selected"``
                 （仅 ``yx_ioas`` / ``yc_ioas`` 列出的点；不在点表内的 IOA 跳过）。
             yx_ioas / yc_ioas: scope=selected 时的点集。
+            yx_enabled / yc_enabled: 是否模拟该类型（两者至少一个为 True；
+                只开一类时另一类的循环完全不执行）。
         """
         e = self._engine
         if e._simulation_running:
             return
+        if not yx_enabled and not yc_enabled:
+            raise ValueError("yx_enabled / yc_enabled 至少启用一项")
 
         # 选中范围里不在点表内的 IOA 记一条 info（这些点会被跳过）
-        if yx_scope == "selected" and yx_ioas:
+        if yx_enabled and yx_scope == "selected" and yx_ioas:
             known = {p.ioa for p in e._point_table.get_all_yx()}
             missing = [ioa for ioa in yx_ioas if ioa not in known]
             if missing:
                 logger.info(f"YX 模拟范围含点表外的 IOA（将跳过）: {missing}")
-        if yc_scope == "selected" and yc_ioas:
+        if yc_enabled and yc_scope == "selected" and yc_ioas:
             known = {p.ioa for p in e._point_table.get_all_yc()}
             missing = [ioa for ioa in yc_ioas if ioa not in known]
             if missing:
@@ -123,9 +129,13 @@ class SlaveSimulator:
                 yx_interval, yc_interval, yx_change_rate, yc_change_range,
                 yx_scope=yx_scope, yc_scope=yc_scope,
                 yx_ioas=yx_ioas, yc_ioas=yc_ioas,
+                yx_enabled=yx_enabled, yc_enabled=yc_enabled,
             )
         )
-        logger.info("Simulation started")
+        logger.info(
+            f"Simulation started (YX={'on' if yx_enabled else 'off'}, "
+            f"YC={'on' if yc_enabled else 'off'})"
+        )
 
     async def stop_simulation(self) -> None:
         """停止模拟."""
@@ -149,11 +159,14 @@ class SlaveSimulator:
         yc_scope: str = "all",
         yx_ioas: list[int] | None = None,
         yc_ioas: list[int] | None = None,
+        yx_enabled: bool = True,
+        yc_enabled: bool = True,
     ) -> None:
         """模拟数据变化循环（随机变化）.
 
         YX/YC 各自支持 ``"all"``（全部点）与 ``"selected"``（仅指定 IOA，
-        点表外的 IOA 自动跳过）两种范围模式。
+        点表外的 IOA 自动跳过）两种范围模式；``yx_enabled`` / ``yc_enabled``
+        为 False 时对应循环分支完全不执行（只模拟遥信或只模拟遥测）。
         """
         e = self._engine
         yx_tick = 0.0
@@ -166,7 +179,7 @@ class SlaveSimulator:
             now = time.monotonic()
 
             # 遥信随机变化（每周期对范围内每点按概率翻转）
-            if now - yx_tick >= yx_interval:
+            if yx_enabled and now - yx_tick >= yx_interval:
                 yx_tick = now
                 yx_points = e._point_table.get_all_yx()
                 for p in yx_points:
@@ -178,7 +191,7 @@ class SlaveSimulator:
                         await self.send_spontaneous_yx(p.ioa, new_value)
 
             # 遥测随机波动（声明量程 → 量程内随机；未声明 → 当前值 ± 比例回落）
-            if now - yc_tick >= yc_interval:
+            if yc_enabled and now - yc_tick >= yc_interval:
                 yc_tick = now
                 yc_points = e._point_table.get_all_yc()
                 for p in yc_points:

@@ -1,13 +1,20 @@
-"""构建 IEC104 主站 / 子站可执行文件.
+"""构建 IEC104 Tester 可执行文件（单文件发布）.
 
 用法:
   python build/build_all.py
   python build/build_all.py --onefile
   python build/build_all.py --skip-frontend   # 跳过 npm 前端构建
 
-产物为两个独立 exe（主站 iec104-master、子站 iec104-slave），双击即用。
+产物为**一个**可执行文件（iec104-tester）：
+  - 双击：默认单进程双角色、一个 8765 端口，打开一个工作台（左侧菜单切换）；
+  - 命令行：`iec104-tester --mode master|slave|both`（默认 both）。
+
 纯 Web 形态：不打包桌面壳，保留控制台以便查看"服务已启动"提示与关闭服务。
 静态页 / 配置 / 资源目录通过 --add-data 打入包内，分隔符用 os.pathsep 跨平台。
+
+注意：请用**项目 venv 的 python** 执行（`venv/Scripts/python.exe build/build_all.py --onefile`）。
+系统 Python 若装了额外包（如 cryptography/pydantic），PyInstaller 会一并打进去，
+onefile 体积会从 ~15 MB 涨到 ~32 MB。
 
 打包前默认先构建新前端（T10）：`webui/frontend` 经 vite build 输出到
 `webui/static/app/`，随 `webui/static` 一并进包。若无 node/npm 则跳过并告警，
@@ -133,8 +140,7 @@ def main() -> int:
             return 1
 
     results = []
-    results.append(build_one(ROOT / "apps" / "web_master.py", "iec104-master", args.onefile))
-    results.append(build_one(ROOT / "apps" / "web_slave.py", "iec104-slave", args.onefile))
+    results.append(build_one(ROOT / "app.py", "iec104-tester", args.onefile))
     print("全部完成:")
     for r in results:
         print(" -", r)

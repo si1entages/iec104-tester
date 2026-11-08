@@ -285,6 +285,9 @@ class EngineBridge:
         r = await self._cmd(self.session.set_simulation(enabled, **kwargs))
         if r.get("ok"):
             self._status["simulation"] = bool(enabled)
+            # 记录实际模拟的类型，供前端刷新后回填开关
+            self._status["simulation_yx"] = bool(kwargs.get("yx_enabled", True)) if enabled else False
+            self._status["simulation_yc"] = bool(kwargs.get("yc_enabled", True)) if enabled else False
         return r
 
     # ── 网络异常模拟（B6）─────────────────────────────────────────

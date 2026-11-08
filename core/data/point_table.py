@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import copy
 import csv
 import enum
 import threading
@@ -139,6 +140,19 @@ class PointTable:
     @common_addr.setter
     def common_addr(self, addr: int):
         self._common_addr = addr
+
+    def clone(self) -> PointTable:
+        """深拷贝点定义（不复制 RLock），供单进程双角色各持一份独立点表."""
+        other = PointTable()
+        with self._lock:
+            other._yx = {k: copy.deepcopy(v) for k, v in self._yx.items()}
+            other._yc = {k: copy.deepcopy(v) for k, v in self._yc.items()}
+            other._yk = {k: copy.deepcopy(v) for k, v in self._yk.items()}
+            other._ym = {k: copy.deepcopy(v) for k, v in self._ym.items()}
+            other._step = {k: copy.deepcopy(v) for k, v in self._step.items()}
+            other._station_name = self._station_name
+            other._common_addr = self._common_addr
+        return other
 
     # ── 点操作 ──────────────────────────────────────────────────
 

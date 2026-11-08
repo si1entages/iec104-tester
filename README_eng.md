@@ -45,7 +45,7 @@ diagnostics and a one-command loopback demo.
   encryption only — **not** full IEC 62351 compliance; see [`docs/tls.md`](docs/tls.md)
 - Vendor-private TypeID registration via YAML; unregistered types still reply COT=42
 
-### Web UI (ISA-101 light industrial style, dark/light theme)
+### Web UI (ISA-101 industrial style, dark/light themes)
 
 - **Master workbench**: 100k-row virtualized point table, command panel
   (system/control/setpoint/step/bitstring/delay/parameter/file), live frame viewer with
@@ -102,23 +102,28 @@ diagnostics and a one-command loopback demo.
 
 ### Packaging and release
 
-- `python build/build_all.py` produces `dist/iec104-master` / `dist/iec104-slave`
-  (web UI, configs and resources included); `--onefile` builds single-file executables
+- `python build/build_all.py` produces **one** portable app directory `dist/iec104-tester/`
+  (web UI, configs and resources included); `--onefile` produces **one** executable
+  (`iec104-tester.exe` on Windows)
+- Double-clicking the exe starts **master + slave together** in **one process on one
+  HTTP port (8765)**; the sidebar has **two menu entries** (Master Workbench / Slave
+  Workbench) that swap the workbench inside the same page. Slave APIs live under
+  `/slave/api` + `/slave/ws`; the CLI supports `iec104-tester --mode master|slave|both`
 - Pushing a `v*` tag runs the release pipeline: version check → Windows/Linux onefile
-  builds → startup smoke → `SHA256SUMS` → GitHub Release
+  builds → startup smoke for **the same exe in both roles** → `SHA256SUMS` → GitHub Release
 
 ## Quick start
 
 ```bash
 pip install -r requirements.txt
 
-# master / slave Web services (each opens the browser)
+# default: start both roles and open one single-page workbench
+python app.py
+
+# explicit single role (opens the browser)
 python app.py --mode master    # http://127.0.0.1:8765/
 python app.py --mode slave     # http://127.0.0.1:8766/
-
-# thin entry scripts (equivalent)
-python apps/web_master.py
-python apps/web_slave.py
+python app.py --mode both      # default: one process/port, two role menu entries
 
 # one-command loopback demo: slave + master + auto connect + GI
 python app.py --demo
@@ -127,9 +132,9 @@ python app.py --demo
 python app.py --mode master --no-browser --http-port 8765
 ```
 
-`--demo` starts both roles on free local ports, enables the slave listener, connects the
-master and performs a GI, then opens the master page. Use `--demo-seconds N` to stop
-automatically; `Ctrl+C` stops all child processes.
+`--demo` starts both roles in one process/port, enables the slave listener, connects the
+master and performs a GI, then opens the workbench. Use `--demo-seconds N` to stop
+automatically; `Ctrl+C` stops the process.
 
 Manual interop: start master and slave in two terminals → slave page “Start listening” →
 master page “Connect local” → “GI now”.
@@ -199,8 +204,8 @@ python tools/mutation_smoke.py
 
 ```
 iec104-tester/
-├── app.py                 # CLI/Web entry (including --demo)
-├── apps/                  # thin entries web_master / web_slave (packaging)
+├── app.py                 # CLI/Web entry (--demo, --mode both)
+├── apps/                  # source thin entries web_master / web_slave (packaging uses app.py)
 ├── webui/                 # aiohttp REST+WS + React SPA (built into webui/static/app/)
 │   ├── bridge.py          # engine bridge
 │   ├── diagnostics.py     # one-click diagnostics ZIP

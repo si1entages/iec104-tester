@@ -48,7 +48,7 @@ test('网络模拟卡片：启停与预设请求体正确', async ({ page }) => 
   })
 
   await gotoApp(page, MASTER, '状态总览')
-  const card = page.locator('.ant-card').filter({ hasText: '网络异常模拟' }).first()
+  const card = page.locator('.pf-v6-c-card').filter({ hasText: '网络异常模拟' }).first()
   await expect(card).toBeVisible()
   await expect(card.getByText('已停用')).toBeVisible()
   await expect(card.getByText('引擎未启动')).toBeVisible()
@@ -57,16 +57,12 @@ test('网络模拟卡片：启停与预设请求体正确', async ({ page }) => 
   const switchReq = page.waitForRequest(
     (req) => req.url().endsWith('/api/simulation') && req.method() === 'POST',
   )
-  await card.getByRole('switch').click()
+  await card.locator('#pf-sim-enable').click({ force: true })
   await switchReq
   await expect.poll(() => posts.some((p) => p.enabled === true)).toBe(true)
 
   // 预设：选择「网络拥塞」→ 应用 → {enabled: false, preset: 'congested'}
-  await card.locator('.ant-select').first().click()
-  await page
-    .locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)')
-    .getByText('网络拥塞', { exact: true })
-    .click()
+  await card.locator('select').first().selectOption('congested')
   const presetReq = page.waitForRequest(
     (req) =>
       req.url().endsWith('/api/simulation') &&

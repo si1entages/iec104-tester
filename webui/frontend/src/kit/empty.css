@@ -1,0 +1,8 @@
+/*
+ * 占位样式表（保持为空）。
+ *
+ * PatternFly 的 `.mjs` 组件样式映射会 `import './xxx.css'` 逐组件引入；
+ * 本应用统一加载全量 `patternfly.css`（含 base/tokens 与手写表格类名），
+ * 因此由 `vite.config.ts` 的 alias 把这些逐组件 CSS 指到这里，避免重复打包，
+ * 也避免它们在切到经典版后残留在 `<head>` 里。
+ */

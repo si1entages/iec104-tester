@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import csv
 import hmac
 import io
@@ -31,6 +32,24 @@ RESOURCES = Path(__file__).parent.parent / "resources"
 HISTORY_QUERY_MAX_LIMIT = 10000
 HISTORY_EXPORT_MAX_ROWS = 200000
 
+
+def _empty_history_stats() -> dict:
+    """未启用/无连接时的零值统计，形状与启用时一致（契约 §2.11/§4.9）.
+
+    早期实现返回 ``stats: {}``，前端类型与契约却声明为完整 HistoryStats，
+    属于“两侧各自自洽”的契约漂移；统一给零值后响应可被前端 schema 校验。
+    """
+    return {
+        "data_records": 0,
+        "frame_records": 0,
+        "buffered_data": 0,
+        "buffered_frames": 0,
+        "oldest_data": 0,
+        "newest_data": 0,
+        "db_size_bytes": 0,
+        "dropped_records": 0,
+    }
+
 # 安全响应头（E4）：静态 SPA + REST/WS 同源。
 # - CSP 允许 antd CSS-in-JS 注入的 <style>（style-src 'unsafe-inline'），
 #   但不允许内联/外部脚本；WS 与 REST 都走同源（localhost/局域网 IP）。
@@ -54,8 +73,8 @@ async def security_headers(request: web.Request, handler) -> web.Response:
     """给所有响应补安全头（含 401/404）."""
     resp = await handler(request)
     resp.headers.setdefault("Content-Security-Policy", _CSP)
-    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("Referrer-Policy", "no-referrer")
     resp.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
     if request.secure:
@@ -126,7 +145,22 @@ def _validate_redundancy(cfg: dict) -> str | None:
     return None
 
 
-def create_app(bridge: EngineBridge, auth_token: str | None = None) -> web.Application:
+def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
+               path_prefix: str = "",
+               available_roles: list[str] | None = None,
+               slave_api_prefix: str | None = None) -> web.Application:
+    """构造单个角色的 aiohttp 应用.
+
+    单角色模式：``path_prefix=""``，API 在 ``/api/*``。
+    合并模式：主站应用前缀为空；子站应用以 ``path_prefix="/slave"`` 挂到
+    ``/slave/api/*``、``/slave/ws``（同一端口、同一进程，不再需要 8766）。
+    """
+
+    def _local_path(path: str) -> str:
+        if path_prefix and path.startswith(path_prefix):
+            return path[len(path_prefix):] or "/"
+        return path
+
     @web.middleware
     async def token_auth(request: web.Request, handler) -> web.Response:
         """可选访问令牌（B7）：保护 /api/* 与 /ws；静态页放行供前端令牌提示.
@@ -137,9 +171,10 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None) -> web.Appli
         """
         if not auth_token:
             return await handler(request)
-        if not (request.path.startswith("/api/") or request.path == "/ws"):
+        path = _local_path(request.path)
+        if not (path.startswith("/api/") or path == "/ws"):
             return await handler(request)
-        if request.path == "/api/auth":
+        if path == "/api/auth":
             return await handler(request)
         provided = _extract_token(request)
         if provided and hmac.compare_digest(provided, auth_token):
@@ -150,7 +185,7 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None) -> web.Appli
 
     async def index(request: web.Request) -> web.Response:
         """旧原生页（master.html/slave.html）已退役（T19）：一律进新前端 /app/."""
-        raise web.HTTPFound("/app/")
+        raise web.HTTPFound(f"{path_prefix}/app/")
 
     async def favicon(request: web.Request) -> web.Response:
         """返回项目图标，避免浏览器请求 /favicon.ico 时 404."""
@@ -164,7 +199,7 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None) -> web.Appli
 
     async def app_redirect(request: web.Request) -> web.Response:
         """`/app` → `/app/`：保证 Vite base 下的相对资源正确解析."""
-        return web.HTTPFound("/app/")
+        return web.HTTPFound(request.path + "/")
 
     async def app_index(request: web.Request) -> web.Response:
         index_file = APP_STATIC / "index.html"
@@ -200,12 +235,16 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None) -> web.Appli
 
     async def api_schema(request: web.Request) -> web.Response:
         """契约版本探测入口（T18）：前端可先探测再决定是否降级渲染."""
-        return web.json_response({
+        body = {
             "ok": True,
             "schemaVersion": SCHEMA_VERSION,
             "wsKinds": ["snapshot", "frame", "event", "log"],
             "wsSchemaKey": "schemaVersion",
-        })
+            "roles": list(available_roles or [bridge.role]),
+        }
+        if slave_api_prefix:
+            body["slaveApiPrefix"] = slave_api_prefix
+        return web.json_response(body)
 
     async def api_auth(request: web.Request) -> web.Response:
         """认证探测（公开）：是否需要令牌、本次请求携带的令牌是否有效（B7）."""
@@ -438,7 +477,14 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None) -> web.Appli
     async def api_points_yaml_get(request: web.Request) -> web.Response:
         try:
             text = bridge.export_points_yaml()
-            return web.Response(text=text, content_type="text/yaml")
+            # 前端「导出 YAML」用 window.open 直开：必须带 attachment，
+            # 否则浏览器会内联展示文本而不是下载文件。
+            return web.Response(
+                text=text, content_type="text/yaml",
+                headers={
+                    "Content-Disposition":
+                        f'attachment; filename="iec104_{bridge.role}_points.yaml"',
+                })
         except Exception as e:
             return web.json_response({"ok": False, "error": str(e)})
 
@@ -480,10 +526,20 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None) -> web.Appli
         return web.json_response(bridge.import_points_yaml(text))
 
     async def api_export_csv(request: web.Request) -> web.Response:
-        return web.Response(text=bridge.export_points_csv(), content_type="text/csv")
+        return web.Response(
+            text=bridge.export_points_csv(), content_type="text/csv",
+            headers={
+                "Content-Disposition":
+                    f'attachment; filename="iec104_{bridge.role}_points.csv"',
+            })
 
     async def api_export_session(request: web.Request) -> web.Response:
-        return web.json_response(bridge.export_session_json())
+        return web.json_response(
+            bridge.export_session_json(),
+            headers={
+                "Content-Disposition":
+                    f'attachment; filename="iec104_{bridge.role}_session.json"',
+            })
 
     async def api_points_batch(request: web.Request) -> web.Response:
         try:
@@ -632,9 +688,9 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None) -> web.Appli
         """历史库统计（未启用时 enabled=false）."""
         db = bridge.history_db
         if db is None:
-            return web.json_response({"ok": True, "enabled": False, "stats": {}})
+            return web.json_response({"ok": True, "enabled": False, "stats": _empty_history_stats()})
         try:
-            stats = db.get_stats()
+            stats = db.get_stats() or _empty_history_stats()
         except Exception as e:
             return web.json_response(
                 {"ok": False, "error": f"history stats failed: {e}"}, status=500)
@@ -798,6 +854,8 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None) -> web.Appli
                     "yx_interval", "yc_interval", "yx_change_rate", "yc_change_range",
                     # 第二批改造⑤：范围模式（YX/YC 独立）——scope + 选中点集
                     "yx_scope", "yc_scope", "yx_ioas", "yc_ioas",
+                    # 模拟类型开关（只模拟遥信 / 只模拟遥测）
+                    "yx_enabled", "yc_enabled",
                 )
                 if k in body
             },
@@ -1212,11 +1270,68 @@ async def _run(role: str, host: str = "127.0.0.1", port: int = 8765,
         await runner.cleanup()
 
 
+async def _run_dual(host: str = "127.0.0.1", port: int = 8765,
+                    point_table=None, connection: dict | None = None,
+                    history_dbs: dict | None = None, app_config=None,
+                    auth_token: str | None = None,
+                    ssl_context: ssl.SSLContext | None = None) -> None:
+    """单进程双角色：同一端口托管主站 + 子站（子站 API/WS 在 /slave 前缀）.
+
+    两个角色的引擎、历史库、日志仍相互独立；普通用户只接触一个 HTTP 端口。
+    """
+    if auth_token is None and host not in ("127.0.0.1", "localhost", "::1"):
+        logger.warning(
+            "Web UI 监听 %s 且未启用访问令牌：局域网内任何主机都可能调用 REST/WS"
+            "（含遥控、点表下发）。请用 --auth-token <token> 启用认证，"
+            "或改回 --http-host 127.0.0.1。", host)
+    dbs = history_dbs or {}
+    master_bridge = EngineBridge(
+        "master",
+        point_table=point_table.clone() if point_table is not None else None,
+        connection=connection,
+        history_db=dbs.get("master"),
+        app_config=copy.deepcopy(app_config) if app_config is not None else None,
+    )
+    slave_bridge = EngineBridge(
+        "slave",
+        point_table=point_table.clone() if point_table is not None else None,
+        connection=connection,
+        history_db=dbs.get("slave"),
+        app_config=copy.deepcopy(app_config) if app_config is not None else None,
+    )
+    master_bridge.ensure_demo_points()
+    slave_bridge.ensure_demo_points()
+
+    schema_roles = ["master", "slave"]
+    master_app = create_app(
+        master_bridge, auth_token=auth_token,
+        available_roles=schema_roles, slave_api_prefix="/slave",
+    )
+    slave_app = create_app(
+        slave_bridge, auth_token=auth_token, path_prefix="/slave",
+        available_roles=schema_roles, slave_api_prefix="/slave",
+    )
+    master_app.add_subapp("/slave", slave_app)
+
+    runner = web.AppRunner(master_app)
+    await runner.setup()
+    site = web.TCPSite(runner, host, port, ssl_context=ssl_context)
+    await site.start()
+    logger.info("Web UI http://%s:%s  roles=master+slave", host, port)
+    try:
+        await asyncio.Event().wait()
+    finally:
+        await master_bridge.shutdown()
+        await slave_bridge.shutdown()
+        await runner.cleanup()
+
+
 def run_server(role: str, host: str = "127.0.0.1", port: int = 8765,
                point_table=None, connection: dict | None = None,
                history_db=None, app_config=None,
                auth_token: str | None = None,
-               ssl_context: ssl.SSLContext | None = None) -> None:
+               ssl_context: ssl.SSLContext | None = None,
+               history_dbs: dict | None = None) -> None:
     """启动 Web 服务（阻塞）.
 
     Args:
@@ -1234,9 +1349,16 @@ def run_server(role: str, host: str = "127.0.0.1", port: int = 8765,
     """
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     try:
-        asyncio.run(_run(role, host, port, point_table=point_table,
-                         connection=connection, history_db=history_db,
-                         app_config=app_config, auth_token=auth_token,
-                         ssl_context=ssl_context))
+        if role == "both":
+            asyncio.run(_run_dual(
+                host, port, point_table=point_table, connection=connection,
+                history_dbs=history_dbs, app_config=app_config,
+                auth_token=auth_token, ssl_context=ssl_context,
+            ))
+        else:
+            asyncio.run(_run(role, host, port, point_table=point_table,
+                             connection=connection, history_db=history_db,
+                             app_config=app_config, auth_token=auth_token,
+                             ssl_context=ssl_context))
     except KeyboardInterrupt:
         pass

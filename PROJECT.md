@@ -8,7 +8,7 @@ IEC 60870-5-104 协议测试工具，支持主站/子站模拟、报文录制回
 Python 3.11+, Web UI (aiohttp + HTML/CSS), asyncio, struct（协议编解码）
 
 ## 架构分层
-入口层: app.py（统一 Web 入口 + headless CLI） / apps/web_master.py / apps/web_slave.py（瘦入口） / run_tests.py / capture_tool.py / sim_tool.py
+入口层: app.py（统一 Web 入口 + headless CLI + `--mode master|slave|both`，单文件发布入口） / apps/web_master.py / apps/web_slave.py（源码瘦入口） / run_tests.py / capture_tool.py / sim_tool.py
 ↓
 Web UI层: webui/ （静态页 + REST/WebSocket）
   ├── server.py
@@ -56,6 +56,9 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - ASDU 结构: TypeID(1B) + SQ(1B) + Cause(2B) + CommonAddr(2B) + IOBs + 数据体
 - 72 种 TypeID 在 types.py 用枚举定义，asdu.py 按 TypeID 分发解析
 - k/w 流控: k=12（未确认上限）, w=8（确认间隔）
+- 品质位按 IEC 60870-5-101 定义：IV=0x80 / NT=0x40 / SB=0x20 / BL=0x10 / OV=0x01；编解码、注入与展示共用 `QualityFlag`
+  —— **`QualityDescriptor.to_int()` 必须保留 bit7**（曾用 `& 0x7F` 截掉 IV，导致注入"无效"品质被读回 GOOD）
+- 品质位注入 `ResponseBehavior.quality_mask()` 只允许使用 `QualityFlag` 常量，不得写字面量（历史上两处掩码不一致）
 
 ### 编码风格
 - 协议层: 纯同步 struct.pack/unpack，无 async，无 GUI 依赖
@@ -69,7 +72,7 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - 真机语义优先: 功能语义有歧义时按真实装置行为实现（用户明确要求）。已落地：遥控→同 IOA 遥信变位 + SOE 上送、遥调→同 IOA 遥测更新 + 上送（`SlaveEngine._reflect_command_result`）；召唤按点表声明分流单点/双点
 - 前端约定: `app.js` 必须把 `$`/`$$` 暴露到 window（页面内联脚本直接用裸 `$` 绑事件，漏暴露会静默导致所有按钮失效）；点值刷新走 WS `"refresh"` 协议 + 节流，不做整表重建
 - 按钮状态单一来源: 顶部「连接/断开」「启动监听/停止」的 `disabled` 只由**服务端状态快照**（`status.started`）驱动，不得只靠点击后的返回码 —— 否则页面刷新后按钮与真实状态不一致，用户"点不了"
-- UI 风格: 浅色工业风（ISA-101 高性能 HMI）——中性浅灰底、颜色只用于状态与类型标签、扁平无装饰、禁用态显式灰化、字段带标签；点表全边框 + 表头/单元格统一左对齐 + 数值等宽
+- UI 风格: **以 [`docs/design_guidelines.md`](docs/design_guidelines.md) 为准**（PatternFly/Carbon 组件模式 + ISA-101/NUREG-0700 领域规则 + antd token 落地）。要点：首次跟随系统主题偏好（缺省深色）、浅色可切换；颜色只表达状态且必须同时有文字/图标；点表数值右对齐、小数点成列、带单位与品质解码；危险操作二次确认且 `danger` 只用于危险方向；每个数据面四态（加载/空/错误/降级）完备
 - 状态一致性: 任何会改变服务端状态的分支（含"已是该状态"的空操作）都必须广播事件，前端据此重新对齐；前端另加 5s 兜底轮询，保证最终一致
 - 帧格式必须字节级对照标准: APCICodec 编码端曾把 S 帧 SS 的 bit0 置 1，自家解码 `>> 1` 掩掉后互通自洽，真机按标准校验直接断开。编码与解码要**独立对照标准**，不能只对拍
 - 真机兼容性: 部分装置每次连接都发 EI 并高频推流，收到主站 I 帧会断开——自动重 GI 默认关（`auto_gi_on_init_end`）；对这类装置用 `tests/e2e/qa_real_device.py` 做只读验证
@@ -100,7 +103,7 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - [x] Web UI：apps/web_master + apps/web_slave 瘦入口，统一走 app.py `cli()`
 - [x] 纯 web 形态：移除桌面壳 / `--no-shell` / web_lab 一键联调；浏览器自动打开
 - [x] Web API：组召唤/复位/测试/读/参数/文件 + 点表 YAML/CSV/会话导出
-- [x] PyInstaller 脚本 build/build_all.py（iec104-master / iec104-slave）
+- [x] PyInstaller 脚本 build/build_all.py（单文件 `iec104-tester`；双击默认同时启动主站+子站，单页工作台）
 - [x] wrong_cot 注入落到 ASDU 构建（子站应答 COT 整体 +1，含 Web UI 开关）
 - [x] 对端断开时 transport 未关闭：`_read_loop` 退出补 `close()`（修 FD 泄漏 + `server.stop()` 阻塞 2s）
 - [x] 主站↔子站真机联合调试：修 SQ=1 非连续 IOA 错址（`_split_contiguous`）与召唤重复上送遥信
@@ -156,6 +159,15 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - [x] E4 Web HTTPS + 安全头：`--web-tls-cert/--web-tls-key`，CSP / X-Frame-Options / Referrer-Policy / Permissions-Policy；4 个安全头/证书用例
 - [x] E5 发布体验：`--version`、README 4 张界面截图、`SECURITY.md`、`CHANGELOG.md`
 - [x] F2 一致性负例：新增 8 个畸形 APCI/ASDU 用例（42→50），独立 runner 与 pytest 汇总同步锁死
+- [x] 修复报文查看器悬停翻译恒显示「翻译失败」：后端契约 §2.9 返回扁平 `{ok, format, segments}`，前端却读取 `r.translation`（自 `810c340` 上线即存在）；前端对齐扁平结构、单测改为真实响应形态，新增 `tests/e2e/specs/frame-translate.spec.ts`（真实后端 + 浏览器悬停）回归；契约端点测试锁定响应键集；前端 128 passed / Playwright 23/23
+- [x] API 响应契约升级为可执行单一源：`api/contract.ts` 零依赖 schema DSL（失败抛 `ApiContractError` 带 JSON 路径）+ `api/contracts.ts` 覆盖全部 JSON 端点 + `apiGet/apiPost/apiPostText` 每次响应强制校验 + `ContractKeyChecks` 编译期比对 schema 字段集与 `types.ts` 接口 + Playwright `api-contract.spec.ts`（真实后端 × 同一 schema：主站/子站只读矩阵、幂等命令、连接+总召运行态）；顺带修正 `SessionExport` 信封形状、`HistoryStats` 未启用零值、参数状态未连接错误响应；前端 136 passed / Playwright 27/27 / 后端 1545 passed
+- [x] 单文件发布 + 单页工作台（单进程双角色）：一个 `iec104-tester` 双击默认同时启动主站+子站，**一个进程、一个 8765 端口**；左侧「主站工作台 / 子站工作台」两个菜单在同一 SPA 内切换，子站 API/WS 挂 `/slave/api`、`/slave/ws`，页面原生渲染（无 iframe/双滚动条）；`--mode master|slave|both` 仍可单角色运行；`--mode both` 自动按角色拆分历史库，两个 `EngineBridge` 共享事件循环但引擎/日志隔离；`MasterPage`/`SlavePage` 共用 `WorkbenchShell` 骨架（flex 不换行：桌面端点表自适应 + 右侧面板固定 400/420px，避免面板被宽表挤到下一行）；查询键按角色隔离（`['points', role]` 等），切换主站/子站不再清空缓存、切回不重新拉点表；后端 1551 passed / 前端 138 passed / Playwright 28/28；本机单 exe 实测 both 单进程单端口与 master/slave 单角色
+- [x] 工作台两处体验缺陷修复：① 点表提示文案（「单击行以选中并手动置数」等）从 Card 标题区移到表体工具行——标题区被右侧工具挤压后长文案只剩半句；Playwright 断言 `points-hint` 完整可见（`scrollWidth<=clientWidth`）。② 模拟控制支持 **YX/YC 独立开启**（只模拟遥信或只模拟遥测）：`POST /api/slave/sim` 新增 `yx_enabled`/`yc_enabled`（默认均 true、至少一项；关闭类型不要求 selected ioas），模拟循环跳过关闭类型、不产生该类报文；`GET /api/status` 回显 `simulation_yx`/`simulation_yc` 供刷新后回填；UI 两个开关并禁用对应参数；后端新增 5 例、前端新增 4 例，Playwright 覆盖只开 YX 的真实请求体
+- [x] UI 自动巡检 + 静态路由一致性（第一类可自动发现问题）：新增 `ui-audit.spec.ts`（8 菜单页 × 3 视口 × 中英/深色 + 主/子站页签 + 命令面板折叠区全展开 + 单角色 8765/8766），自动检查文本裁切（scrollWidth）、页面横向滚动、控件出视口、console error/warn、API 4xx/5xx、错误 Alert、空白页签、漏出 i18n key，并探活导出/下载链接；巡检发现并修复：① 英文/窄屏下点表标题被 Card `extra` 工具条压到 7px、工具被裁 → 工具条移入表体首行自动换行；② 英文「手动置数」类型标签超宽 → 短标签；③ 点表 YAML/CSV/会话 JSON 导出缺 `Content-Disposition: attachment`（浏览器内联显示而非下载）；④ 合并模式下子站「报文抓包」页会列出/可下载主站录制 → `CaptureService` 按角色前缀隔离（无前缀手工文件双方可见）。新增 `tests/test_frontend_routes.py`（前端 API 方法+路径 ↔ 后端路由）；`npm run i18n:inventory` 恢复 0（契约层诊断文案标记 `i18n-ignore-file`）；前端 142 passed、后端 1559 passed、Playwright 33/33、ruff 通过
+- [x] 配色对比度自动化 + WCAG AA 主色：新增 `ui-contrast.spec.ts`（8 页 × 浅/深主题 + 选中行，祖先 alpha 合成有效背景，WCAG 2.1 对比度，普通 4.5:1 / 大字 3:1，含 `::placeholder`；3488 处文本 **0 硬失败 / 0 建议项**，全部 AA；默认 <3:1 门禁，`CONTRAST_REPORT=1` 仅报告）；主色 `#13c2c2`（白底/白字双向仅 ~2.2:1）→ `#0a7575`（~5.5:1），亮青保留为 `colorInfo`（深色品牌字/信息色）；显式配置浅/深选中菜单、Tabs/Pagination 强调色，success/warning/error 标签前景/背景 token；placeholder、次要/三级文字、Switch 轨道、空表占位文字提升；不可访问预设标签 gold/cyan/purple/green 改为 success/blue/default（帧方向 发送 success / 接收 blue，格式 I/S/U = blue/success/default）；6 处硬编码颜色改 token，新增 `test_frontend_style_tokens.py` 静态门禁；前端 142 passed、后端 1560 passed、Playwright 34/34、ruff 通过
+- [x] 非文本对比 + 视觉回归基线：新增 `ui-nontext-contrast.spec.ts`（WCAG 1.4.11 / 2.4.7）：控件边框、Switch 轨道、纯图标按钮、键盘 Tab 焦点环与相邻背景 ≥3:1；702 处 0 硬失败（禁用控件豁免）。修复 `colorBorder`（浅 #8c8c8c / 深 #6b6b6b）、Button `defaultBorderColor`、深色选中 Switch 轨道 #0b7f7f、全局 `:focus-visible` 焦点环（浅 #0a7575 / 深 #5cdbd3）。新增 `visual.spec.ts`：专用单角色服务 8768（无引擎/无帧/无历史），浅/深主站工作台 + 状态总览整页基线；按平台分目录（已提交 win32 基线，`windows-build` CI job 自动跑视觉回归；无基线平台自动 skip，`VISUAL_UPDATE=1 --update-snapshots` 生成新平台基线）；Windows 全量 Playwright **38/38 passed**（Linux 35 passed + 3 skipped）
+- [x] 界面套件共存（同地址即时切换）：根入口与 UI 解耦（`src/main.tsx` 常驻 QueryClient/WS/契约协商，`PfRoot`/`ClassicRoot`/`CarbonRoot` 只做 UI），**PatternFly / 经典版（antd 6，v1.3.1 冻结）/ Carbon** 三套在 `/app/` 同一文档内切换——不刷新、不改 URL、连接与页面保持，深浅主题/语言跟随；`useKitCss` 保证 `<head>` 同时只有当前套件的全局样式表（PF 逐组件 CSS 置空、Carbon styles.css 含全局 reset 同样按需挂载），经典版数据层用 re-export shim 指向共享层。右下角 UI 圆钮切换，`?kit=pf|classic|carbon` + localStorage。e2e 41 passed（`ui-kit.spec.ts` 3 条含 Carbon）、前端单测 133 passed、视觉基线重拍、exe 重建（19.0 MB；Carbon 的 IBM Plex 字体本地化进包）。详见 `docs/ui_kits.md`
+- [x] T71 反馈批次：**Carbon 设为默认套件**（`resolveInitialKit`：`?kit=` → localStorage → `carbon`，存量 pf 偏好视为未设置）；三套外壳头部统一收敛为**只留中英切换 + 深浅图标切换**（Sun/Moon 类图标，不再用文字），状态类信息只在页面内呈现；主站工作台**选中行与趋势 watch 移入共享 `uiStore`**（切菜单/切套件回来不丢），且选中行按 key 从点表缓存现取——命令面板「当前值」继续跟随 WS 刷新（不回退到快照冻结，与经典版同一 bug 修复）；**趋势图「没有曲线」根因修复**：三套件趋势图的容器 div 是条件渲染（无 watch 时占位），一次性 init effect 挂载时读到空 ref 即永久 bail，之后「加入趋势」也不会建图——改为回调 ref，容器每次出现都重挂 ResizeObserver 并重试 init（隐藏面板 0×0 时跳过，可见后再创建）；「加入趋势」并立即以当前值写入首采样（连接空闲也有曲线起点）。e2e `ui-kit.spec.ts` 增至 5 条（含「加入趋势后切页返回，选中与曲线保留」）；修正 2 处 e2e 自身问题：@carbon/react 1.120 无 `--selected` 修饰类改语义选择器、Carbon↔PF 互切用例改等 `dataset.kit` 完成信号（原用 PF/Carbon 同名 point-row 判断切换完成，属竞态）
 
 ### TODO（暂缓，等待外部条件）
 
@@ -166,10 +178,16 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 
 | 产品 | 入口 | 端口默认 |
 |------|------|----------|
+| 单文件发布 | `iec104-tester`（双击默认 both：一个进程/8765 端口，左侧两个角色菜单） | 8765 |
 | IEC104 主站 | `python apps/web_master.py`（= `python app.py --mode master`） | 8765 |
 | IEC104 子站 | `python apps/web_slave.py`（= `python app.py --mode slave`） | 8766 |
 
-联调：开两个终端分别执行 `python app.py --mode master` / `python app.py --mode slave`（或对应瘦入口），浏览器中两个页面操作。
+联调：`python app.py`（默认 both）单进程/单端口打开一个工作台，左侧菜单切换主站/子站；也可用 `--mode master` / `--mode slave` 分开启动。
 
 架构：`webui/bridge.py` 引擎桥 + `webui/server.py` aiohttp REST/WS + `webui/frontend`（React/Vite，产物 `webui/static/app`），浏览器为唯一 UI（无桌面壳）。
 共享：`core/` 引擎。README 与代码对齐：主站含组召唤/复位/测试/读/参数/文件与点表导出；子站含响应注入与模拟。多站/录制/网络模拟见 CLI。
+
+界面：默认 **Carbon**；同一地址 `/app/` 内可即时切到 **PatternFly 6** 或 **经典版**（antd 6，v1.3.1 界面冻结），
+右下角 UI 圆钮切换（`?kit=pf|classic|carbon`，选择持久化，页面/连接/主题/语言保持；
+存量 pf 偏好视为未设置，跟随新默认）。
+架构与隔离方式见 [`docs/ui_kits.md`](docs/ui_kits.md)。

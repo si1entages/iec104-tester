@@ -99,6 +99,38 @@ async def test_set_simulation_passes_scope_and_ioas():
     assert call["yx_ioas"] == [1, 2]
     assert call["yc_scope"] == "all"
     assert call["yx_change_rate"] == pytest.approx(0.3)
+    # 未显式指定时两类都模拟（兼容旧调用）
+    assert call["yx_enabled"] is True
+    assert call["yc_enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_set_simulation_requires_at_least_one_type():
+    """YX / YC 都关闭时拒绝启动（否则会得到「模拟中但什么都不发」的空状态）."""
+    s = _session_with_engine()
+    r = await s.set_simulation(True, yx_enabled=False, yc_enabled=False)
+    assert r["ok"] is False
+    assert "至少" in r["error"]
+    assert s.engine.calls == []
+
+
+@pytest.mark.asyncio
+async def test_set_simulation_passes_type_flags():
+    """只开 YC：禁用的 YX 即使 scope=selected 也不要求 ioas."""
+    s = _session_with_engine()
+    r = await s.set_simulation(
+        True,
+        yx_enabled=False,
+        yc_enabled=True,
+        yx_scope="selected",  # YX 未启用，不应要求 yx_ioas
+        yc_scope="selected",
+        yc_ioas=[101],
+    )
+    assert r["ok"] is True
+    call = s.engine.calls[0]
+    assert call["yx_enabled"] is False
+    assert call["yc_enabled"] is True
+    assert call["yc_ioas"] == [101]
 
 
 # ── simulation_loop scope 点集 ───────────────────────────────────
@@ -186,3 +218,29 @@ async def test_scope_all_covers_all_table_points():
     for c in engine._sim.send_spontaneous_yc.await_args_list:
         if c.args[0] == 102:
             assert 50.0 * 0.9 - 1e-9 <= c.args[1] <= 50.0 * 1.1 + 1e-9
+
+
+@pytest.mark.asyncio
+async def test_loop_yx_only_sends_no_yc():
+    """yc_enabled=False：循环只发遥信，一条遥测报文都不发."""
+    engine = _engine_with_points()
+    await _run_loop(engine, 3, yx_enabled=True, yc_enabled=False)
+    assert engine._sim.send_spontaneous_yx.await_count > 0
+    assert engine._sim.send_spontaneous_yc.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_loop_yc_only_sends_no_yx():
+    """yx_enabled=False：循环只发遥测，一条遥信报文都不发."""
+    engine = _engine_with_points()
+    await _run_loop(engine, 3, yx_enabled=False, yc_enabled=True)
+    assert engine._sim.send_spontaneous_yx.await_count == 0
+    assert engine._sim.send_spontaneous_yc.await_count > 0
+
+
+@pytest.mark.asyncio
+async def test_start_simulation_rejects_both_disabled():
+    engine = _engine_with_points()
+    with pytest.raises(ValueError, match="至少启用一项"):
+        await engine._sim.start_simulation(yx_enabled=False, yc_enabled=False)
+    assert engine._simulation_running is False

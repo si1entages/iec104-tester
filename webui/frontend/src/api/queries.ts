@@ -4,6 +4,7 @@ import type { QueryClient } from '@tanstack/react-query'
 import { api } from './endpoints'
 import { applyPatches, mergePointValues } from '../lib/pointValue'
 import type { PointPatch } from '../lib/pointValue'
+import { useUiStore } from '../store/uiStore'
 import type {
   EngineEvent,
   Frame,
@@ -36,25 +37,33 @@ export const MAX_LIVE_FRAMES = 2000
 /** 实时事件缓冲上限 */
 export const MAX_LIVE_EVENTS = 500
 
+/** 当前工作台角色：查询键按角色隔离，切换主站/子站互不覆盖、切回不重新加载. */
+function activeRole() {
+  return useUiStore.getState().activeRole
+}
+
 export const queryKeys = {
   schema: ['schema'] as const,
-  status: ['status'] as const,
-  points: ['points'] as const,
-  recent: ['recent'] as const,
-  logs: (params: LogQueryParams) => ['logs', params] as const,
-  liveLogs: ['logs', 'live'] as const,
-  liveFrames: ['frames', 'live'] as const,
-  liveEvents: ['events', 'live'] as const,
-  multiStatus: ['multi', 'status'] as const,
-  multiSummary: ['multi', 'summary'] as const,
-  historyStats: ['history', 'stats'] as const,
-  historyData: (params: HistoryDataParams) => ['history', 'data', params] as const,
-  historyFrames: (params: HistoryFramesParams) => ['history', 'frames', params] as const,
-  simulationStatus: ['simulation', 'status'] as const,
-  captureStatus: ['capture', 'status'] as const,
-  captureFrames: (offset: number, limit: number) => ['capture', 'frames', offset, limit] as const,
-  testScripts: ['tests', 'scripts'] as const,
-  testStatus: ['tests', 'status'] as const,
+  status: () => ['status', activeRole()] as const,
+  points: () => ['points', activeRole()] as const,
+  recent: () => ['recent', activeRole()] as const,
+  logs: (params: LogQueryParams) => ['logs', activeRole(), params] as const,
+  liveLogs: () => ['logs', activeRole(), 'live'] as const,
+  liveFrames: () => ['frames', activeRole(), 'live'] as const,
+  liveEvents: () => ['events', activeRole(), 'live'] as const,
+  multiStatus: () => ['multi', activeRole(), 'status'] as const,
+  multiSummary: () => ['multi', activeRole(), 'summary'] as const,
+  historyStats: () => ['history', activeRole(), 'stats'] as const,
+  historyData: (params: HistoryDataParams) =>
+    ['history', activeRole(), 'data', params] as const,
+  historyFrames: (params: HistoryFramesParams) =>
+    ['history', activeRole(), 'frames', params] as const,
+  simulationStatus: () => ['simulation', activeRole(), 'status'] as const,
+  captureStatus: () => ['capture', activeRole(), 'status'] as const,
+  captureFrames: (offset: number, limit: number) =>
+    ['capture', activeRole(), 'frames', offset, limit] as const,
+  testScripts: () => ['tests', activeRole(), 'scripts'] as const,
+  testStatus: () => ['tests', activeRole(), 'status'] as const,
 }
 
 // ── 查询 ───────────────────────────────────────────────────────────────
@@ -71,7 +80,7 @@ export function useSchemaQuery() {
 
 export function useStatusQuery() {
   return useQuery<Status>({
-    queryKey: queryKeys.status,
+    queryKey: queryKeys.status(),
     queryFn: api.status,
     // WS 快照会持续覆盖缓存；轮询只作为断线兜底
     refetchInterval: 5000,
@@ -80,7 +89,7 @@ export function useStatusQuery() {
 
 export function usePointsQuery() {
   return useQuery<Point[]>({
-    queryKey: queryKeys.points,
+    queryKey: queryKeys.points(),
     queryFn: async () => (await api.points()).points,
     // 十万点表：不再自动轮询，值由 WS（增量补丁/快照刷新）驱动
     refetchOnWindowFocus: false,
@@ -90,7 +99,7 @@ export function usePointsQuery() {
 
 export function useRecentQuery() {
   return useQuery<RecentResponse>({
-    queryKey: queryKeys.recent,
+    queryKey: queryKeys.recent(),
     queryFn: api.recent,
     refetchInterval: 5000,
   })
@@ -101,7 +110,7 @@ export function useRecentQuery() {
  */
 export function useMultiStatusQuery() {
   return useQuery<MultiStatusResponse>({
-    queryKey: queryKeys.multiStatus,
+    queryKey: queryKeys.multiStatus(),
     queryFn: api.multi.status,
     refetchInterval: 2000,
   })
@@ -110,7 +119,7 @@ export function useMultiStatusQuery() {
 /** 多站聚合汇总（T16）。同样只在页面挂载期间轮询。 */
 export function useMultiSummaryQuery() {
   return useQuery<MultiSummaryResponse>({
-    queryKey: queryKeys.multiSummary,
+    queryKey: queryKeys.multiSummary(),
     queryFn: api.multi.summary,
     refetchInterval: 2000,
   })
@@ -127,7 +136,7 @@ export function useLogsQuery(params: LogQueryParams) {
 /** 历史库统计（轻量，页面挂载期间低频轮询即可） */
 export function useHistoryStatsQuery() {
   return useQuery<HistoryStatsResponse>({
-    queryKey: queryKeys.historyStats,
+    queryKey: queryKeys.historyStats(),
     queryFn: api.history.stats,
     staleTime: 5000,
     refetchInterval: 15000,
@@ -162,7 +171,7 @@ export function useHistoryFramesQuery(params: HistoryFramesParams, enabled = tru
 /** 网络异常模拟状态（仅在状态页挂载期间轮询，统计计数实时更新） */
 export function useSimulationStatusQuery() {
   return useQuery<SimulationStatusResponse>({
-    queryKey: queryKeys.simulationStatus,
+    queryKey: queryKeys.simulationStatus(),
     queryFn: api.simulation.status,
     refetchInterval: 3000,
     staleTime: 1000,
@@ -183,17 +192,17 @@ function useDerivedArray<T>(key: readonly unknown[]): T[] {
 
 /** 实时日志（由 WS 桥写入 React Query 缓存）。 */
 export function useLiveLogs(): LogRow[] {
-  return useDerivedArray<LogRow>(queryKeys.liveLogs)
+  return useDerivedArray<LogRow>(queryKeys.liveLogs())
 }
 
 /** 实时报文（报文查看器）。 */
 export function useLiveFrames(): Frame[] {
-  return useDerivedArray<Frame>(queryKeys.liveFrames)
+  return useDerivedArray<Frame>(queryKeys.liveFrames())
 }
 
 /** 实时引擎事件。 */
 export function useLiveEvents(): EngineEvent[] {
-  return useDerivedArray<EngineEvent>(queryKeys.liveEvents)
+  return useDerivedArray<EngineEvent>(queryKeys.liveEvents())
 }
 
 // ── 缓存写入（给 WS 桥接层用）──────────────────────────────────────────
@@ -213,55 +222,55 @@ export function appendLiveLog(client: QueryClient, row: LogRow): void {
  */
 export function appendLiveLogs(client: QueryClient, rows: LogRow[]): void {
   if (rows.length === 0) return
-  client.setQueryData<LogRow[]>(queryKeys.liveLogs, (prev) => {
+  client.setQueryData<LogRow[]>(queryKeys.liveLogs(), (prev) => {
     const next = prev ? prev.concat(rows) : rows.slice()
     return next.length > MAX_LIVE_LOGS ? next.slice(next.length - MAX_LIVE_LOGS) : next
   })
 }
 
 export function replaceLiveLogs(client: QueryClient, rows: LogRow[]): void {
-  client.setQueryData<LogRow[]>(queryKeys.liveLogs, rows.slice(-MAX_LIVE_LOGS))
+  client.setQueryData<LogRow[]>(queryKeys.liveLogs(), rows.slice(-MAX_LIVE_LOGS))
 }
 
 export function clearLiveLogs(client: QueryClient): void {
-  client.setQueryData<LogRow[]>(queryKeys.liveLogs, [])
+  client.setQueryData<LogRow[]>(queryKeys.liveLogs(), [])
 }
 
 export function appendFrame(client: QueryClient, frame: Frame): void {
-  client.setQueryData<Frame[]>(queryKeys.liveFrames, (prev) =>
+  client.setQueryData<Frame[]>(queryKeys.liveFrames(), (prev) =>
     appendCapped(prev, frame, MAX_LIVE_FRAMES),
   )
 }
 
 export function replaceFrames(client: QueryClient, frames: Frame[]): void {
-  client.setQueryData<Frame[]>(queryKeys.liveFrames, frames.slice(-MAX_LIVE_FRAMES))
+  client.setQueryData<Frame[]>(queryKeys.liveFrames(), frames.slice(-MAX_LIVE_FRAMES))
 }
 
 export function clearFrames(client: QueryClient): void {
-  client.setQueryData<Frame[]>(queryKeys.liveFrames, [])
+  client.setQueryData<Frame[]>(queryKeys.liveFrames(), [])
 }
 
 export function appendEvent(client: QueryClient, event: EngineEvent): void {
-  client.setQueryData<EngineEvent[]>(queryKeys.liveEvents, (prev) =>
+  client.setQueryData<EngineEvent[]>(queryKeys.liveEvents(), (prev) =>
     appendCapped(prev, event, MAX_LIVE_EVENTS),
   )
 }
 
 export function replaceEvents(client: QueryClient, events: EngineEvent[]): void {
-  client.setQueryData<EngineEvent[]>(queryKeys.liveEvents, events.slice(-MAX_LIVE_EVENTS))
+  client.setQueryData<EngineEvent[]>(queryKeys.liveEvents(), events.slice(-MAX_LIVE_EVENTS))
 }
 
 // ── 点表写入（diff 合并，避免整表重建）─────────────────────────────────
 
 /** 用快照对齐点表：仅变化行换新对象，无变化则保持原数组引用。 */
 export function mergePointsSnapshot(client: QueryClient, points: Point[]): void {
-  client.setQueryData<Point[]>(queryKeys.points, (prev) => mergePointValues(prev, points))
+  client.setQueryData<Point[]>(queryKeys.points(), (prev) => mergePointValues(prev, points))
 }
 
 /** 用事件补丁就近更新点表（不触发网络请求）。 */
 export function patchPoints(client: QueryClient, patches: PointPatch[]): void {
   if (patches.length === 0) return
-  client.setQueryData<Point[]>(queryKeys.points, (prev) => applyPatches(prev, patches))
+  client.setQueryData<Point[]>(queryKeys.points(), (prev) => applyPatches(prev, patches))
 }
 
 // ── 命令（mutations）──────────────────────────────────────────────────
@@ -272,10 +281,10 @@ function useInvalidateAfterCommand() {
   // 不等 WS 快照（断线时也能对齐）；
   // 多站命令同理，顺带刷新多站状态/汇总，避免等下一个轮询周期。
   return () => {
-    void client.invalidateQueries({ queryKey: queryKeys.status })
-    void client.invalidateQueries({ queryKey: queryKeys.points })
-    void client.invalidateQueries({ queryKey: queryKeys.multiStatus })
-    void client.invalidateQueries({ queryKey: queryKeys.multiSummary })
+    void client.invalidateQueries({ queryKey: queryKeys.status() })
+    void client.invalidateQueries({ queryKey: queryKeys.points() })
+    void client.invalidateQueries({ queryKey: queryKeys.multiStatus() })
+    void client.invalidateQueries({ queryKey: queryKeys.multiSummary() })
   }
 }
 
@@ -300,7 +309,7 @@ export function useCommandNoArgs<R extends OkResponse = OkResponse>(fn: () => Pr
 /** 报文录制/回放状态；录制中 1s 轮询，停止后降低频率。 */
 export function useCaptureStatusQuery() {
   return useQuery<CaptureStatus>({
-    queryKey: queryKeys.captureStatus,
+    queryKey: queryKeys.captureStatus(),
     queryFn: api.capture.status,
     refetchInterval: (query) => (query.state.data?.recording ? 1000 : 5000),
   })
@@ -318,7 +327,7 @@ export function useCaptureFramesQuery(offset: number, limit: number, enabled: bo
 /** 测试脚本列表（静态，挂载时取一次）。 */
 export function useTestScriptsQuery() {
   return useQuery<TestScriptInfo[]>({
-    queryKey: queryKeys.testScripts,
+    queryKey: queryKeys.testScripts(),
     queryFn: async () => (await api.tests.scripts()).scripts,
     staleTime: 30_000,
   })
@@ -327,7 +336,7 @@ export function useTestScriptsQuery() {
 /** 测试运行状态；运行中 1s 轮询，空闲 5s。 */
 export function useTestStatusQuery() {
   return useQuery<TestStatusResponse>({
-    queryKey: queryKeys.testStatus,
+    queryKey: queryKeys.testStatus(),
     queryFn: api.tests.status,
     refetchInterval: (query) => (query.state.data?.running ? 1000 : 5000),
   })

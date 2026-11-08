@@ -2,7 +2,7 @@
 
 from core.data.point_table import PointTable
 from core.engine.slave import ResponseBehavior, SlaveEngine
-from core.protocol.types import COT
+from core.protocol.types import COT, QualityDescriptor, QualityFlag, SinglePoint
 
 
 def test_response_behavior_from_dict():
@@ -18,6 +18,7 @@ def test_response_behavior_from_dict():
         "quality": {
             "invalid": True,
             "blocked": False,
+            "substituted": True,
             "not_topical": True,
             "overflow": False,
         },
@@ -38,12 +39,13 @@ def test_response_behavior_from_dict():
     assert rb.no_response is True
     assert rb.wrong_cot is True
     assert rb.force_invalid is True
+    assert rb.force_substituted is True
     assert rb.force_not_topical is True
     assert rb.reject_startdt is True
     assert rb.send_testfr is True
     assert rb.testfr_interval == 15
-    # IV=0x80 + NT=0x40
-    assert rb.quality_mask() == 0xC0
+    # IV=0x80 + NT=0x40 + SB=0x20
+    assert rb.quality_mask() == 0xE0
 
 
 def test_response_behavior_defaults():
@@ -59,11 +61,34 @@ def test_apply_quality_mask():
     engine.set_response_behavior({
         "quality": {"invalid": True, "overflow": True},
     })
-    # 原始品质 0 → 强制 IV|OV
-    assert engine._apply_quality(0) == (0x80 | 0x04)
+    # 原始品质 0 → 强制 IV|OV（0x80 | 0x01）
+    assert engine._apply_quality(0) == (0x80 | 0x01)
     # 原始品质已有 BL → 再叠加 IV
     engine.set_response_behavior({"quality": {"invalid": True}})
     assert engine._apply_quality(0x10) == (0x10 | 0x80)
+
+
+def test_quality_mask_uses_standard_bits():
+    """品质位必须按 IEC 60870-5-101：IV=0x80 / NT=0x40 / SB=0x20 / BL=0x10 / OV=0x01."""
+    for key, flag in (
+        ("invalid", QualityFlag.IV),
+        ("not_topical", QualityFlag.NT),
+        ("substituted", QualityFlag.SB),
+        ("blocked", QualityFlag.BL),
+        ("overflow", QualityFlag.OV),
+    ):
+        rb = ResponseBehavior.from_dict({"quality": {key: True}})
+        assert rb.quality_mask() == int(flag)
+
+
+def test_injected_invalid_quality_round_trips():
+    """注入「无效」后，解码侧必须仍读到 IV（曾被解读为 GOOD）。"""
+    encoded = SinglePoint(value=True, quality=QualityDescriptor(QualityFlag.IV)).to_bytes()
+    decoded = SinglePoint.from_bytes(encoded)
+    assert decoded.quality.invalid is True
+    assert decoded.quality.is_good is False
+    assert str(decoded.quality) == "IV"
+    assert QualityDescriptor(QualityFlag.IV).to_int() == 0x80
 
 
 def test_maybe_drop_frame():

@@ -36,6 +36,9 @@ export interface Status {
   clients?: number
   client_list?: string[]
   simulation?: boolean
+  /** 当前模拟是否包含遥信 / 遥测（仅 simulation=true 时有意义） */
+  simulation_yx?: boolean
+  simulation_yc?: boolean
   /** 冗余双通道运行态（仅主站启用时存在）（E3） */
   redundancy?: RedundancyStatus
   schemaVersion?: number
@@ -75,6 +78,10 @@ export interface Point {
   subtype?: string
   /** 仅 YK：是否需要选择-执行（SBO） */
   sbo?: boolean
+  /** 仅 YC：工程单位（设计规范 §5.3，界面按 `值 + 单位` 显示） */
+  unit?: string
+  /** 仅 YC：显式小数位（缺省按量级推断） */
+  decimal_places?: number
 }
 
 export interface PointsResponse {
@@ -113,10 +120,12 @@ export interface FrameTranslation {
   segments: FrameSegment[]
 }
 
+/** 与后端契约 §2.9 一致：成功响应是**扁平**结构，没有 `translation` 包裹层 */
 export interface FrameDecodeResponse {
   ok: boolean
   error?: string
-  translation?: FrameTranslation
+  format?: FrameTranslation['format']
+  segments?: FrameSegment[]
 }
 
 /** `GET /api/schema` */
@@ -125,14 +134,18 @@ export interface SchemaResponse {
   schemaVersion: number
   wsKinds: string[]
   wsSchemaKey: string
+  /** 可用角色：单角色模式一个；合并模式 master + slave */
+  roles?: Role[]
+  /** 合并模式下子站 API/WS 前缀（如 /slave） */
+  slaveApiPrefix?: string
 }
 
-/** `GET /api/export/session.json` */
+/** `GET /api/export/session.json`（帧/事件按 `EventBus.recent()` 原样导出为 WS 信封） */
 export interface SessionExport {
   role: Role
   status: Status
-  frames: Frame[]
-  events: EngineEvent[]
+  frames: WsEnvelope<'frame', Frame>[]
+  events: WsEnvelope<'event', EngineEvent>[]
 }
 
 // ── 日志 ───────────────────────────────────────────────────────────────
@@ -330,6 +343,7 @@ export interface SlaveErrors {
 export interface SlaveQuality {
   invalid?: boolean
   blocked?: boolean
+  substituted?: boolean
   not_topical?: boolean
   overflow?: boolean
 }
@@ -350,6 +364,10 @@ export interface SlaveResponseBehavior {
 
 export interface SimRequest {
   enabled: boolean
+  /** 是否模拟遥信（默认 true；与 yc_enabled 至少一个为 true） */
+  yx_enabled?: boolean
+  /** 是否模拟遥测（默认 true；与 yx_enabled 至少一个为 true） */
+  yc_enabled?: boolean
   yx_interval?: number
   yc_interval?: number
   /** YX 每周期翻转概率（0~1，每周期对范围内每点独立判定） */
@@ -400,18 +418,20 @@ export interface ParameterStateEntry {
   activationUpdatedAt: number | null
 }
 
-/** `GET /api/master/param_state?ioa=<int>` */
+/** `GET /api/master/param_state?ioa=<int>`（未连接时返回 `{ok:false,error}`） */
 export interface ParamStateResponse {
   ok: boolean
-  ioa: number
+  error?: string
+  ioa?: number
   /** 从未下发过参数命令时为 null */
-  state: ParameterStateEntry | null
+  state?: ParameterStateEntry | null
 }
 
-/** `GET /api/master/params` */
+/** `GET /api/master/params`（未连接时返回 `{ok:false,error}`） */
 export interface ParamsResponse {
   ok: boolean
-  params: ParameterStateEntry[]
+  error?: string
+  params?: ParameterStateEntry[]
 }
 
 // ── 多站（T16，契约 §2.8 / §4.7）───────────────────────────────────────

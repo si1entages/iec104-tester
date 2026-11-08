@@ -640,12 +640,15 @@ class SlaveEngine(EngineBase):
         yc_scope: str = "all",
         yx_ioas: list[int] | None = None,
         yc_ioas: list[int] | None = None,
+        yx_enabled: bool = True,
+        yc_enabled: bool = True,
     ) -> None:
         """启动自动数据模拟（门面 → SlaveSimulator）."""
         await self._sim.start_simulation(
             yx_interval, yc_interval, yx_change_rate, yc_change_range,
             yx_scope=yx_scope, yc_scope=yc_scope,
             yx_ioas=yx_ioas, yc_ioas=yc_ioas,
+            yx_enabled=yx_enabled, yc_enabled=yc_enabled,
         )
 
     async def stop_simulation(self) -> None:
@@ -662,12 +665,15 @@ class SlaveEngine(EngineBase):
         yc_scope: str = "all",
         yx_ioas: list[int] | None = None,
         yc_ioas: list[int] | None = None,
+        yx_enabled: bool = True,
+        yc_enabled: bool = True,
     ) -> None:
         """随机模拟循环（门面 → SlaveSimulator）."""
         await self._sim.simulation_loop(
             yx_interval, yc_interval, yx_change_rate, yc_change_range,
             yx_scope=yx_scope, yc_scope=yc_scope,
             yx_ioas=yx_ioas, yc_ioas=yc_ioas,
+            yx_enabled=yx_enabled, yc_enabled=yc_enabled,
         )
 
     async def _auto_change_loop(self) -> None:

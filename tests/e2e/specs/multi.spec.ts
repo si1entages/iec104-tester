@@ -19,12 +19,12 @@ test('多站：增删/启停 → 聚合状态可见', async ({ page, request }) 
   await idInput.waitFor()
   await idInput.fill('e2e-a')
   // 独立端口，避开单站引擎（站卡片内第一个数字输入框即「端口」）
-  const card = page.locator('.ant-card').filter({ hasText: 'e2e-a' })
-  const portInput = card.locator('.ant-input-number input').first()
+  const card = page.locator('[data-testid="multi-card"]').filter({ hasText: 'e2e-a' })
+  const portInput = card.getByLabel('端口').first()
   await portInput.fill(String(STATION_PORT))
   // 若还有残留默认站，关掉其「参与本次启动」，保证只启动 e2e-a
   const page1 = page
-  const partSwitches = page1.getByRole('switch', { name: /^参与本次启动-/ })
+  const partSwitches = page1.getByRole('checkbox', { name: /^参与本次启动-/ })
   const count = await partSwitches.count()
   for (let i = 0; i < count; i += 1) {
     const sw = partSwitches.nth(i)

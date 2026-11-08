@@ -20,7 +20,7 @@ import {
 
 test.describe.configure({ mode: 'serial' })
 
-const ROW = '.ant-table-tbody .ant-table-row'
+const ROW = '[data-testid="point-row"]'
 
 test.beforeAll(async ({ request }) => {
   await injectPoints(request, MASTER)
@@ -46,7 +46,7 @@ test('主站 UI 连接建立（点「连接」→ 后端 running）', async ({ p
   const status = await waitForStatus(page.request, MASTER, (s) => s.running === true)
   expect(status.running).toBe(true)
   // 头部运行标记同步（WS 快照驱动）
-  await expect(page.getByText('running', { exact: true })).toBeVisible()
+  await expect(page.getByText(/已连接|连接中/).first()).toBeVisible()
 })
 
 test('点表虚拟滚动：DOM 行数远小于总行数（T12 核心验收）', async ({ page }) => {
@@ -58,12 +58,12 @@ test('点表虚拟滚动：DOM 行数远小于总行数（T12 核心验收）', 
   expect(domRows).toBeLessThan(200) // 远小于 2000+：虚拟滚动只渲染可视窗口
   // 滚动到底部后首屏内容更新（可视行确实随滚动变化）
   await page.evaluate(() => {
-    const holder = document.querySelector('.ant-table-tbody-virtual-holder')
+    const holder = document.querySelector('[data-testid="points-scroll"]')
     if (holder) holder.scrollTop = (holder as HTMLElement).scrollHeight
   })
   await expect(page.locator(ROW).first()).toContainText('YX_BULK', { timeout: 15_000 })
   await page.evaluate(() => {
-    const holder = document.querySelector('.ant-table-tbody-virtual-holder')
+    const holder = document.querySelector('[data-testid="points-scroll"]')
     if (holder) holder.scrollTop = 0
   })
 })
@@ -128,7 +128,8 @@ test('双击 YK 值单元格 → 确认弹窗 → 下发遥控命令（SBO 不�
 
   await page.getByTestId('point-value-YK-201').dblclick()
   const dialog = page.getByRole('dialog')
-  await expect(dialog).toContainText('下发遥控命令')
+  // PF Modal 的标题渲染在 dialog 角色节点之外，按页面级文本断言
+  await expect(page.getByText('下发遥控命令').first()).toBeVisible()
   await expect(dialog).toContainText('选择-执行（SBO）')
   await expect(dialog).toContainText('选择被拒或超时不会发送执行帧')
   await dialog.getByRole('button', { name: /确\s*认\s*下\s*发/ }).click()
@@ -150,7 +151,7 @@ test('双击 YC 值单元格 → 确认弹窗 → 下发设点命令', async ({ 
 
   await page.getByTestId('point-value-YC-101').dblclick()
   const dialog = page.getByRole('dialog')
-  await expect(dialog).toContainText('下发设点命令')
+  await expect(page.getByText('下发设点命令').first()).toBeVisible()
   const valueInput = dialog.getByRole('spinbutton')
   await valueInput.fill('12.5')
   await dialog.getByRole('button', { name: /确\s*认\s*下\s*发/ }).click()

@@ -1,8 +1,10 @@
 """IEC 60870-5-104 协议测试工具 — 应用入口.
 
 纯 Web 形态：浏览器作为唯一 UI，入口负责启动本地 Web 服务并按需打开浏览器。
+单文件发布入口：默认单进程双角色、一个 8765 端口，打开一个工作台（左侧菜单
+切换主站/子站）；也支持 `--mode master|slave` 只启动单角色。
 提供三类运行方式：
-  - Web UI（默认）：`python app.py --mode master|slave`
+  - Web UI（默认）：`python app.py`（both）/ `--mode master|slave`
   - headless 引擎 CLI：`python app.py --mode slave --no-gui`
   - YAML 自动化测试：`python app.py --test tests/scripts/`
 """
@@ -117,11 +119,12 @@ def run_web(role: str, http_port: int | None = None, open_browser: bool = True,
             history_db=None, engine_config=None,
             http_host: str = "127.0.0.1", auth_token: str | None = None,
             web_tls_cert: str | None = None,
-            web_tls_key: str | None = None) -> None:
+            web_tls_key: str | None = None,
+            history_dbs: dict | None = None) -> None:
     """启动 Web 服务（阻塞）并在就绪后打开浏览器.
 
     Args:
-        role: 运行角色，"master"（主站）或 "slave"（子站）.
+        role: "master" / "slave" / "both"（both = 单进程双角色、同一端口）.
         http_port: HTTP 端口；为 None 时按角色取默认端口（主站 8765 / 子站 8766）.
         open_browser: True 时在端口就绪后自动打开默认浏览器；False 时仅打印地址.
         point_table: 已加载的 ``PointTable``；为 None 时 Web 层自行生成演示点表.
@@ -176,6 +179,7 @@ def run_web(role: str, http_port: int | None = None, open_browser: bool = True,
     try:
         run_server(role, http_host, port, point_table=point_table,
                    connection=connection, history_db=history_db,
+                   history_dbs=history_dbs,
                    app_config=engine_config, auth_token=auth_token,
                    ssl_context=ssl_context)
     except KeyboardInterrupt:
@@ -210,12 +214,20 @@ def _pick_port(preferred: int | None = None,
     raise RuntimeError("无法分配空闲端口")
 
 
-def _http_json(port: int, path: str = "/api/status", timeout: float = 1.0):
+def _http_json(port: int, path: str = "/api/status", timeout: float = 1.0,
+               token: str | None = None, scheme: str = "http"):
     """GET 一个本地 Web 端点；不可达时返回 None."""
     try:
-        with urllib.request.urlopen(
-            f"http://127.0.0.1:{port}{path}", timeout=timeout
-        ) as resp:
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        req = urllib.request.Request(
+            f"{scheme}://127.0.0.1:{port}{path}", headers=headers
+        )
+        context = None
+        if scheme == "https":
+            import ssl
+            # 本地就绪探测不校验证书（与 --web-tls 自签场景一致）
+            context = ssl._create_unverified_context()
+        with urllib.request.urlopen(req, timeout=timeout, context=context) as resp:
             return json.loads(resp.read().decode("utf-8") or "{}")
     except Exception:
         return None
@@ -235,10 +247,11 @@ def _post_json(port: int, path: str, payload: dict | None = None) -> dict:
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
-def _wait_http(ports: list[int], timeout: float = 45.0) -> bool:
+def _wait_http(ports: list[int], timeout: float = 45.0,
+               token: str | None = None, scheme: str = "http") -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if all(_http_json(port) is not None for port in ports):
+        if all(_http_json(port, token=token, scheme=scheme) is not None for port in ports):
             return True
         time.sleep(0.2)
     return False
@@ -254,80 +267,81 @@ def _wait_master_running(port: int, timeout: float = 15.0) -> bool:
     return False
 
 
-def _demo_commands(args, master_http: int, slave_http: int,
-                   iec_port: int) -> tuple[list[str], list[str]]:
-    """构造两个角色的子进程命令（独立测试用）."""
+def _demo_commands(args, http_port: int, iec_port: int) -> list[str]:
+    """构造演示子进程命令（一个进程、单端口双角色）."""
     root = Path(__file__).resolve().parent
     if getattr(sys, "frozen", False):
         base = [sys.executable]
     else:
         base = [sys.executable, str(root / "app.py")]
-    common = ["--no-browser", "--no-history", "--log-level", args.log_level]
+    cmd = base + [
+        "--mode", "both", "--host", "127.0.0.1",
+        "--http-port", str(http_port), "--port", str(iec_port),
+        "--no-browser", "--no-history", "--log-level", args.log_level,
+    ]
     if args.config:
-        common += ["--config", args.config]
+        cmd += ["--config", args.config]
     if args.point_table:
-        common += ["--point-table", args.point_table]
-    slave = base + [
-        "--mode", "slave", "--host", "127.0.0.1",
-        "--http-port", str(slave_http), "--port", str(iec_port),
-    ] + common
-    master = base + [
-        "--mode", "master", "--host", "127.0.0.1",
-        "--http-port", str(master_http), "--port", str(iec_port),
-    ] + common
-    return slave, master
+        cmd += ["--point-table", args.point_table]
+    return cmd
 
 
-def _demo_connect(slave_http: int, master_http: int,
-                  iec_port: int) -> tuple[bool, str]:
+def _demo_connect(http_port: int, iec_port: int) -> tuple[bool, str]:
     """让演示子站监听、主站连接并总召；返回 (成功, 错误信息)."""
-    slave = _post_json(slave_http, "/api/slave/start",
+    slave = _post_json(http_port, "/slave/api/slave/start",
                        {"host": "127.0.0.1", "port": iec_port, "addr": 1})
     if not slave.get("ok"):
         return False, f"子站监听失败：{slave.get('error', '未知错误')}"
 
-    master = _post_json(master_http, "/api/master/start",
+    master = _post_json(http_port, "/api/master/start",
                         {"host": "127.0.0.1", "port": iec_port, "addr": 1})
     if not master.get("ok"):
         return False, f"主站连接失败：{master.get('error', '未知错误')}"
-    if not _wait_master_running(master_http):
+    if not _wait_master_running(http_port):
         return False, "主站未进入运行态"
-    _post_json(master_http, "/api/master/gi", {"qoi": 20})
+    _post_json(http_port, "/api/master/gi", {"qoi": 20})
     return True, ""
 
 
-def _run_demo(args) -> int:
-    """启动本地子站 + 主站，自动连接并总召，打开主站页面.
+def _terminate_process_tree(proc: subprocess.Popen) -> None:
+    """终止子进程及其子进程树（PyInstaller onefile 是 bootloader + app 两进程）.
 
-    父进程只负责编排与回收；两个角色各自独立进程/事件循环，避免共享状态。
+    Windows 上只 ``terminate()`` 父 bootloader 会留下真正的 app 子进程继续占用
+    端口；``taskkill /T`` 才能把整棵树回收。POSIX 侧直接 terminate 即可。
     """
-    master_http = _pick_port(args.http_port or _DEFAULT_HTTP_PORT["master"])
-    slave_preferred = master_http + 1 if master_http < 65535 else None
-    slave_http = _pick_port(slave_preferred, exclude={master_http})
-    iec_port = _pick_port(args.port or 2404, exclude={master_http, slave_http})
+    if proc.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+            capture_output=True, check=False,
+        )
+    else:
+        proc.terminate()
 
-    slave_cmd, master_cmd = _demo_commands(args, master_http, slave_http, iec_port)
-    procs: list[subprocess.Popen] = []
-    master_url = f"http://127.0.0.1:{master_http}/"
-    slave_url = f"http://127.0.0.1:{slave_http}/"
 
-    # 演示模式的两个子进程只监听 127.0.0.1，且 _demo_connect 不带令牌；
+def _run_demo(args) -> int:
+    """一键演示：一个进程双角色（单端口），自动监听/连接/总召，打开单页工作台."""
+    http_port = _pick_port(args.http_port or _DEFAULT_HTTP_PORT["master"])
+    iec_port = _pick_port(args.port or 2404, exclude={http_port})
+    cmd = _demo_commands(args, http_port, iec_port)
+    ui_url = f"http://127.0.0.1:{http_port}/app/"
+
+    # 演示模式仅监听 127.0.0.1，且 _demo_connect 不带令牌；
     # 为保证一键演示可用，--auth-token/--http-host 在演示模式下不生效。
     if args.auth_token or args.http_host not in ("127.0.0.1", "localhost", "::1"):
         print("提示：演示模式仅监听 127.0.0.1，不启用访问令牌"
               "（--auth-token / --http-host 已忽略）", flush=True)
 
-    print("启动演示环境（子站 + 主站）...", flush=True)
+    print("启动演示环境（单进程：主站 + 子站）...", flush=True)
+    proc: subprocess.Popen | None = None
     try:
-        procs.append(subprocess.Popen(slave_cmd))
-        procs.append(subprocess.Popen(master_cmd))
-
-        if not _wait_http([slave_http, master_http]):
+        proc = subprocess.Popen(cmd)
+        if not _wait_http([http_port]):
             print("演示启动超时：请检查端口/依赖是否正常", flush=True)
             return 1
-        dead = [p for p in procs if p.poll() is not None]
-        if dead:
-            print(f"演示进程提前退出（退出码 {dead[0].returncode}）", flush=True)
+        if proc.poll() is not None:
+            print(f"演示进程提前退出（退出码 {proc.returncode}）", flush=True)
             return 1
 
         # 端口检查与实际 bind 之间存在竞态；失败时换一个 IEC 端口重试一次，
@@ -335,51 +349,42 @@ def _run_demo(args) -> int:
         connected = False
         last_error = ""
         for attempt in range(2):
-            connected, last_error = _demo_connect(slave_http, master_http, iec_port)
+            connected, last_error = _demo_connect(http_port, iec_port)
             if connected:
                 break
             print(f"演示连接失败（第 {attempt + 1} 次）：{last_error}", flush=True)
-            _post_json(master_http, "/api/master/stop")
-            _post_json(slave_http, "/api/slave/stop")
+            _post_json(http_port, "/api/master/stop")
+            _post_json(http_port, "/slave/api/slave/stop")
             time.sleep(0.5)
-            iec_port = _pick_port(
-                None, exclude={master_http, slave_http},
-            )
+            iec_port = _pick_port(None, exclude={http_port})
 
         if not connected:
             print(f"自动连接失败：{last_error}（可在页面手动连接）", flush=True)
 
         banner = "演示环境已就绪：" if connected else "演示环境已启动（自动连接失败）："
-        print(
-            f"\n{banner}\n"
-            f"  主站 UI: {master_url}\n"
-            f"  子站 UI: {slave_url}\n"
-            f"  IEC 104: 127.0.0.1:{iec_port}（公共地址 1）\n"
-            "按 Ctrl+C 停止全部进程\n",
-            flush=True,
-        )
+        print(f"\n{banner}", flush=True)
+        print(f"  工作台（主站/子站同一页面）: {ui_url}", flush=True)
+        print(f"  IEC 104: 127.0.0.1:{iec_port}（公共地址 1）", flush=True)
+        print("按 Ctrl+C 停止演示", flush=True)
         if not args.no_browser:
-            webbrowser.open(master_url)
+            webbrowser.open(ui_url)
 
         deadline = (time.monotonic() + args.demo_seconds
                     if args.demo_seconds > 0 else None)
-        while all(p.poll() is None for p in procs):
+        while proc.poll() is None:
             if deadline is not None and time.monotonic() >= deadline:
                 print(f"演示时间到（{args.demo_seconds:.0f}s），停止 ...", flush=True)
                 break
             time.sleep(0.5)
         return 0
     except KeyboardInterrupt:
-        print("\n正在停止演示环境 ...", flush=True)
+        print("正在停止演示环境 ...", flush=True)
         return 0
     finally:
-        for proc in procs:
-            if proc.poll() is None:
-                proc.terminate()
-        deadline = time.monotonic() + 8
-        for proc in procs:
+        if proc is not None:
+            _terminate_process_tree(proc)
             try:
-                proc.wait(timeout=max(0.1, deadline - time.monotonic()))
+                proc.wait(timeout=8)
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait(timeout=3)
@@ -403,8 +408,8 @@ def cli(default_role: str | None = None) -> int:
         help="打印版本号并退出"
     )
     parser.add_argument(
-        "--mode", choices=["master", "slave"], default=default_role,
-        help="运行模式: master(主站) 或 slave(子站)"
+        "--mode", choices=["master", "slave", "both"], default=default_role,
+        help="运行模式: master(主站) / slave(子站) / both(默认；单页工作台)"
     )
     parser.add_argument(
         "--config", type=str, default=None,
@@ -520,6 +525,14 @@ def cli(default_role: str | None = None) -> int:
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
 
+    # 单文件发布（一个 exe）：无 --mode 时默认同时启动主站+子站（单进程双角色、
+    # 一个 8765 端口），不再交互选择。--mode master|slave 仍可用于单角色。
+    if args.mode is None and not args.demo and not args.test and not args.config:
+        args.mode = "master" if args.no_gui else "both"
+    if args.mode == "both" and args.no_gui:
+        print("--mode both 仅支持 Web 模式（请去掉 --no-gui）", flush=True)
+        return 2
+
     # 日志
     setup_logging(args.log_level, args.log_file)
     logger = logging.getLogger("iec104")
@@ -535,8 +548,8 @@ def cli(default_role: str | None = None) -> int:
     else:
         config = AppConfig()
 
-    # 命令行参数覆盖
-    if args.mode:
+    # 命令行参数覆盖（both 不是 AppConfig 的合法 mode；引擎按角色单独设置）
+    if args.mode and args.mode != "both":
         config.mode = args.mode
     if args.host:
         config.connection.host = args.host
@@ -599,32 +612,43 @@ def cli(default_role: str | None = None) -> int:
 
     # 历史数据库（T17：默认开启，落盘到 <数据目录>/history_<role>.db）
     # 优先级：--no-history > --history-db > config.history.enabled
-    role = "slave" if config.mode == "slave" else "master"
+    mode = args.mode or config.mode
+    role = "slave" if mode == "slave" else "master"
+    roles = ["master", "slave"] if mode == "both" else [role]
     history_db = None
+    history_dbs: dict = {}
     if args.no_history:
         logger.info("History DB disabled by --no-history")
     elif config.history.enabled or args.history_db:
         from core.data.history import HistoryDB
 
-        db_path = resolve_history_path(config.history.dir, args.history_db, role)
-        try:
-            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-            history_db = HistoryDB(
-                db_path,
-                retention_days=config.history.retention_days,
-                max_size_mb=config.history.max_size_mb,
-                flush_interval=config.history.flush_interval,
-                auto_flush=True,
-            )
-            history_db.open()
-            logger.info(
-                f"History DB: {db_path} (retention={config.history.retention_days}d, "
-                f"max_size={config.history.max_size_mb}MB, "
-                f"flush_interval={config.history.flush_interval}s)"
-            )
-        except Exception as e:
-            logger.error(f"Failed to open history DB: {e}")
-            history_db = None
+        for db_role in roles:
+            if mode == "both" and args.history_db:
+                # 双角色共用一个 --history-db 时必须拆文件，避免两个 SQLite 互踩
+                p = Path(args.history_db)
+                db_path = str(p.with_name(f"{p.stem}_{db_role}{p.suffix or '.db'}"))
+            else:
+                db_path = resolve_history_path(config.history.dir, args.history_db, db_role)
+            try:
+                Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+                db = HistoryDB(
+                    db_path,
+                    retention_days=config.history.retention_days,
+                    max_size_mb=config.history.max_size_mb,
+                    flush_interval=config.history.flush_interval,
+                    auto_flush=True,
+                )
+                db.open()
+                history_dbs[db_role] = db
+                logger.info(
+                    f"History DB({db_role}): {db_path} "
+                    f"(retention={config.history.retention_days}d, "
+                    f"max_size={config.history.max_size_mb}MB, "
+                    f"flush_interval={config.history.flush_interval}s)"
+                )
+            except Exception as e:
+                logger.error(f"Failed to open history DB({db_role}): {e}")
+        history_db = history_dbs.get(role) if mode != "both" else None
 
     try:
         # 自动化测试脚本模式
@@ -667,15 +691,17 @@ def cli(default_role: str | None = None) -> int:
             "port": config.connection.port,
             "addr": config.connection.common_addr,
         }
-        run_web(role, args.http_port, open_browser=not args.no_browser,
+        run_web(mode, args.http_port, open_browser=not args.no_browser,
                 point_table=point_table, connection=connection,
-                history_db=history_db, engine_config=config,
+                history_db=history_db, history_dbs=history_dbs, engine_config=config,
                 http_host=args.http_host, auth_token=args.auth_token,
                 web_tls_cert=args.web_tls_cert, web_tls_key=args.web_tls_key)
         return 0
     finally:
-        # 保证异常路径也会关闭历史数据库
-        if history_db:
+        # 保证异常路径也会关闭历史数据库（合并模式两个角色各一个）
+        for db in set(history_dbs.values()):
+            db.close()
+        if history_db is not None and history_db not in history_dbs.values():
             history_db.close()
 
 

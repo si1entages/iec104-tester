@@ -79,6 +79,39 @@ async def test_pause_resume(capture_client):
     await client.post("/api/capture/stop")
 
 
+def test_combined_roles_do_not_see_each_others_recordings(tmp_path):
+    """合并模式共用 data/captures 目录，但两角色只能看到自己的录制.
+
+    无角色前缀的手工文件（用户拷进来的）对双方可见，便于离线回放。
+    """
+    master = CaptureService(tmp_path, "master")
+    slave = CaptureService(tmp_path, "slave")
+    names = [
+        "master_20260101-000000.i104",
+        "slave_20260101-000000.i104",
+        "manual_import.i104",
+    ]
+    for name in names:
+        (tmp_path / name).write_bytes(b"")
+
+    assert {row["name"] for row in master.list_files()} == {
+        "master_20260101-000000.i104", "manual_import.i104",
+    }
+    assert {row["name"] for row in slave.list_files()} == {
+        "slave_20260101-000000.i104", "manual_import.i104",
+    }
+
+    # 另一角色的文件：不能下载、导出、加载（按文件不存在处理）
+    assert master.download_path("slave_20260101-000000.i104") is None
+    assert slave.download_path("master_20260101-000000.i104") is None
+    assert master.export("slave_20260101-000000.i104", "pcap")["ok"] is False
+    assert slave.load("master_20260101-000000.i104")["ok"] is False
+
+    # 自己的文件与手工文件正常可达
+    assert master.download_path("master_20260101-000000.i104") is not None
+    assert master.download_path("manual_import.i104") is not None
+
+
 @pytest.mark.asyncio
 async def test_export_pcap_and_download(capture_client):
     client, bridge, tmp = capture_client

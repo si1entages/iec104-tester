@@ -22,7 +22,7 @@ test('级别过滤生效（拦截 /api/logs 注入确定性数据）', async ({ 
   )
   await gotoApp(page, MASTER, '日志')
   // 实时 WS 日志会排在历史行之前；用关键字把视图收敛到注入的 3 行，避免分页遮挡
-  const search = page.getByPlaceholder('关键字搜索')
+  const search = page.getByPlaceholder('搜索消息 / 来源')
   await search.fill('e2e-')
   await search.press('Enter')
   await expect(page.getByText('e2e-error-row')).toBeVisible()
@@ -34,14 +34,8 @@ test('级别过滤生效（拦截 /api/logs 注入确定性数据）', async ({ 
   // 字体度量（CI Linux runner 无中文字体，与本地 Windows Edge 不同），中心点可能
   // 恰好落在某个 × 上——点击会变成「移除该级别」而非「展开下拉」（CI 首跑实测踩坑）。
   // 改为点击 selector 右侧空白：那里只有无删除叉的 +N 计数 tag，任何字体下都安全。
-  // antd 6 移除了 .ant-select-selector 包装层，直接点第一个 Select 的 combobox
-  const levelSelector = page.getByRole('combobox').first()
-  await levelSelector.click()
-  const infoOption = page
-    .locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option[title="INFO"]')
-    .first()
-  await expect(infoOption).toBeVisible()
-  await infoOption.click()
+  // PF 版级别过滤是多选复选框：取消 INFO
+  await page.locator('#pf-log-level-INFO').click({ force: true })
   await expect(page.getByText('e2e-info-row')).toHaveCount(0)
   await expect(page.getByText('e2e-error-row')).toBeVisible()
   await expect(page.getByText('e2e-debug-row')).toBeVisible()
@@ -49,15 +43,15 @@ test('级别过滤生效（拦截 /api/logs 注入确定性数据）', async ({ 
 
 test('暂停后恢复不丢缓冲（真实后端日志流）', async ({ page, request }) => {
   await gotoApp(page, MASTER, '日志')
-  await page.waitForSelector('.ant-table-row', { timeout: 15_000 })
+  await page.waitForSelector('[data-testid="log-row"]', { timeout: 15_000 })
 
   const bufferTagText = () =>
     page
-      .locator('.ant-tag')
+      .locator('.pf-v6-c-label')
       .filter({ hasText: /^缓冲 \d+$/ })
       .first()
       .innerText()
-  const viewRows = () => page.locator('.ant-table-row').count()
+  const viewRows = () => page.locator('[data-testid="log-row"]').count()
   const parseBuffer = (t: string) => Number(t.replace(/\D+/g, '')) || 0
 
   const bufferBefore = parseBuffer(await bufferTagText())

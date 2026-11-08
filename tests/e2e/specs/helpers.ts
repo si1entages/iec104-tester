@@ -2,13 +2,33 @@
  * T15 e2e 共享工具：后端编排（HTTP 设置）、点表注入、UI 导航与请求捕获。
  *
  * 端点分配与 `qa_*.py` 惯例一致：主站 UI 8765 / 子站 UI 8766 / IEC 2404。
+ * 本机已有运行中的实例占用默认端口时，可用 `E2E_PORT_OFFSET=10` 整体平移
+ * （见 playwright.config.ts 的 webServer 命令，两端必须使用同一个值）。
  */
 import type { APIRequestContext, Page } from '@playwright/test'
 import { expect } from '@playwright/test'
 
-export const MASTER = 'http://127.0.0.1:8765'
-export const SLAVE = 'http://127.0.0.1:8766'
+export const PORT_OFFSET = Number(process.env.E2E_PORT_OFFSET ?? 0)
+
+export const MASTER = `http://127.0.0.1:${8765 + PORT_OFFSET}`
+export const SLAVE = `http://127.0.0.1:${8766 + PORT_OFFSET}`
+/** 合并模式：一个进程、一个端口，同时提供主站 + /slave 子站 */
+export const COMBINED = `http://127.0.0.1:${8767 + PORT_OFFSET}`
+/** 视觉基线专用：单角色主站、无引擎/无帧/无历史，内容可复现 */
+export const VISUAL = `http://127.0.0.1:${8768 + PORT_OFFSET}`
 export const IEC_PORT = 2404
+
+/**
+ * 功能用例统一跑在 **PatternFly 套件**上（这些用例的 DOM 断言按 PF 编写）。
+ * Carbon 是产品默认套件，其外壳/切换/主题覆盖见 ui-kit.spec；
+ * 两者共享同一数据层与业务逻辑，PF 用例即可覆盖核心流程。
+ */
+export const SPECS_KIT = 'pf'
+
+/** `/app/?kit=<SPECS_KIT>#<hash>`：功能用例的统一入口 URL */
+export function appUrl(base: string, hash = ''): string {
+  return `${base}/app/?kit=${SPECS_KIT}${hash ? `#${hash}` : ''}`
+}
 
 export interface CapturedRequest {
   path: string
@@ -127,8 +147,9 @@ export async function stopEngines(request: APIRequestContext): Promise<void> {
 
 /** 打开某端 UI 并切换到指定页（点侧边菜单，顺带覆盖导航入口） */
 export async function gotoApp(page: Page, base: string, menu: string): Promise<Page> {
-  await page.goto(`${base}/app/`, { waitUntil: 'domcontentloaded' })
-  const item = page.getByRole('menuitem', { name: menu })
+  await page.goto(appUrl(base), { waitUntil: 'domcontentloaded' })
+  // PatternFly 侧栏：NavItem 渲染为 <a class="pf-v6-c-nav__link">，用文本过滤
+  const item = page.locator('.pf-v6-c-nav__link').filter({ hasText: menu }).first()
   await item.waitFor()
   await item.click()
   return page

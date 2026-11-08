@@ -1,0 +1,23 @@
+/* PatternFly 迁移应用的少量补充样式（不影响 antd 旧应用） */
+
+/* 与旧应用一致的等宽数字：报文 HEX、时间戳、IOA、数值列共用 */
+.mono {
+  font-family: ui-monospace, SFMono-Regular, 'Cascadia Mono', Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 焦点环（WCAG 2.4.7）：PF6 组件默认只有浏览器 1px 描边，深色主题下不可见。
+   用品牌色统一 2px 焦点环，浅/深主题分别由 PF token 提供对比度。 */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--pf-t--global--color--brand--default);
+  outline-offset: 2px;
+}
+
+/* 密集数据表：收紧单元格横向内边距（PF 默认 16px，工程表用 12px） */
+.pf-v6-c-table.pf-m-compact > .pf-v6-c-table__thead > .pf-v6-c-table__tr > .pf-v6-c-table__th,
+.pf-v6-c-table.pf-m-compact > .pf-v6-c-table__tbody > .pf-v6-c-table__tr > .pf-v6-c-table__td,
+.pf-v6-c-table.pf-m-compact > .pf-v6-c-table__tr > .pf-v6-c-table__th,
+.pf-v6-c-table.pf-m-compact > .pf-v6-c-table__tr > .pf-v6-c-table__td {
+  padding-inline: 12px;
+}

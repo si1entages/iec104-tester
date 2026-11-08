@@ -203,15 +203,20 @@ class LogManager:
 
     def attach_python_logging(self, logger_names: tuple[str, ...] = ("iec104",),
                               level: int = logging.INFO) -> None:
-        """把既有 ``iec104.*`` logger 的记录收纳进来（幂等，重复调用只挂一次）."""
-        handler = _PythonLogBridge(self)
+        """把既有 ``iec104.*`` logger 的记录收纳进来（幂等，重复调用只挂一次）.
+
+        单进程双角色（master+slave）时每个 LogManager 各挂一个 handler；
+        ``_PythonLogBridge.emit`` 按 logger 名的角色段过滤，避免两边日志混在一起。
+        """
         for name in logger_names:
             lg = logging.getLogger(name)
             lg.setLevel(level)
-            for h in list(lg.handlers):
-                if isinstance(h, _PythonLogBridge):
-                    lg.removeHandler(h)     # 换绑到最新 manager
-            lg.addHandler(handler)
+            if any(
+                isinstance(h, _PythonLogBridge) and h.manager is self
+                for h in lg.handlers
+            ):
+                continue
+            lg.addHandler(_PythonLogBridge(self))
 
 
 class _PythonLogBridge(logging.Handler):
@@ -230,6 +235,16 @@ class _PythonLogBridge(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
+            # 单进程双角色：iec104.master.* / iec104.slave.* 只进对应角色的
+            # LogManager；iec104.transport / webui 等共享日志两边都收。
+            parts = record.name.split(".")
+            if (
+                len(parts) >= 2
+                and parts[1] in ("master", "slave")
+                and self.manager.source in ("master", "slave")
+                and parts[1] != self.manager.source
+            ):
+                return
             level = record.levelname
             if level not in LEVEL_ORDER:
                 level = "INFO"

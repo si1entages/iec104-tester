@@ -97,9 +97,9 @@ def test_parsed_io_with_time_tag_and_bad_quality():
 
     assert obj.has_time is True
     assert obj.time_str == ts.to_datetime_str()
-    assert obj.quality_str == "OV|BL"
+    assert obj.quality_str == "BL|OV"
     assert obj.to_dict()["timestamp"] == ts.to_datetime_str()
-    assert obj.to_dict()["quality"] == "OV|BL"
+    assert obj.to_dict()["quality"] == "BL|OV"
 
 
 # ── parse_* 便捷入口 ─────────────────────────────────────────────

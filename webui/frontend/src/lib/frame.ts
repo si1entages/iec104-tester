@@ -276,14 +276,17 @@ export function parseFrame(hex: string): ParsedFrame | null {
 
 export const FORMAT_COLOR: Record<FrameFormat, string> = {
   I: 'blue',
-  S: 'cyan',
-  U: 'purple',
+  // 预设 cyan/purple 在浅/深底上只有 3.4:1；改用可访问的 success/default
+  S: 'success',
+  U: 'default',
   '?': 'default',
 }
 
 export const DIRECTION_COLOR: Record<string, string> = {
-  tx: 'green',
-  rx: 'gold',
+  tx: 'success',
+  // 预设 gold（gold-7 文字 / gold-1 底）仅 2.8:1，10px 标签不可读；
+  // blue 约 5.5:1，且「发送绿 / 接收蓝」语义更直观。
+  rx: 'blue',
 }
 
 const DIRECTION_LABELS: Record<string, L10n> = {

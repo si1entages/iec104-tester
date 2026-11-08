@@ -35,6 +35,14 @@ const PY = process.env.E2E_PY ?? (process.platform === 'win32' ? 'venv\\Scripts\
 // webServer 的 cwd 默认是配置文件所在目录，这里显式指回仓库根（app.py 位置）
 const ROOT = path.resolve(__dirname, '..', '..')
 
+/**
+ * 端口整体平移（与 specs/helpers.ts 的 E2E_PORT_OFFSET 同源）：
+ * 本机已有运行中的实例占用 8765~8768 时，用 `E2E_PORT_OFFSET=10` 错开，
+ * 不必关掉正在使用的应用（两端必须使用同一个值）。
+ */
+const OFF = Number(process.env.E2E_PORT_OFFSET ?? 0)
+const PORT = (base: number): number => base + OFF
+
 export default defineConfig({
   testDir: path.resolve(__dirname, 'specs'),
   outputDir: path.resolve(__dirname, '.playwright-artifacts'),
@@ -46,6 +54,8 @@ export default defineConfig({
   fullyParallel: false,
   retries: 0,
   reporter: [['list']],
+  // 视觉基线按平台分目录（字体渲染差异），Windows 基线在 __screenshots__/win32
+  snapshotPathTemplate: '{testDir}/__screenshots__/{platform}/{arg}{ext}',
   use: {
     headless: true,
     channel: process.env.E2E_CHANNEL ?? 'msedge',
@@ -55,15 +65,31 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: `${PY} app.py --mode slave --no-browser`,
-      url: 'http://127.0.0.1:8766/api/status',
+      command: `${PY} app.py --mode slave --no-browser --http-port ${PORT(8766)}`,
+      url: `http://127.0.0.1:${PORT(8766)}/api/status`,
       cwd: ROOT,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
     },
     {
-      command: `${PY} app.py --mode master --no-browser`,
-      url: 'http://127.0.0.1:8765/api/status',
+      command: `${PY} app.py --mode master --no-browser --http-port ${PORT(8765)}`,
+      url: `http://127.0.0.1:${PORT(8765)}/api/status`,
+      cwd: ROOT,
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+    },
+    {
+      // 合并模式（单进程双角色、一个 HTTP 端口）：单页工作台用例
+      command: `${PY} app.py --mode both --no-browser --no-history --http-port ${PORT(8767)}`,
+      url: `http://127.0.0.1:${PORT(8767)}/api/status`,
+      cwd: ROOT,
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+    },
+    {
+      // 视觉基线专用单角色服务：无引擎/无帧/无历史，页面内容可复现
+      command: `${PY} app.py --mode master --no-browser --no-history --http-port ${PORT(8768)}`,
+      url: `http://127.0.0.1:${PORT(8768)}/api/status`,
       cwd: ROOT,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,

@@ -100,6 +100,7 @@ def response_behavior_to_dict(rb: Any) -> dict:
         "quality": {
             "invalid": rb.force_invalid,
             "blocked": rb.force_blocked,
+            "substituted": rb.force_substituted,
             "not_topical": rb.force_not_topical,
             "overflow": rb.force_overflow,
         },
@@ -671,6 +672,12 @@ class EngineSession:
     async def set_simulation(self, enabled: bool, **kwargs) -> dict:
         eng = self.require_slave()
         if enabled:
+            # YX / YC 可独立开启（只模拟遥信或只模拟遥测），至少选一类
+            yx_enabled = bool(kwargs.get("yx_enabled", True))
+            yc_enabled = bool(kwargs.get("yc_enabled", True))
+            if not yx_enabled and not yc_enabled:
+                return {"ok": False, "error": "yx_enabled / yc_enabled 至少启用一项"}
+
             # 第二批改造⑤：范围模式 scope（YX/YC 独立）——"all" 全部点 / "selected" 仅指定 IOA
             def _scope(key: str) -> str | None:
                 v = kwargs.get(key, "all")
@@ -693,8 +700,9 @@ class EngineSession:
 
             yx_ioas = _ioas("yx_ioas")
             yc_ioas = _ioas("yc_ioas")
-            if (yx_scope == "selected" and not yx_ioas) or (
-                yc_scope == "selected" and not yc_ioas
+            # 只有启用的那一类才要求 selected 模式带点集
+            if (yx_enabled and yx_scope == "selected" and not yx_ioas) or (
+                yc_enabled and yc_scope == "selected" and not yc_ioas
             ):
                 return {"ok": False, "error": "scope=selected 须提供非空 ioas 列表"}
 
@@ -707,6 +715,8 @@ class EngineSession:
                 yc_scope=yc_scope,
                 yx_ioas=yx_ioas,
                 yc_ioas=yc_ioas,
+                yx_enabled=yx_enabled,
+                yc_enabled=yc_enabled,
             )
         else:
             await eng.stop_simulation()

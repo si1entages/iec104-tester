@@ -128,9 +128,20 @@ class CaptureService:
             return None
         return name
 
+    def _is_other_role_file(self, name: str) -> bool:
+        """是否是**另一角色**的录制文件（合并模式共用 data/captures 目录）.
+
+        主站/子站共用一个进程、一个目录，但工作台按角色隔离：子站页面不应
+        看到/下载主站的录制（反之亦然）。无角色前缀的手工文件对双方可见。
+        """
+        return any(
+            other != self.role and name.startswith(f"{other}_")
+            for other in ("master", "slave")
+        )
+
     def _path(self, name: str) -> Path | None:
         safe = self._safe_name(name)
-        if safe is None:
+        if safe is None or self._is_other_role_file(safe):
             return None
         path = (self.dir / safe).resolve()
         if path.parent != self.dir.resolve():
@@ -141,6 +152,8 @@ class CaptureService:
         rows = []
         for path in sorted(self.dir.glob("*"), key=lambda p: p.stat().st_mtime, reverse=True):
             if not path.is_file() or path.suffix.lower() not in _FILE_SUFFIXES:
+                continue
+            if self._is_other_role_file(path.name):
                 continue
             st = path.stat()
             rows.append({

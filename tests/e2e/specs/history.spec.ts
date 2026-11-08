@@ -87,7 +87,7 @@ test('历史页：统计标签、IOA 过滤、报文页签与导出可用', asyn
   await expect(exportBtn).toBeEnabled()
 
   // 切到报文页签 → 请求 frames 并显示 HEX
-  await page.locator('.ant-segmented-item').filter({ hasText: '报文' }).click()
+  await page.getByRole('button', { name: '报文', exact: true }).click()
   await expect.poll(() => frameUrls.length).toBeGreaterThan(0)
   await expect(page.getByText('680E0400030064010600010000000014')).toBeVisible()
 })

@@ -28,7 +28,7 @@ def test_single_point():
         assert sp2.value == value
 
     # 带品质
-    sp = SinglePoint(value=True, quality=QualityDescriptor(0x40))  # IV
+    sp = SinglePoint(value=True, quality=QualityDescriptor(0x80))  # IV (bit7)
     data = sp.to_bytes()
     sp2 = SinglePoint.from_bytes(data)
     assert sp2.value == True

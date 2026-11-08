@@ -4,6 +4,9 @@
  * 权威契约见 `webui/api_contract.md`。
  */
 
+import type { Schema } from './contract'
+import type { Role } from './types'
+
 export class ApiError extends Error {
   readonly status: number
 
@@ -19,6 +22,33 @@ export type QueryValue = string | number | boolean | null | undefined
 /** 访问令牌在 localStorage 的键（B7：服务端 --auth-token 启用时使用） */
 export const TOKEN_KEY = 'iec104_token'
 
+/**
+ * 合并模式（单进程双角色）下，子站 API/WS 挂在 `/slave` 前缀。
+ * 单角色模式该前缀为 null，主/子站都直接用 `/api`。
+ */
+let activeRole: Role = 'master'
+let slaveApiPrefix: string | null = null
+
+export function setActiveRole(role: Role): void {
+  activeRole = role
+}
+
+export function setSlaveApiPrefix(prefix: string | null): void {
+  slaveApiPrefix = prefix
+}
+
+/** 当前角色对应的 API 根路径（"" 或 "/slave"）。 */
+export function getApiBase(): string {
+  return activeRole === 'slave' && slaveApiPrefix ? slaveApiPrefix : ''
+}
+
+/** 给任意 API/下载路径加当前角色前缀（用于 <a href> / window.open）。 */
+export function apiUrl(path: string): string {
+  const normalized = path.startsWith('/') ? path : `/${path}`
+  const base = getApiBase()
+  return base ? `${base}${normalized}` : normalized
+}
+
 /** 读取本地保存的访问令牌（无 / 存储不可用时返回空串） */
 export function getToken(): string {
   try {
@@ -30,7 +60,7 @@ export function getToken(): string {
 
 /** 拼接查询串；空值（undefined/null/空串）自动跳过。 */
 export function buildUrl(path: string, params?: Record<string, QueryValue>): string {
-  const url = path.startsWith('/') ? path : `/${path}`
+  const url = apiUrl(path)
   if (!params) return url
   const search = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
@@ -94,20 +124,40 @@ async function asJson<T>(res: Response): Promise<T> {
   return body as T
 }
 
-export async function apiGet<T>(
-  path: string,
-  params?: Record<string, QueryValue>,
-): Promise<T> {
-  return asJson<T>(await send('GET', path, { params }))
+/**
+ * 所有 JSON 响应都必须经过 schema 校验：契约不符时抛 `ApiContractError`
+ * （带 JSON 路径），而不是让 UI 读到 `undefined` 后显示一个含糊的失败文案。
+ *
+ * 校验同时承担“类型来源”职责——`T` 由 schema 推断，端点不需要手写泛型。
+ */
+async function asContract<T>(path: string, schema: Schema<T>, res: Response): Promise<T> {
+  const body = await asJson<unknown>(res)
+  return schema.parse(body, path)
 }
 
-export async function apiPost<T>(path: string, json?: unknown): Promise<T> {
-  return asJson<T>(await send('POST', path, { json }))
+export async function apiGet<T>(
+  path: string,
+  schema: Schema<T>,
+  params?: Record<string, QueryValue>,
+): Promise<T> {
+  return asContract(path, schema, await send('GET', path, { params }))
+}
+
+export async function apiPost<T>(
+  path: string,
+  schema: Schema<T>,
+  json?: unknown,
+): Promise<T> {
+  return asContract(path, schema, await send('POST', path, { json }))
 }
 
 /** POST 原始文本（YAML / 点表导入），响应仍是 JSON。 */
-export async function apiPostText<T>(path: string, text: string): Promise<T> {
-  return asJson<T>(await send('POST', path, { text }))
+export async function apiPostText<T>(
+  path: string,
+  schema: Schema<T>,
+  text: string,
+): Promise<T> {
+  return asContract(path, schema, await send('POST', path, { text }))
 }
 
 /** 取文本响应（YAML / CSV）。 */

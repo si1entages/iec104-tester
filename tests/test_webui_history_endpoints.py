@@ -40,7 +40,19 @@ async def test_history_disabled():
     async with TestClient(TestServer(create_app(bridge))) as client:
         r = await client.get("/api/history/stats")
         assert r.status == 200
-        assert await r.json() == {"ok": True, "enabled": False, "stats": {}}
+        body = await r.json()
+        assert body["ok"] is True and body["enabled"] is False
+        # 未启用时也返回与启用时同形状的零值统计（便于前端 schema 校验）
+        assert body["stats"] == {
+            "data_records": 0,
+            "frame_records": 0,
+            "buffered_data": 0,
+            "buffered_frames": 0,
+            "oldest_data": 0,
+            "newest_data": 0,
+            "db_size_bytes": 0,
+            "dropped_records": 0,
+        }
 
         r = await client.get("/api/history/data")
         body = await r.json()
