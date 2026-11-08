@@ -211,8 +211,9 @@ async def test_bridge_capture_recording(tmp_path):
 
 # ── TLS 桥（T84）：明文↔TLS 混合桥接，证书复用 tests/certs ──────────────
 
-from core.transport.tls_context import build_client_context, build_server_context  # noqa: E402
 from pathlib import Path  # noqa: E402
+
+from core.transport.tls_context import build_client_context, build_server_context  # noqa: E402
 
 CERTS = Path(__file__).parent / "certs"
 
