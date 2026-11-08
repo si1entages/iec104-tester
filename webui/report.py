@@ -82,6 +82,9 @@ def build_session_report_html(
     compliance_violations: list[dict] | None = None,
     conclusion: str = "",
     conclusion_kind: str = "",
+    injection: dict | None = None,
+    condition: str = "",
+    chart_images: list[str] | None = None,
 ) -> str:
     """生成自包含 HTML 测试报告.
 
@@ -144,6 +147,25 @@ def build_session_report_html(
         loadtest_html = (f"<h2>5. 压测汇总</h2>"
                          f'<table class=meta>{lt_rows}</table>'
                          "<p class=foot>压测口径：子站按目标速率自发事件，主站侧差分统计。</p>")
+    chart_html = ""
+    if chart_images:
+        imgs = "".join(
+            f'<div style="margin-bottom:12px;text-align:center">'
+            f'<img src="{_escape(img)}" style="max-width:100%;border:1px solid #c6c6c6" '
+            f'alt="历史曲线 {i + 1}" /></div>'
+            for i, img in enumerate(chart_images[:4]))
+        chart_html = f"<h2>8. 历史曲线快照</h2>{imgs}"
+    injection_html = ""
+    if injection is not None and injection.get("total", 0) > 0:
+        inj_rows = "".join(
+            f"<tr><td>{_escape(k)}</td><td class=n>{_escape(v)}</td></tr>"
+            for k, v in sorted(injection.items()))
+        injection_html = (
+            f"<h2>7. 网络条件注入（混沌验收）</h2>"
+            f"<p>条件：<span class=mono>{_escape(condition)}</span></p>"
+            f'<table class=meta>{inj_rows}</table>'
+            "<p class=foot>丢帧/重复/损坏/延迟/乱序/断线作用于转发路径；"
+            "旁路观察与合规监视始终看原始帧（干扰前证据）。</p>")
     compliance_html = ""
     if compliance_violations:
         v_rows = "".join(
@@ -218,5 +240,7 @@ def build_session_report_html(
 </table>
 {loadtest_html}
 {compliance_html}
+{injection_html}
+{chart_html}
 <p class=foot>由 iec104-tester 自动生成；本文件自包含（无外部引用），浏览器「打印 → 另存为 PDF」即可归档交付。</p>
 </body></html>"""

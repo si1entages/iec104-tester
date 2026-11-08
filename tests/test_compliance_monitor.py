@@ -237,3 +237,78 @@ def test_asdu_cot_zero():
     _started(m)
     m.observe("tx", _i(0, 0, _asdu(1, 0, bytes([1]))), 0.2)
     assert "cot-zero" in _kinds(m)
+
+
+# ── T86 应用层规则第二批 ────────────────────────────────────────────────
+
+def test_t86_ca_mismatch():
+    """公共地址与会话基线不符 → ca-mismatch."""
+    m = ComplianceMonitor()
+    _started(m)
+    m.observe("tx", _i(0, 0, _asdu(45, 6, bytes([1, 0]))), 0.2)  # CA=1 基线
+    bad = bytes([45, 1, 6, 0, 2, 0]) + bytes([1, 0])           # CA=2
+    m.observe("tx", _i(1, 0, bad), 0.3)
+    assert "ca-mismatch" in _kinds(m)
+
+
+def test_t86_expected_ca():
+    """显式 expected_ca=1：首帧 CA=2 就指认."""
+    m = ComplianceMonitor(expected_ca=1)
+    _started(m)
+    bad = bytes([45, 1, 6, 0, 2, 0]) + bytes([1, 0])
+    m.observe("tx", _i(0, 0, bad), 0.2)
+    assert "ca-mismatch" in _kinds(m)
+
+
+def test_t86_ca_consistent_no_violation():
+    m = ComplianceMonitor()
+    _started(m)
+    m.observe("tx", _i(0, 0, _asdu(45, 6, bytes([1, 0]))), 0.2)
+    m.observe("tx", _i(1, 0, _asdu(45, 6, bytes([1, 0]))), 0.3)
+    assert "ca-mismatch" not in _kinds(m)
+
+
+def test_t86_spont_duplicate():
+    """同类型/IOA/值、COT=3 连续两帧 → spont-duplicate."""
+    m = ComplianceMonitor()
+    _started(m)
+    # M_SP_NA_1 (type 1) COT=3，信息体 = IOA(3B) + SIQ(1B)
+    spont = bytes([1, 1, 3, 0, 1, 0]) + bytes([1, 0, 0, 1])
+    m.observe("rx", _i(0, 0, spont), 0.2)
+    m.observe("rx", _i(1, 0, spont), 0.3)
+    assert "spont-duplicate" in _kinds(m)
+
+
+def test_t86_spont_changed_value_ok():
+    """同 IOA 但值变化 → 不算重复."""
+    m = ComplianceMonitor()
+    _started(m)
+    a = bytes([1, 1, 3, 0, 1, 0]) + bytes([1, 0, 0, 1])
+    b = bytes([1, 1, 3, 0, 1, 0]) + bytes([1, 0, 0, 0])
+    m.observe("rx", _i(0, 0, a), 0.2)
+    m.observe("rx", _i(1, 0, b), 0.3)
+    assert "spont-duplicate" not in _kinds(m)
+
+
+def test_t86_spont_duplicate_outside_window_ok():
+    """超过重复窗口的同值自发帧 → 不指认."""
+    m = ComplianceMonitor()
+    _started(m)
+    spont = bytes([1, 1, 3, 0, 1, 0]) + bytes([1, 0, 0, 1])
+    m.observe("rx", _i(0, 0, spont), 0.2)
+    m.observe("rx", _i(1, 0, spont), 20.0)
+    assert "spont-duplicate" not in _kinds(m)
+
+
+def test_t86_time_skew():
+    """带 CP56 时标对象与观察时刻偏差超阈值 → time-skew."""
+    from core.protocol.types import CP56Time2a
+
+    m = ComplianceMonitor()
+    _started(m)
+    # M_SP_TB_1 (type 30) COT=3：IOA(3B) + SIQ(1B) + CP56(7B)
+    tag = CP56Time2a(millisecond=0, minute=0, hour=0, day=1, month=1,
+                     year=20, weekday=0)  # 2020-01-01，离 now 很远
+    spont = bytes([30, 1, 3, 0, 1, 0]) + bytes([1, 0, 0, 1]) + tag.to_bytes()
+    m.observe("rx", _i(0, 0, spont), 1_700_000_000.0)
+    assert "time-skew" in _kinds(m)

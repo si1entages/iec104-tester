@@ -227,6 +227,10 @@ class EngineBridge:
                         **self.compliance.as_dict(),
                         "violations": self.compliance.violation_list(20),
                     }
+                st["injection"] = self.tcp_bridge.injection_stats()
+                cond = self.tcp_bridge.config.condition
+                st["condition"] = cond.describe() if cond is not None else "(none)"
+                st["condition_active"] = bool(cond and cond.active and cond.has_any())
         else:
             st.update(self.session.status_fields())
         # 引擎未启动时也必须给出配置里的连接参数——否则前端输入框回落到
@@ -324,6 +328,20 @@ class EngineBridge:
         self._notify_ui(
             f"桥接 {listen_host}:{listen_port} → {upstream_host}:{upstream_port}")
         return {"ok": True}
+
+    def set_bridge_condition(self, cfg: dict) -> dict:
+        """动态设置桥网络条件（T85）；运行中链路即时生效."""
+        from core.simulation.conditions import NetworkCondition
+
+        if self.tcp_bridge is None:
+            return {"ok": False, "error": "桥未运行"}
+        cond = NetworkCondition()
+        for k, v in cfg.items():
+            if hasattr(cond, k) and k != "describe":
+                setattr(cond, k, v)
+        self.tcp_bridge.set_condition(cond)
+        self._notify_ui(f"桥条件：{cond.describe()}")
+        return {"ok": True, "condition": cond.describe(), "active": cond.has_any()}
 
     async def stop_bridge(self) -> dict:
         """停止透明桥（未运行时也广播，让页面状态对齐——与 stop_master 同策略）."""

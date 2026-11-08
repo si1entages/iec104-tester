@@ -150,6 +150,11 @@ export const statusSchema = obj({
       detail: optional(str()),
     }))),
   })),
+
+  // 桥角色网络条件注入（T85）
+  injection: optional(dict(num())),
+  condition: optional(str()),
+  condition_active: optional(bool()),
 })
 
 export const pointSchema = obj({

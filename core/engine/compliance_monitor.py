@@ -42,6 +42,8 @@ _MAX_VIOLATIONS = 200
 _CMD_TYPES = {t.value for t in TypeID if t.name.startswith("C_") and 45 <= t.value <= 64}
 _MON_TYPES = {t.value for t in TypeID if t.name.startswith("M_")}
 _ACT_EXPIRE_S = 60.0
+_SPONT_WINDOW_S = 10.0    # T86：同值自发帧重复窗口
+_MAX_TIME_SKEW_S = 300.0  # T86：CP56 时标与观察时刻最大允许偏差（秒）
 
 
 @dataclass
@@ -76,6 +78,7 @@ class ComplianceMonitor:
     t2: float = 10.0
     t3: float = 20.0
     k: int = 12
+    expected_ca: int | None = None   # T86：显式期望公共地址（None=首帧建基线）
     w: int = 8
     max_violations: int = _MAX_VIOLATIONS
     violations: deque = field(default_factory=lambda: deque(maxlen=_MAX_VIOLATIONS))
@@ -87,6 +90,9 @@ class ComplianceMonitor:
     _pending_acts: dict = field(default_factory=dict)        # type_id → 最近 ACT 时刻（T81）
     _gi_pending: bool = False
     _ci_pending: bool = False
+    _ca_baseline: int | None = None                          # T86：会话公共地址基线
+    _last_spont: tuple | None = None                        # T86：最近自发帧 (type, ioa, value)
+    _last_spont_ts: float = 0.0
     t3_reported: bool = False
     _frames_seen: int = 0
 
@@ -204,10 +210,11 @@ class ComplianceMonitor:
             peer.pending_testfr = False
 
     def _observe_asdu(self, direction: str, frame: bytes, now: float) -> None:
-        """应用层语义检查（T81）：方向错位 / 无请求响应 / 总召唤终止 / COT 合法性.
+        """应用层语义检查（T81/T86）：方向/请求响应/召唤期/COT/CA/重复自发/时标.
 
-        只用 ``ASDU.decode_header``（不解析信息体——畸形对象体不影响监视）。
-        规则刻意保守：仅指认无歧义的违规，宁漏勿错（现场误报比漏报更伤信任）。
+        头部用 ``ASDU.decode_header``（不解析信息体——畸形对象体不影响监视）；
+        T86 的重复帧/时标检查尝试 ``ASDU.decode``，失败一律跳过（保守）。
+        规则刻意保守：仅指认无歧义的违规，宁漏勿错。
         """
         try:
             asdu = ASDU.decode_header(frame[6:])
@@ -216,7 +223,18 @@ class ComplianceMonitor:
         type_id = asdu.type_id
         value = type_id.value if isinstance(type_id, TypeID) else type_id
         cot = asdu.cot
+        ca = asdu.common_addr
         from_master = direction == "tx"
+
+        # ── T86：公共地址一致性（首帧建基线，后续不符即违规）──
+        if self._ca_baseline is None:
+            self._ca_baseline = ca
+        elif ca != self._ca_baseline:
+            self._add(now, "ca-mismatch", _side_of(direction),
+                      f"公共地址 {ca} 与会话基线 {self._ca_baseline} 不符")
+        if self.expected_ca is not None and ca != self.expected_ca:
+            self._add(now, "ca-mismatch", _side_of(direction),
+                      f"公共地址 {ca} 与期望配置 {self.expected_ca} 不符")
 
         if cot == 0:
             self._add(now, "cot-zero", _side_of(direction), "传送原因 COT=0（非法）")
@@ -252,6 +270,31 @@ class ComplianceMonitor:
         # 总召唤终止帧到达 → 召唤期结束
         if (not from_master) and value == TypeID.C_IC_NA_1.value and cot == COT.INTROGEN:
             self._gi_pending = False
+
+        # ── T86：重复自发帧（同类型/IOA/值连续重复，COT=3）──
+        # 设备常在变化时重复上送同一值——同值自发帧连续出现即指认（NC/抖动缺陷）
+        if (not from_master) and cot == COT.SPONT:
+            try:
+                full = ASDU.decode(frame[6:])
+                first = full.objects[0] if full.objects else None
+                ioa = getattr(first, "ioa", None)
+                raw = getattr(first, "data", None)
+                val = getattr(raw, "value", raw)
+                key = (value, ioa, str(val))
+                if key == self._last_spont and now - self._last_spont_ts < _SPONT_WINDOW_S:
+                    self._add(now, "spont-duplicate", _side_of(direction),
+                              f"连续重复自发帧（类型 {value} IOA={ioa} 值={val}）")
+                self._last_spont = key
+                self._last_spont_ts = now
+                # 时标偏离（带 CP56 时标的对象）：与观察时刻差超阈值
+                tag = getattr(first, "time_tag", None)
+                if tag is not None and hasattr(tag, "to_epoch"):
+                    delta = abs(tag.to_epoch() - now)
+                    if delta > _MAX_TIME_SKEW_S:
+                        self._add(now, "time-skew", _side_of(direction),
+                                  f"时标偏离观察时刻 {delta:.0f}s（阈值 {_MAX_TIME_SKEW_S:.0f}s）")
+            except Exception:  # noqa: BLE001 — 对象体解析失败一律跳过（保守）
+                pass
 
     def _check_send_seq(self, sender: _SideState, seq: int, direction: str,
                         now: float) -> None:

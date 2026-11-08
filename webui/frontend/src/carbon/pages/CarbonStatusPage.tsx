@@ -1,6 +1,6 @@
 import { Button, Select, SelectItem, TextInput } from '@carbon/react'
 
-import { exportReportUrl } from '../../api/endpoints'
+import { useUiStore } from '../../store/uiStore'
 import { useState } from 'react'
 
 import { usePointsQuery, useStatusQuery } from '../../api/queries'
@@ -30,17 +30,40 @@ export function CarbonStatusPage() {
     fail: t('status.reportConclusionFail'),
     conditional: t('status.reportConclusionConditional'),
   }
-  const exportReport = (): void => {
+  const chartSnapshots = useUiStore((s) => s.chartSnapshots)
+  const exportReport = async (): Promise<void> => {
     const conclusion = conclusionKind
       ? conclusionTexts[conclusionKind] + (conclusionNote ? `：${conclusionNote}` : '')
       : ''
-    window.open(
-      exportReportUrl(t('status.exportReportTitle', { role: status?.role ?? '-' }), {
+    // POST 报告（T87：曲线快照 base64 放 GET query 会超长）→ Blob 打开
+    try {
+      const res = await fetch('/api/export/report.html', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+        title: t('status.exportReportTitle', { role: status?.role ?? '-' }),
         conclusion,
         conclusion_kind: conclusionKind,
-      }),
-      '_blank',
-    )
+          chart_images: chartSnapshots,
+        }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const text = await res.text()
+      const blob = new Blob([text], { type: 'text/html;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const win = window.open(url, '_blank')
+      if (!win) URL.revokeObjectURL(url)
+      else setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    } catch {
+      // 网络失败降级为 GET（无曲线快照）
+      window.open(
+        `/api/export/report.html?${new URLSearchParams({
+          title: t('status.exportReportTitle', { role: status?.role ?? '-' }),
+          conclusion, conclusion_kind: conclusionKind,
+        }).toString()}`,
+        '_blank',
+      )
+    }
   }
 
   return (
@@ -75,7 +98,7 @@ export function CarbonStatusPage() {
           kind="secondary"
           size="sm"
           data-testid="export-report"
-          onClick={exportReport}
+          onClick={() => void exportReport()}
           title={t('status.exportReportHint')}
         >
           {t('status.exportReport')}

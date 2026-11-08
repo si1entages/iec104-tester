@@ -444,7 +444,11 @@ graph TD
 | **T82** | 报告结论与颜色横幅（2026-11-09） | `build_session_report_html` 增 `conclusion/conclusion_kind`（pass=绿/fail=红/conditional=琥珀，html.escape）→ 报告头部结论横幅；端点 `?conclusion=&conclusion_kind=`；状态页导出区升级为「结论下拉 + 说明输入 + 导出」（Carbon/PF）。pytest 结论横幅 2 项（颜色/转义/缺省无横幅） |
 | **T84** | TLS 透传桥（2026-11-09） | `BridgeConfig` 增 `listen_ssl`/`upstream_ssl`/`upstream_hostname`（双侧独立可配——明文↔TLS 混合桥接同样支持）；`start_server`/`open_connection` 传入 context；**TLS 终结在桥**——帧内容对桥可见，合规监视/录制照常工作。CLI：`--bridge-listen-tls-cert/key`（桥对主站扮演子站）、`--bridge-upstream-tls-ca[/cert/key/hostname]`（桥对子站扮演主站，mTLS 可选）；context 复用 `core/transport/tls_context.py` 既有构造器（证书/密钥缺失 → 人话报错 exit 2）。pytest 2 项：明文主站↔桥↔TLS 子站（混合）、TLS 主站↔桥↔明文子站（证书复用 tests/certs，STARTDT 回环 + 双向帧观察解密可见） |
 
-> **累计统计**：T01~T49、T51~T84 **全部完成**；**待办 1**（T50 真机复测，暂缓待窗口；T39 第三方实测已回填）。
+| **T85** | 桥上网络条件注入（混沌验收）（2026-11-09） | 桥产品故事第三级「主动干扰」：`core/engine/condition_injector.py` 帧级注入器（丢帧/重复/损坏/延迟/乱序/断线，条件器复用 `NetworkCondition`；乱序改为「附加延迟后发先至」——避免缓冲帧滞留造成字节流缺口）。`TcpBridge._pump` 帧边界重组：完整帧经注入器决策（0/1/N 份 + 延迟调度），**脏字节/半包原样透传不丢字节**；旁路观察/合规监视/录制始终看干扰前原始帧。每条链路独立断线状态；`set_condition` 运行中动态生效；`injection_stats` 跨链路累计（连接断开归档）。接线：`BridgeConfig.condition` + status `injection/condition/condition_active` + `POST /api/bridge/condition` + 桥接页条件卡（Carbon/PF，百分比输入 + 注入统计）+ 报告「7. 网络条件注入」段。pytest：注入器 9 项（固定种子确定性）+ 桥端到端 3 项（100% 丢帧转发无响应但观察仍见原始帧、无异常条件原样透传、运行中动态设置）+ 端点 2 项 |
+| **T86** | 应用层合规规则第二批（2026-11-09） | 合规监视器新增：公共地址不符（首帧建基线 / 显式 `expected_ca` 配置双模式）、连续重复自发帧（同类型+IOA+值在 10s 窗口内 COT=3 重复——设备抖动缺陷）、CP56 时标偏离（带时标对象 `InformationObject.time_tag` 与观察时刻差 > 300s；`ASDU.decode` 失败一律跳过，保守）。pytest 应用层 7 项（CA 3 / 重复 3 / 时标 1），合规监视器合计 28 项 |
+| **T87** | 报告嵌曲线快照（2026-11-09） | 跨页 plumbing：历史曲线组件渲染后 `ECharts.getDataURL`（底色从主题 token 解析，打印用不透明背景）→ `uiStore.chartSnapshots`（最多 4 张）；状态页导出改 **POST `/api/export/report.html`**（base64 放 GET query 会超长）——JSON `{title, notes, conclusion, conclusion_kind, chart_images}`，报告生成器嵌「8. 历史曲线快照」`<img>`；仅接受 `data:image/png;base64,` 前缀（防属性注入），最多 4 张；GET 端点保留（无快照场景）；前端 fetch → Blob 打开，失败降级 GET。pytest 2 项（生成器嵌图 + POST 端点过滤） |
+
+> **累计统计**：T01~T49、T51~T87 **全部完成**；**待办 1**（T50 真机复测，暂缓待窗口；T39 第三方实测已回填）。
 
 ---
 

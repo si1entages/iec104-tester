@@ -128,3 +128,43 @@ def test_report_conclusion_banner():
     bad = build_session_report_html("master", _fake_status(), _envelopes(), [],
                                     conclusion="不合格：<b>注入</b>", conclusion_kind="fail")
     assert "#c62828" in bad and "&lt;b&gt;注入&lt;/b&gt;" in bad
+
+
+def test_report_injection_section():
+    """注入统计存在时生成 §7（T85 报告贯通）；缺省无该节."""
+    base = build_session_report_html("master", _fake_status(), _envelopes(), [])
+    assert "网络条件注入" not in base
+    with_inj = build_session_report_html(
+        "master", _fake_status(), _envelopes(), [],
+        injection={"total": 100, "dropped": 5, "corrupted": 2,
+                   "duplicated": 0, "delayed": 0, "reordered": 0, "disconnects": 0},
+        condition="loss=5%")
+    assert "网络条件注入" in with_inj and "loss=5%" in with_inj and ">5<" in with_inj
+
+
+@pytest.mark.asyncio
+async def test_report_post_endpoint_with_chart_images():
+    """POST 报告端点：嵌入 dataURL 图片；非图片前缀被过滤（防注入）."""
+    from webui.bridge import EngineBridge
+    from webui.server import create_app
+
+    bridge = EngineBridge("master")
+    bridge.ensure_demo_points()
+    app = create_app(bridge)
+    client = TestClient(TestServer(app))
+    await client.start_server()
+    try:
+        r = await client.post("/api/export/report.html", json={
+            "title": "T87",
+            "conclusion": "合格",
+            "conclusion_kind": "pass",
+            "chart_images": ["data:image/png;base64,AAAA", "javascript:alert(1)"],
+        })
+        assert r.status == 200 and "text/html" in r.headers["Content-Type"]
+        text = await r.text()
+        assert "历史曲线快照" in text and "data:image/png;base64,AAAA" in text
+        assert "javascript:alert" not in text
+        assert "测试结论" in text
+    finally:
+        await bridge.shutdown()
+        await client.close()

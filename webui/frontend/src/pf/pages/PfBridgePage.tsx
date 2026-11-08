@@ -21,6 +21,7 @@ import {
 import { api } from '../../api/endpoints'
 import { useCommand, useCommandNoArgs, useStatusQuery } from '../../api/queries'
 import { useT } from '../../i18n'
+import { PfConditionCard } from '../components/PfConditionCard'
 import { PfFrameViewer } from '../components/PfFrameViewer'
 
 /**
@@ -165,6 +166,8 @@ export function PfBridgePage() {
           </CardBody>
         </Card>
       </PageSection>
+
+      <PfConditionCard />
 
       {status?.compliance ? (
         <PageSection>

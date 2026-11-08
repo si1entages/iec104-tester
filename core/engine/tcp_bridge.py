@@ -28,7 +28,13 @@ import ssl
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
+from core.engine.condition_injector import (
+    ConditionInjector,
+    DeliverAction,
+    _delayed_write,
+)
 from core.protocol.apci import APCICodec
+from core.simulation.conditions import NetworkCondition
 
 logger = logging.getLogger("iec104.bridge")
 
@@ -57,6 +63,7 @@ class BridgeConfig:
     listen_ssl: ssl.SSLContext | None = None    # 监听侧 TLS（None=明文）
     upstream_ssl: ssl.SSLContext | None = None  # 上游侧 TLS（None=明文）
     upstream_hostname: str = ""      # 上游证书主机名校验（空=不校验名）
+    condition: NetworkCondition | None = None  # 网络条件注入（T85；None/无异常=直通）
 
 
 @dataclass
@@ -70,11 +77,15 @@ class FrameSplitter:
 
     buffer: bytearray = field(default_factory=bytearray)
     resyncs: int = 0
+    last_consumed: int = 0   # 本次 feed 吐出的完整帧字节总数（T85 注入路径用）
+    last_junk: int = 0       # 本次 feed 丢弃的脏字节数
 
     def feed(self, data: bytes) -> list[bytes]:
         """喂一段字节，返回其中包含的完整帧（可能 0/1/N 个）."""
         self.buffer.extend(data)
         frames: list[bytes] = []
+        consumed = 0
+        junk = 0
         while True:
             if len(self.buffer) < 2:
                 break
@@ -84,18 +95,23 @@ class FrameSplitter:
                 drop = idx if idx > 0 else len(self.buffer)
                 del self.buffer[:drop]
                 self.resyncs += drop
+                junk += drop
                 continue
             length = self.buffer[1]
             if length < 4:
                 # 长度域非法 → 视为脏字节重同步
                 del self.buffer[:1]
                 self.resyncs += 1
+                junk += 1
                 continue
             total = 2 + length
             if len(self.buffer) < total:
                 break  # 半包，等下一段
             frames.append(bytes(self.buffer[:total]))
             del self.buffer[:total]
+            consumed += total
+        self.last_consumed = consumed
+        self.last_junk = junk
         return frames
 
 
@@ -159,6 +175,8 @@ class TcpBridge:
         self.stats = BridgeStats()
         self._server: asyncio.Server | None = None
         self._client_tasks: set[asyncio.Task] = set()
+        self._injectors: dict[str, ConditionInjector] = {}   # T85：按链路隔离断线状态
+        self._injection_totals: dict[str, int] = {}          # 连接断开后仍保留的累计
         self._client_seq = 0
         self._stopping = False
 
@@ -201,6 +219,31 @@ class TcpBridge:
             return int(self._server.sockets[0].getsockname()[1])
         return self.config.listen_port
 
+    def set_condition(self, condition: NetworkCondition | None) -> None:
+        """动态设置网络条件（T85）：已连接链路同步生效（每条链路独立断线状态）."""
+        self.config.condition = condition
+        for injector in self._injectors.values():
+            injector.update(condition)
+
+    def injection_stats(self) -> dict:
+        """聚合注入统计（T85 状态页/报告用）：活跃链路 + 已断开链路的累计."""
+        keys = ("total", "dropped", "duplicated", "corrupted", "delayed",
+                "reordered", "disconnects")
+        out = {k: self._injection_totals.get(k, 0) for k in keys}
+        for injector in self._injectors.values():
+            d = injector.stats.as_dict()
+            for k in keys:
+                out[k] += d.get(k, 0)
+        return out
+
+    def _archive_injector(self, client_id: str) -> None:
+        """链路断开：把该链路统计并入累计（避免连接关闭后统计消失）."""
+        injector = self._injectors.pop(client_id, None)
+        if injector is None:
+            return
+        for k, v in injector.stats.as_dict().items():
+            self._injection_totals[k] = self._injection_totals.get(k, 0) + v
+
     # ── 客户端处理 ────────────────────────────────────────────
 
     async def _handle_client(self, reader: asyncio.StreamReader,
@@ -227,10 +270,13 @@ class TcpBridge:
             writer.close()
             return
 
+        # 每条链路一个注入器（T85）：断线状态按连接隔离
+        injector = ConditionInjector(self.config.condition)
+        self._injectors[client_id] = injector
         dn_task = asyncio.create_task(
-            self._pump(reader, writer, up_writer, "tx", client_id))
+            self._pump(reader, writer, up_writer, "tx", client_id, injector))
         up_task = asyncio.create_task(
-            self._pump(up_reader, up_writer, writer, "rx", client_id))
+            self._pump(up_reader, up_writer, writer, "rx", client_id, injector))
         try:
             # 任一方向断开即结束（对端关闭/异常）；另一方向由 finally 收口
             done, _ = await asyncio.wait({dn_task, up_task},
@@ -243,6 +289,7 @@ class TcpBridge:
             for t in (dn_task, up_task):
                 t.cancel()
             await asyncio.gather(dn_task, up_task, return_exceptions=True)
+            self._archive_injector(client_id)
             for w in (writer, up_writer):
                 try:
                     w.close()
@@ -252,28 +299,70 @@ class TcpBridge:
 
     async def _pump(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
                     peer_writer: asyncio.StreamWriter, direction: str,
-                    client_id: str) -> None:
-        """单方向泵：读 → 立即转发 → 旁路切帧/回调（转发永远优先于观察）."""
+                    client_id: str, injector: ConditionInjector | None = None) -> None:
+        """单方向泵：读 → 转发（注入模式按帧处理）→ 旁路观察.
+
+        * 直通模式：整段字节立即转发（零拷贝路径，行为与 T73 一致）；
+        * 注入模式（T85）：按 APCI 帧边界切分，完整帧经 ``ConditionInjector``
+          决策后按动作序列投递；脏字节（非 0x68）与半包尾部**原样透传**，
+          不因为帧注入而丢字节（TCP 分段是合法的，必须送达）。
+        两种模式下 **on_frame 观察的始终是原始帧**（干扰前的审计证据）。
+        """
         splitter = FrameSplitter()
         while True:
             chunk = await reader.read(self.config.read_chunk)
             if not chunk:
                 return  # 对端正常关闭
-            peer_writer.write(chunk)
+            injecting = injector is not None and injector.active
             try:
-                await peer_writer.drain()
-            except Exception as e:  # 对端写失败 → 结束本方向（连接即将收口）
-                logger.info("[%s] %s relay write failed: %s", client_id, direction, e)
-                return
+                frames = splitter.feed(chunk)
+            except Exception:  # noqa: BLE001 — 旁路兜底
+                frames = []
+            if injecting:
+                try:
+                    # 按帧切分后重新拼装字节流：完整帧经注入器决策
+                    # （丢弃=不拼、重复=拼两份、损坏=翻转位、延迟=单独调度），
+                    # 半包尾部与脏字节前缀原样保留——保证 TCP 字节流不丢字节。
+                    consumed = splitter.last_consumed
+                    tail = bytes(splitter.buffer)          # 未成帧半包（原样送达）
+                    junk_len = max(0, len(chunk) - consumed - len(tail))
+                    head_junk = chunk[:junk_len]
+                    out = bytearray(head_junk)
+                    delayed: list[DeliverAction] = []
+                    for frame in frames:
+                        for action in injector.process(frame, direction):
+                            if action.delay_s > 0:
+                                delayed.append(action)
+                            else:
+                                out.extend(action.data)
+                    out.extend(tail)
+                    if out:
+                        peer_writer.write(bytes(out))
+                        await peer_writer.drain()
+                    if delayed:
+                        loop = asyncio.get_running_loop()
+                        for action in delayed:
+                            loop.call_later(action.delay_s, _delayed_write,
+                                            peer_writer, action.data)
+                except Exception as e:  # noqa: BLE001 — 注入异常降级为直通
+                    logger.warning("[%s] injection failed, fallback: %s", client_id, e)
+                    peer_writer.write(chunk)
+                    try:
+                        await peer_writer.drain()
+                    except Exception:  # noqa: BLE001 — 对端关闭由上层收口
+                        return
+            else:
+                peer_writer.write(chunk)
+                try:
+                    await peer_writer.drain()
+                except Exception as e:  # 对端写失败 → 结束本方向（连接即将收口）
+                    logger.info("[%s] %s relay write failed: %s", client_id, direction, e)
+                    return
             # ── 旁路观察（失败只丢观察，不影响已转发的数据）──
             if direction == "tx":
                 self.stats.bytes_dn += len(chunk)
             else:
                 self.stats.bytes_up += len(chunk)
-            try:
-                frames = splitter.feed(chunk)
-            except Exception:  # noqa: BLE001 — 旁路兜底
-                continue
             self.stats.resyncs += splitter.resyncs
             splitter.resyncs = 0
             for frame in frames:

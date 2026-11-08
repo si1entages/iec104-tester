@@ -206,6 +206,9 @@ export const api = {
     ),
   exportPointsCsv: () => apiGetText(POINTS_CSV_URL),
   exportSession: () => apiGet('/api/export/session.json', sessionExportSchema),
+  /** 报告导出（T87 可带曲线快照）——返回 HTML 文本，调用方用 Blob 打开 */
+  exportReport: (body: Record<string, unknown>) =>
+    apiPostText('/api/export/report.html', looseOkSchema, JSON.stringify(body)),
 
   // ── 透明桥（T74；仅 bridge 角色应用注册这两个端点）────────────────
   loadtest: {
@@ -222,6 +225,8 @@ export const api = {
       upstream_port?: number
     }) => apiPost('/api/bridge/start', looseOkSchema, body),
     stop: () => apiPost('/api/bridge/stop', looseOkSchema),
+    condition: (body: Record<string, unknown>) =>
+      apiPost('/api/bridge/condition', looseOkSchema, body),
   },
 
   // ── 日志 ─────────────────────────────────────────────────────────────

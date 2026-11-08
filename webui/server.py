@@ -552,23 +552,52 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
         return web.json_response(await bridge.measure_clock_offset(samples))
 
     async def api_export_report(request: web.Request) -> web.Response:
-        """会话测试报告（T75）：自包含单文件 HTML，浏览器打印即 PDF 归档.
+        """会话测试报告（T75/T87）：自包含单文件 HTML，浏览器打印即 PDF 归档.
 
-        query: ``?title=&notes=&limit=``（limit 为帧证据表最大行数，1~5000）。
+        GET: ``?title=&notes=&limit=&conclusion=&conclusion_kind=``；
+        POST: JSON ``{title?, notes?, conclusion?, conclusion_kind?,
+        chart_images?: [dataURL]}``（T87 曲线快照 base64 放 GET query 会超长）。
         数据源为当前缓冲（recent frames/events），不落盘、不改状态。
         """
         from .report import build_session_report_html
 
-        title = request.query.get("title") or ""
-        notes = request.query.get("notes") or ""
-        conclusion = request.query.get("conclusion") or ""
-        conclusion_kind = request.query.get("conclusion_kind") or ""
+        if request.method == "POST":
+            try:
+                body = await request.json()
+            except Exception:
+                body = {}
+            if not isinstance(body, dict):
+                return web.json_response({"ok": False, "error": "invalid body"}, status=400)
+            title = body.get("title") or ""
+            notes = body.get("notes") or ""
+            conclusion = body.get("conclusion") or ""
+            conclusion_kind = body.get("conclusion_kind") or ""
+            limit = body.get("limit") or 300
+            chart_images = body.get("chart_images") or []
+        else:
+            title = request.query.get("title") or ""
+            notes = request.query.get("notes") or ""
+            conclusion = request.query.get("conclusion") or ""
+            conclusion_kind = request.query.get("conclusion_kind") or ""
+            limit = request.query.get("limit") or 300
+            chart_images = []
         try:
-            limit = max(1, min(int(request.query.get("limit") or 300), 5000))
-        except ValueError:
+            limit = max(1, min(int(limit), 5000))
+        except (TypeError, ValueError):
             return web.json_response({"ok": False, "error": "limit 必须是整数"}, status=400)
+        if not isinstance(chart_images, list):
+            chart_images = []
+        # 只接受 data:image/png;base64 前缀（防注入任意 HTML 属性内容）
+        chart_images = [str(x) for x in chart_images
+                        if isinstance(x, str) and x.startswith("data:image/png;base64,")][:4]
         lt = getattr(bridge, "loadtest", None)
         lt_summary = lt.last_summary() if lt is not None else None
+        injection = None
+        condition = ""
+        if bridge.role == "bridge" and bridge.tcp_bridge is not None:
+            injection = bridge.tcp_bridge.injection_stats()
+            cond = bridge.tcp_bridge.config.condition
+            condition = cond.describe() if cond is not None else ""
         comp = getattr(bridge, "compliance", None)
         comp_violations = comp.violation_list(50) if comp is not None else None
         html_text = build_session_report_html(
@@ -576,7 +605,9 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
             bridge.recent("frame", 5000), bridge.recent("event", 2000),
             title=title, notes=notes, max_frames=limit,
             loadtest_summary=lt_summary, compliance_violations=comp_violations,
-            conclusion=conclusion, conclusion_kind=conclusion_kind)
+            conclusion=conclusion, conclusion_kind=conclusion_kind,
+            injection=injection, condition=condition,
+            chart_images=chart_images)
         fname = time.strftime("iec104_report_%Y%m%d_%H%M%S.html")
         return web.Response(
             text=html_text, content_type="text/html",
@@ -659,6 +690,19 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
             return web.json_response(
                 {"ok": False, "error": "仅 bridge 角色支持该操作"})
         return web.json_response(await bridge.stop_bridge())
+
+    async def api_bridge_condition_set(request: web.Request) -> web.Response:
+        """设置桥网络条件（T85，仅 bridge 角色）：body 为 NetworkCondition 字段."""
+        if bridge.role != "bridge":
+            return web.json_response(
+                {"ok": False, "error": "仅 bridge 角色支持该操作"})
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            return web.json_response({"ok": False, "error": "invalid body"}, status=400)
+        return web.json_response(bridge.set_bridge_condition(body))
 
     async def api_loadtest_start(request: web.Request) -> web.Response:
         """启动压测（T76；仅挂载了 LoadTestService 的 both 模式应用）.
@@ -1328,6 +1372,7 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
     # handler 层业务拒绝。桥应用则跳过引擎专属路由（见 else 分支注释）。
     app.router.add_post("/api/bridge/start", api_bridge_start)
     app.router.add_post("/api/bridge/stop", api_bridge_stop)
+    app.router.add_post("/api/bridge/condition", api_bridge_condition_set)
     if bridge.role != "bridge":
         app.router.add_post("/api/master/start", api_master_start)
         app.router.add_post("/api/master/stop", api_master_stop)
@@ -1368,6 +1413,7 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
     app.router.add_get("/api/export/points.csv", api_export_csv)
     app.router.add_get("/api/export/session.json", api_export_session)
     app.router.add_get("/api/export/report.html", api_export_report)
+    app.router.add_post("/api/export/report.html", api_export_report)
     app.router.add_get("/api/logs", api_logs)
     app.router.add_get("/api/logs/export", api_logs_export)
     app.router.add_get("/api/diagnostics/export", api_diagnostics_export)

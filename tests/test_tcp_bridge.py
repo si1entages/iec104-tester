@@ -287,3 +287,104 @@ async def test_bridge_tls_listen_side():
     assert {d for d, _ in observed} == {"tx", "rx"}
     await bridge.stop()
     await slave.stop()
+
+
+# ── 条件注入（T85）──────────────────────────────────────────────────────
+
+from core.simulation.conditions import NetworkCondition  # noqa: E402
+
+
+@pytest.mark.asyncio
+async def test_bridge_injection_loss_drops_forward_but_observes_original():
+    """丢包 100%：转发路径无帧，但旁路观察仍看到原始帧（审计证据不污染）."""
+    from core.engine.slave import SlaveEngine
+
+    pt = PointTable()
+    pt.generate_demo_points(yx_count=5, yc_count=3, yk_count=0, ym_count=0)
+    slave = SlaveEngine(port=0, point_table=pt)
+    await slave.start()
+    upstream_port = slave._server._server.sockets[0].getsockname()[1]
+
+    observed: list[tuple[str, bytes]] = []
+    bridge = TcpBridge(BridgeConfig(
+        listen_host="127.0.0.1", listen_port=0,
+        upstream_host="127.0.0.1", upstream_port=upstream_port,
+        condition=NetworkCondition(loss_rate=1.0),
+    ), on_frame=lambda data, direction, cid: observed.append((direction, data)))
+    await bridge.start()
+    try:
+        reader, writer = await asyncio.open_connection("127.0.0.1", bridge.listen_port)
+        writer.write(bytes([0x68, 0x04, 0x07, 0x00, 0x00, 0x00]))
+        await writer.drain()
+        # 上游收不到 STARTDT → 无 STARTDT_CON
+        try:
+            data = await asyncio.wait_for(reader.read(6), timeout=1.0)
+            assert data == b"" or len(data) == 0  # 无响应
+        except asyncio.TimeoutError:
+            pass  # 连接保持但无响应，符合丢帧预期
+        writer.close()
+        await asyncio.sleep(0.2)
+        assert any(d == "tx" for d, _ in observed)  # 原始帧被观察
+        assert bridge.injection_stats()["dropped"] >= 1
+    finally:
+        await bridge.stop()
+        await slave.stop()
+
+
+@pytest.mark.asyncio
+async def test_bridge_injection_disabled_is_plain_passthrough():
+    """无异常条件：字节流原样透传（与 T73 行为一致）."""
+    from core.engine.slave import SlaveEngine
+
+    pt = PointTable()
+    pt.generate_demo_points(yx_count=5, yc_count=3, yk_count=0, ym_count=0)
+    slave = SlaveEngine(port=0, point_table=pt)
+    await slave.start()
+    upstream_port = slave._server._server.sockets[0].getsockname()[1]
+
+    bridge = TcpBridge(BridgeConfig(
+        listen_host="127.0.0.1", listen_port=0,
+        upstream_host="127.0.0.1", upstream_port=upstream_port,
+        condition=NetworkCondition(),  # 无异常 → 直通
+    ))
+    await bridge.start()
+    try:
+        reader, writer = await asyncio.open_connection("127.0.0.1", bridge.listen_port)
+        writer.write(bytes([0x68, 0x04, 0x07, 0x00, 0x00, 0x00]))
+        await writer.drain()
+        data = await asyncio.wait_for(reader.readexactly(6), timeout=10.0)
+        assert data == bytes([0x68, 0x04, 0x0B, 0x00, 0x00, 0x00])
+        writer.close()
+    finally:
+        await bridge.stop()
+        await slave.stop()
+
+
+@pytest.mark.asyncio
+async def test_bridge_set_condition_realtime():
+    """运行中动态设置条件：当前链路立即生效."""
+    from core.engine.slave import SlaveEngine
+
+    pt = PointTable()
+    pt.generate_demo_points(yx_count=5, yc_count=3, yk_count=0, ym_count=0)
+    slave = SlaveEngine(port=0, point_table=pt)
+    await slave.start()
+    upstream_port = slave._server._server.sockets[0].getsockname()[1]
+    bridge = TcpBridge(BridgeConfig(
+        listen_host="127.0.0.1", listen_port=0,
+        upstream_host="127.0.0.1", upstream_port=upstream_port))
+    await bridge.start()
+    try:
+        reader, writer = await asyncio.open_connection("127.0.0.1", bridge.listen_port)
+        await asyncio.sleep(0.1)  # 等链路注入器登记
+        assert len(bridge._injectors) == 1
+        bridge.set_condition(NetworkCondition(loss_rate=1.0))
+        writer.write(bytes([0x68, 0x04, 0x07, 0x00, 0x00, 0x00]))
+        await writer.drain()
+        await asyncio.sleep(0.3)
+        assert bridge.injection_stats()["dropped"] >= 1
+        bridge.set_condition(None)
+        writer.close()
+    finally:
+        await bridge.stop()
+        await slave.stop()

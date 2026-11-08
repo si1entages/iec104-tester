@@ -83,6 +83,10 @@ interface UiState {
 
   trendWatched: Point[]
   setTrendWatched: (points: Point[]) => void
+
+  /** 历史曲线快照（T87）：ECharts getDataURL → 报告导出时嵌入（最多 4 张） */
+  chartSnapshots: string[]
+  setChartSnapshots: (images: string[]) => void
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -139,4 +143,7 @@ export const useUiStore = create<UiState>((set) => ({
 
   trendWatched: [],
   setTrendWatched: (trendWatched) => set({ trendWatched }),
+
+  chartSnapshots: [],
+  setChartSnapshots: (chartSnapshots) => set({ chartSnapshots }),
 }))

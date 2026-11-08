@@ -159,6 +159,7 @@
 | POST | `/api/scd/preview` | SCD/CID/ICD 原始 XML 文本（IEC 61850-6 SCL）；`?common_addr=` 可选显式指定公共地址（缺省取出现最多的 casdu）、`?station=` 可选覆盖站名 | `{ok, yaml, station_name, common_addr, stats: Record<string,number>, warnings: string[]}` |
 | GET | `/api/export/points.csv` | — | `text/csv` 文本 |
 | GET | `/api/export/report.html` | `?title=&notes=&limit=`（limit=帧证据最大行数 1~5000） | `text/html` 自包含报告（attachment；浏览器打印即 PDF） |
+| POST | `/api/export/report.html` | `{title?, notes?, conclusion?, conclusion_kind?, chart_images?: [data:image/png;base64,...]}`（T87 曲线快照，最多 4 张） | `text/html` 自包含报告（同 GET，额外嵌入曲线图片） |
 | GET | `/api/export/session.json` | — | `{role, status: Status, frames: WsEnvelope<'frame', Frame>[], events: WsEnvelope<'event', EngineEvent>[]}`（`recent()` 原样导出） |
 
 > 说明：`/api/points/import` 的 `auto` 嗅探顺序为 —— 以 `{` 开头 → `json`；
@@ -170,10 +171,12 @@
 |------|------|------|------|
 | POST | `/api/bridge/start` | `{listen_host?, listen_port?, upstream_host?, upstream_port?}`（缺省回填 `0.0.0.0:2404` 与 status 的 host/port） | `{ok, error?}` |
 | POST | `/api/bridge/stop` | — | `{ok, error?}` |
+| POST | `/api/bridge/condition` | `NetworkCondition` 字段（loss_rate/delay_ms/duplicate_rate/corrupt_rate/reorder_rate/disconnect_rate/direction/active；空 body=清空条件） | `{ok, condition, active}`（仅 bridge 角色，未运行时业务拒绝） |
 
 > 桥角色（T74）的 `GET /api/status` 额外携带 `bridge_stats`（frames/bytes/
 > clients/resyncs/upstream_errors 计数，running 时存在）与 `bridge_cfg`
 > （当前桥配置）；帧观察复用 `/ws` 的 `frame` 事件与 `/api/capture/*`。
+> 桥角色 status 另携带 `injection`（注入统计累计）、`condition`（当前条件描述）、`condition_active`（T85）。
 > 桥应用**不注册**引擎专属路由（master/slave/multi 启停、点表写入、网络模拟）。
 
 ### 2.4b 压测编排（端点全应用注册；未挂载编排服务的应用返回 `{ok: false, error: 压测仅支持单进程双角色（both）模式}`）

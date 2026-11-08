@@ -11,9 +11,9 @@ import { CanvasRenderer } from 'echarts/renderers'
 
 import { api } from '../../api/endpoints'
 import type { HistoryDataRecord } from '../../api/types'
-import { useT } from '../../i18n'
 import { toNumericValue } from '../../lib/trendBuffer'
 import { useUiStore } from '../../store/uiStore'
+import { useT } from '../../i18n'
 
 use([LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
 
@@ -45,6 +45,8 @@ function cssVar(name: string): string {
 export function CarbonHistoryCurve({ start, end }: Props) {
   const t = useT()
   const theme = useUiStore((s) => s.theme)
+  const setChartSnapshots = useUiStore((s) => s.setChartSnapshots)
+  const chartSnapshots = useUiStore((s) => s.chartSnapshots)
   const observerRef = useRef<ResizeObserver | null>(null)
   const chartRef = useRef<EChartsType | null>(null)
   const [series, setSeries] = useState<CurveSeries[]>([])
@@ -130,6 +132,18 @@ export function CarbonHistoryCurve({ start, end }: Props) {
 
   useEffect(() => {
     applyRef.current()
+    // 曲线渲染后采集快照（T87）：供报告导出嵌入（最多 4 张，
+    // 仅采集有数据的序列，避免空图占位）
+    const chart = chartRef.current
+    if (chart && queries.some((q) => (q.data?.rows?.length ?? 0) > 0)) {
+      try {
+        // 打印报告需要不透明底色；从主题 token 解析实际色值（canvas 不认 CSS 变量）
+        const bg = cssVar('--cds-background') || cssVar('--pf-t--global--background--color--primary--default')
+        const url = chart.getDataURL({ type: 'png', pixelRatio: 1.5,
+          backgroundColor: bg }) as string
+        setChartSnapshots([url, ...chartSnapshots.filter((x) => x !== url)].slice(0, 4))
+      } catch { /* ECharts 未就绪时跳过 */ }
+    }
   })
 
   const addSeries = (): void => {

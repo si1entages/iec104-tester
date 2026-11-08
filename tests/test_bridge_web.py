@@ -162,3 +162,42 @@ async def test_bridge_endpoints_on_master_role_rejected():
     finally:
         await bridge.shutdown()
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_bridge_condition_endpoint(bridge_client):
+    """条件端点：设置后 status 可见描述/统计字段；非桥角色业务拒绝."""
+    client, bridge = bridge_client
+    echo = await _echo_server()
+    upstream_port = echo.sockets[0].getsockname()[1]
+    try:
+        await client.post("/api/bridge/start", json={
+            "listen_port": 0, "upstream_port": upstream_port})
+        r = await client.post("/api/bridge/condition", json={"loss_rate": 0.5})
+        assert (await r.json())["ok"] is True
+        st = await (await client.get("/api/status")).json()
+        assert "loss" in st["condition"] and st["condition_active"] is True
+        assert "total" in st["injection"]
+        # 清空条件
+        r2 = await client.post("/api/bridge/condition", json={})
+        assert (await r2.json())["active"] is False
+    finally:
+        echo.close()
+        await echo.wait_closed()
+
+
+@pytest.mark.asyncio
+async def test_bridge_condition_role_guard():
+    """非 bridge 角色调用条件端点 → 200 + ok:false（业务拒绝，巡检不计 4xx）."""
+    from webui.bridge import EngineBridge
+    bridge = EngineBridge("master")
+    bridge.ensure_demo_points()
+    app = create_app(bridge)
+    client = TestClient(TestServer(app))
+    await client.start_server()
+    try:
+        r = await client.post("/api/bridge/condition", json={"loss_rate": 1.0})
+        assert r.status == 200 and (await r.json())["ok"] is False
+    finally:
+        await bridge.shutdown()
+        await client.close()

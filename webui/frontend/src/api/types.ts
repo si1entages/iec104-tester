@@ -57,6 +57,10 @@ export interface Status {
     frames_seen?: number
     violations?: Array<{ ts?: number; side?: string; kind?: string; detail?: string }>
   }
+  /** 桥角色网络条件注入（running 时存在）（T85） */
+  injection?: Record<string, number>
+  condition?: string
+  condition_active?: boolean
   schemaVersion?: number
 }
 
