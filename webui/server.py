@@ -536,6 +536,29 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
                     f'attachment; filename="iec104_{bridge.role}_points.csv"',
             })
 
+    async def api_export_report(request: web.Request) -> web.Response:
+        """会话测试报告（T75）：自包含单文件 HTML，浏览器打印即 PDF 归档.
+
+        query: ``?title=&notes=&limit=``（limit 为帧证据表最大行数，1~5000）。
+        数据源为当前缓冲（recent frames/events），不落盘、不改状态。
+        """
+        from .report import build_session_report_html
+
+        title = request.query.get("title") or ""
+        notes = request.query.get("notes") or ""
+        try:
+            limit = max(1, min(int(request.query.get("limit") or 300), 5000))
+        except ValueError:
+            return web.json_response({"ok": False, "error": "limit 必须是整数"}, status=400)
+        html_text = build_session_report_html(
+            bridge.role, bridge.status(),
+            bridge.recent("frame", 5000), bridge.recent("event", 2000),
+            title=title, notes=notes, max_frames=limit)
+        fname = time.strftime("iec104_report_%Y%m%d_%H%M%S.html")
+        return web.Response(
+            text=html_text, content_type="text/html",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
     async def api_export_session(request: web.Request) -> web.Response:
         return web.json_response(
             bridge.export_session_json(),
@@ -613,6 +636,43 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
             return web.json_response(
                 {"ok": False, "error": "仅 bridge 角色支持该操作"})
         return web.json_response(await bridge.stop_bridge())
+
+    async def api_loadtest_start(request: web.Request) -> web.Response:
+        """启动压测（T76；仅挂载了 LoadTestService 的 both 模式应用）.
+
+        body JSON: ``{duration_s?, events_per_s?}``。
+        """
+        loadtest = getattr(bridge, "loadtest", None)
+        if loadtest is None:
+            # 200 + ok:false（业务拒绝语义）：巡检门禁把 4xx/5xx 一律计失败请求
+            return web.json_response(
+                {"ok": False, "error": "压测仅支持单进程双角色（both）模式"})
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            return web.json_response({"ok": False, "error": "invalid body"}, status=400)
+        try:
+            duration_s = float(body.get("duration_s") or 60.0)
+            events_per_s = float(body.get("events_per_s") or 100.0)
+        except (TypeError, ValueError):
+            return web.json_response({"ok": False, "error": "参数必须是数字"}, status=400)
+        return web.json_response(await loadtest.start(duration_s, events_per_s))
+
+    async def api_loadtest_stop(request: web.Request) -> web.Response:
+        loadtest = getattr(bridge, "loadtest", None)
+        if loadtest is None:
+            return web.json_response(
+                {"ok": False, "error": "压测仅支持单进程双角色（both）模式"})
+        return web.json_response(await loadtest.stop())
+
+    async def api_loadtest_status(request: web.Request) -> web.Response:
+        loadtest = getattr(bridge, "loadtest", None)
+        if loadtest is None:
+            return web.json_response(
+                {"ok": False, "error": "压测仅支持单进程双角色（both）模式"})
+        return web.json_response({"ok": True, **loadtest.status()})
 
     async def api_points_batch(request: web.Request) -> web.Response:
         try:
@@ -1282,6 +1342,7 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
     app.router.add_post("/api/scd/preview", api_scd_preview)
     app.router.add_get("/api/export/points.csv", api_export_csv)
     app.router.add_get("/api/export/session.json", api_export_session)
+    app.router.add_get("/api/export/report.html", api_export_report)
     app.router.add_get("/api/logs", api_logs)
     app.router.add_get("/api/logs/export", api_logs_export)
     app.router.add_get("/api/diagnostics/export", api_diagnostics_export)
@@ -1313,6 +1374,11 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
         app.router.add_post("/api/simulation", api_network_simulation_set)
         app.router.add_post("/api/simulation/reset", api_network_simulation_reset)
         app.router.add_post("/api/simulation/disconnect", api_network_simulation_disconnect)
+    # 压测端点在所有角色应用上注册（契约单一表）；非 both 部署无编排服务，
+    # handler 返回 404 JSON（见 §2.4b 注）
+    app.router.add_post("/api/loadtest/start", api_loadtest_start)
+    app.router.add_post("/api/loadtest/stop", api_loadtest_stop)
+    app.router.add_get("/api/loadtest/status", api_loadtest_status)
     app.router.add_get("/api/multi/status", api_multi_status)
     app.router.add_get("/api/multi/summary", api_multi_summary)
     app.router.add_get("/ws", ws_feed)
@@ -1382,6 +1448,13 @@ async def _run_dual(host: str = "127.0.0.1", port: int = 8765,
     )
     master_bridge.ensure_demo_points()
     slave_bridge.ensure_demo_points()
+
+    # 压测编排（T76）：both 模式独有——双桥都在本进程，挂在主站桥上供路由发现
+    from .loadtest import LoadTestService
+
+    master_bridge.loadtest = LoadTestService(
+        slave_bridge, master_bridge,
+        publish=lambda kind, data: master_bridge.bus.publish(kind, data))
 
     schema_roles = ["master", "slave"]
     master_app = create_app(

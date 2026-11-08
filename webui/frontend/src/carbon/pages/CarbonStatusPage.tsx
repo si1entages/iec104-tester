@@ -1,3 +1,6 @@
+import { Button } from '@carbon/react'
+
+import { exportReportUrl } from '../../api/endpoints'
 import { usePointsQuery, useStatusQuery } from '../../api/queries'
 import { useT } from '../../i18n'
 import type { MessageKey } from '../../i18n'
@@ -18,8 +21,23 @@ export function CarbonStatusPage() {
     { term: 'conn.window', value: status?.window ?? '-' },
   ]
 
+  const exportReport = (): void => {
+    window.open(exportReportUrl(t('status.exportReportTitle', { role: status?.role ?? '-' })), '_blank')
+  }
+
   return (
     <div className="app-gap">
+      <div className="app-row" style={{ justifyContent: 'flex-end' }}>
+        <Button
+          kind="secondary"
+          size="sm"
+          data-testid="export-report"
+          onClick={exportReport}
+          title={t('status.exportReportHint')}
+        >
+          {t('status.exportReport')}
+        </Button>
+      </div>
       <div className="app-tiles">
         <Stat label={t('status.points')} value={String(status?.points ?? points.length)} unit={t('status.unit.points')} />
         <Stat label={t('status.tx')} value={String(status?.tx ?? 0)} unit={t('status.unit.frames')} />

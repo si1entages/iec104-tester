@@ -157,6 +157,7 @@
 | POST | `/api/points/import` | 原始文本；`?format=csv\|yaml\|json\|auto`（默认 `auto` 按内容嗅探） | `{ok, error?, ...}` |
 | POST | `/api/scd/preview` | SCD/CID/ICD 原始 XML 文本（IEC 61850-6 SCL）；`?common_addr=` 可选显式指定公共地址（缺省取出现最多的 casdu）、`?station=` 可选覆盖站名 | `{ok, yaml, station_name, common_addr, stats: Record<string,number>, warnings: string[]}` |
 | GET | `/api/export/points.csv` | — | `text/csv` 文本 |
+| GET | `/api/export/report.html` | `?title=&notes=&limit=`（limit=帧证据最大行数 1~5000） | `text/html` 自包含报告（attachment；浏览器打印即 PDF） |
 | GET | `/api/export/session.json` | — | `{role, status: Status, frames: WsEnvelope<'frame', Frame>[], events: WsEnvelope<'event', EngineEvent>[]}`（`recent()` 原样导出） |
 
 > 说明：`/api/points/import` 的 `auto` 嗅探顺序为 —— 以 `{` 开头 → `json`；
@@ -173,6 +174,18 @@
 > clients/resyncs/upstream_errors 计数，running 时存在）与 `bridge_cfg`
 > （当前桥配置）；帧观察复用 `/ws` 的 `frame` 事件与 `/api/capture/*`。
 > 桥应用**不注册**引擎专属路由（master/slave/multi 启停、点表写入、网络模拟）。
+
+### 2.4b 压测编排（端点全应用注册；未挂载编排服务的应用返回 `{ok: false, error: 压测仅支持单进程双角色（both）模式}`）
+
+| 方法 | 路径 | 请求 | 响应 |
+|------|------|------|------|
+| POST | `/api/loadtest/start` | `{duration_s?: number, events_per_s?: number}`（1~3600s / 1~10000 eps，缺省 60/100） | `{ok, error?}`（双端引擎未运行时业务拒绝） |
+| POST | `/api/loadtest/stop` | — | `{ok, summary?, error?}`（summary：events_sent/rx_frames/avg_eps/avg_fps/errors） |
+| GET | `/api/loadtest/status` | — | `{ok, running, elapsed_s, duration_s, target_eps, events_sent, rx_frames, i_frames, bytes_received, fps, errors, summary?}` |
+
+> 压测（T76）编排层不改引擎：驱动既有 `slave_set_yx/yc` 自发事件路径按目标速率
+> 循环触发，主站侧以 `ConnectionStats` 差分统计吞吐（验收口径：每秒 N 条遥测
+> 稳定上送不断链）。仅 both 模式挂载（双桥同进程）。
 
 > `/api/scd/preview`（T72）**无副作用**：不修改当前点表，返回可直接投给
 > `/api/points/import?format=yaml` 的点表 YAML 文本。映射规则

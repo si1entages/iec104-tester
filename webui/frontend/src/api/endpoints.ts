@@ -86,6 +86,8 @@ export const testReportUrl = (runId: string, name: string) =>
       .replace('{run_id}', encodeURIComponent(runId))
       .replace('{name}', encodeURIComponent(name)),
   )
+export const exportReportUrl = (title: string): string =>
+  `/api/export/report.html?${new URLSearchParams({ title }).toString()}`
 
 function logsQuery(params: LogQueryParams): Record<string, string | number | undefined> {
   return {
@@ -197,6 +199,12 @@ export const api = {
   exportSession: () => apiGet('/api/export/session.json', sessionExportSchema),
 
   // ── 透明桥（T74；仅 bridge 角色应用注册这两个端点）────────────────
+  loadtest: {
+    start: (body: { duration_s?: number; events_per_s?: number }) =>
+      apiPost('/api/loadtest/start', looseOkSchema, body),
+    stop: () => apiPost('/api/loadtest/stop', looseOkSchema),
+    status: () => apiGet('/api/loadtest/status', looseOkSchema),
+  },
   bridge: {
     start: (body: {
       listen_host?: string

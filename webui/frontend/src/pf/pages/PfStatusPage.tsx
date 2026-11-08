@@ -12,6 +12,9 @@ import {
   Title,
 } from '@patternfly/react-core'
 
+import { Button } from '@patternfly/react-core'
+
+import { exportReportUrl } from '../../api/endpoints'
 import { usePointsQuery, useStatusQuery } from '../../api/queries'
 import { useT } from '../../i18n'
 import type { MessageKey } from '../../i18n'
@@ -47,8 +50,20 @@ export function PfStatusPage() {
     { term: 'conn.window', value: status?.window ?? '-' },
   ]
 
+  const exportReport = (): void => {
+    window.open(exportReportUrl(t('status.exportReportTitle', { role: status?.role ?? '-' })), '_blank')
+  }
+
   return (
     <>
+      <PageSection variant="secondary">
+        <Flex justifyContent={{ default: 'justifyContentFlexEnd' }}>
+          <Button variant="secondary" data-testid="export-report"
+                  onClick={exportReport} title={t('status.exportReportHint')}>
+            {t('status.exportReport')}
+          </Button>
+        </Flex>
+      </PageSection>
       <PageSection variant="secondary">
         <Flex gap={{ default: 'gapMd' }} flexWrap={{ default: 'wrap' }}>
           <FlexItem flex={{ default: 'flex_1' }}>

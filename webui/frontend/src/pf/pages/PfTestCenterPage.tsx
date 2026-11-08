@@ -11,6 +11,7 @@ import {
 } from '@patternfly/react-core'
 import { useQueryClient } from '@tanstack/react-query'
 
+import { PfLoadTestCard } from '../components/PfLoadTestCard'
 import { api, testReportUrl } from '../../api/endpoints'
 import { queryKeys, useTestScriptsQuery, useTestStatusQuery } from '../../api/queries'
 import type { TestScriptInfo } from '../../api/types'
@@ -143,7 +144,9 @@ export function PfTestCenterPage() {
         </CardBody>
       </Card>
 
-      <Card>
+<PfLoadTestCard />
+
+            <Card>
         <CardTitle>{t('test.log')}</CardTitle>
         <CardBody>
           {run ? (

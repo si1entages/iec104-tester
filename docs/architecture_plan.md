@@ -428,7 +428,11 @@ graph TD
 
 | **T74** | 桥接 Web UI 页：bridge 角色接入 webui 三件套（2026-11-08） | ① `EngineBridge` 增 **bridge 角色**：无 104 引擎；`_BridgeRoleSessionStub` 占位会话把全部引擎操作统一拒绝为干净错误 dict（替代 20 处散落守卫，漏一处即 500）；`start_bridge/stop_bridge`（幂等 + 失败人话）；`status()` 携带 `bridge_stats/bridge_cfg`；`_on_raw_frame` 对桥角色 1Hz 节流广播状态刷新（帧流量大时不逐帧触发前端重拉）。② server：`POST /api/bridge/start|stop`（仅桥应用注册）；**引擎专属路由按角色跳过**（master/slave/multi 启停、点表写入、网络模拟在桥应用 404——纵深防御 + UI 不显示对应菜单）；`_run` 跳过桥角色演示点表。③ app.py：`--mode bridge` 默认 **Web 模式**（8767，`run_web` 端口表扩展），`--no-gui` 保留 T73 headless 形态；`--upstream-host/port` 经 `config.connection` 预填 UI 表单。④ 前端（Carbon/PF，经典版冻结不加）：`Role`/`PageKey` 增 bridge、`roleSchema`/`statusSchema` 契约扩展（编译期键集比对同步）、菜单按角色过滤（both/master/slave 部署不显示桥菜单）、**桥接观察页**：配置启停（`ok:false` 业务错误显形——端口被占不再静默）+ KvList 运行统计 + 复用 FrameViewer 的 WS 实时帧。⑤ e2e：第 4 个 webServer（8769，`SERVER_ENV` UTF-8）+ `bridge.spec.ts`——用例内 echo 上游 + `node:net` STARTDT_ACT 经桥回环探针 + 页面帧行/统计/停止断言；本机部分端口段 bind 10048（无监听进程仍失败）→ 测试监听口改 **OS 派空闲口**。验证：后端 15 项桥 Web pytest（status 形状/启停往返/echo 回环帧流/404 守卫/重复启动/非法端口）；UI 端到端全流程通过；后端全量与 e2e 全量随提交前运行回填 |
 
-> **累计统计**：T01~T49、T51~T74 **全部完成**；**待办 1**（T50 真机复测，暂缓待窗口；T39 第三方实测已回填）。
+| **T75** | 测试报告导出（2026-11-08） | 候选方向①。`webui/report.py` 纯函数生成器（零第三方依赖）：输入会话快照（status + bus 帧缓冲 + 事件缓冲），输出**自包含单文件 HTML**（内联 CSS、打印友好 @media print，浏览器「打印→另存 PDF」即可归档）；帧证据表逐帧解码 APCI/ASDU 摘要（脏帧回退 raw 绝不抛出），聚合方向/帧型/ASDU Top10 分布，事件计数与最近 50 条；备注/标题全程 html.escape。端点 `GET /api/export/report.html?title=&notes=&limit=`（attachment；limit 1~5000 防撑爆单文件）；契约 §2.4 表增行。UI：状态总览页「导出测试报告」按钮（Carbon/PF；`exportReportUrl` 构造器进 endpoints.ts 满足端点覆盖测试，标题 i18n 化满足巡检）。pytest 6 项（分节/解码/转义/限量/脏帧/自包含+端点） |
+
+| **T76** | 压测编排（吞吐验收）（2026-11-08） | 候选方向④。`webui/loadtest.py` `LoadTestService`：**编排层不改引擎**——驱动既有 `slave_set_yx/yc` 自发事件路径按目标速率（tick 均摊）循环触发（4:1 YC/YX 交替，值随机扰动），主站侧以 `ConnectionStats` **差分**统计（frames/i_frames/bytes/errors received）；时长/速率钳位（1~3600s / 1~10000 eps）；异常收敛为汇总不崩 UI。端点 `POST /api/loadtest/start|stop` + `GET /api/loadtest/status`：**全应用注册**（契约单一表），未挂载编排服务的应用返回 `{ok:false}` 业务拒绝（巡检把 4xx 一律计失败请求——首版 404 JSON 被审计抓住改为 200 业务拒绝）；仅 both 模式 `_run_dual` 挂载双桥编排（`master_bridge.loadtest` 属性注入）。UI：测试中心页压测卡（Carbon/PF；仅双角色部署显示；运行中 1s 轮询 refetchInterval 按 data 驱动）。pytest 3 项（真主站↔真子站 1.5s@80eps 吞吐差分端到端、未运行拒绝、重复启动幂等） |
+
+> **累计统计**：T01~T49、T51~T76 **全部完成**；**待办 1**（T50 真机复测，暂缓待窗口；T39 第三方实测已回填）。
 
 ---
 

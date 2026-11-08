@@ -7,6 +7,7 @@ import { api, testReportUrl } from '../../api/endpoints'
 import { queryKeys, useTestScriptsQuery, useTestStatusQuery } from '../../api/queries'
 import type { TestScriptInfo } from '../../api/types'
 import { useT } from '../../i18n'
+import { CarbonLoadTestCard } from '../components/CarbonLoadTestCard'
 import { Panel, TableFrame } from '../components/ui'
 
 const STATUS_TONE: Record<string, 'blue' | 'green' | 'red' | 'magenta' | 'gray'> = {
@@ -138,7 +139,9 @@ export function CarbonTestCenterPage() {
         <div style={{ fontSize: 12, opacity: 0.7, marginTop: 8 }}>{t('test.startHint')}</div>
       </Panel>
 
-      <Panel title={t('test.log')}>
+<CarbonLoadTestCard />
+
+            <Panel title={t('test.log')}>
         {run ? (
           <pre ref={logRef} className="mono app-log">
             {run.lines.join('\n')}
