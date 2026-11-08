@@ -3,7 +3,7 @@
  * 权威契约见该文档；本文件是它的 TypeScript 投影（T11）。
  */
 
-export type Role = 'master' | 'slave'
+export type Role = 'master' | 'slave' | 'bridge'
 
 /** 所有命令端点的通用响应；失败含 `error`。 */
 export interface OkResponse {
@@ -41,6 +41,15 @@ export interface Status {
   simulation_yc?: boolean
   /** 冗余双通道运行态（仅主站启用时存在）（E3） */
   redundancy?: RedundancyStatus
+  /** 桥角色运行统计（running 时存在）（T74） */
+  bridge_stats?: Record<string, number>
+  /** 桥角色当前配置（running 时存在） */
+  bridge_cfg?: {
+    listen_host?: string
+    listen_port?: number
+    upstream_host?: string
+    upstream_port?: number
+  }
   schemaVersion?: number
 }
 

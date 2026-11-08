@@ -99,6 +99,15 @@ export default defineConfig({
       timeout: 60_000,
     },
     {
+      // 桥模式（T74）：UI 上配置启停/观察；上游在用例内起 echo 服务
+      command: `${PY} app.py --mode bridge --no-browser --http-port ${PORT(8769)}`,
+      url: `http://127.0.0.1:${PORT(8769)}/api/status`,
+      cwd: ROOT,
+      env: SERVER_ENV,
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+    },
+    {
       // 视觉基线专用单角色服务：无引擎/无帧/无历史，页面内容可复现
       command: `${PY} app.py --mode master --no-browser --no-history --http-port ${PORT(8768)}`,
       url: `http://127.0.0.1:${PORT(8768)}/api/status`,

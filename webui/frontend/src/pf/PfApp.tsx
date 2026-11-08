@@ -26,6 +26,7 @@ import { useLocale, useT } from '../i18n'
 import type { MessageKey } from '../i18n'
 import { useUiStore } from '../store/uiStore'
 import type { PageKey } from '../store/uiStore'
+import { PfBridgePage } from './pages/PfBridgePage'
 import { PfCapturePage } from './pages/PfCapturePage'
 import { PfHistoryPage } from './pages/PfHistoryPage'
 import { PfLogsPage } from './pages/PfLogsPage'
@@ -43,6 +44,7 @@ const PAGES: { key: PageKey; labelKey: MessageKey }[] = [
   { key: 'status', labelKey: 'menu.status' },
   { key: 'logs', labelKey: 'menu.logs' },
   { key: 'history', labelKey: 'menu.history' },
+  { key: 'bridge', labelKey: 'menu.bridge' },
   { key: 'capture', labelKey: 'menu.capture' },
   { key: 'tests', labelKey: 'menu.tests' },
 ]
@@ -103,7 +105,9 @@ export function PfApp() {
   useEffect(() => {
     if (!status?.role || initialized.current) return
     initialized.current = true
-    if (!window.location.hash) go(status.role === 'master' ? 'master' : 'slave')
+    if (!window.location.hash)
+      go(status.role === 'bridge' ? 'bridge'
+        : status.role === 'master' ? 'master' : 'slave')
   }, [status?.role])
 
   // 单角色部署直接采用唯一角色；合并部署按当前工作台切换 API/WS 前缀（/api ↔ /slave/api）
@@ -162,6 +166,10 @@ export function PfApp() {
         <Nav aria-label={t('menu.master')}>
           <NavList>
             {PAGES.filter(({ key }) => {
+              if (key === 'bridge') {
+                const rs = availableRoles.length > 0 ? availableRoles : status?.role ? [status.role] : []
+                return rs.includes('bridge')
+              }
               if (key !== 'master' && key !== 'slave') return true
               const roles = availableRoles.length > 0 ? availableRoles : status?.role ? [status.role] : []
               return roles.includes(key)
@@ -194,6 +202,7 @@ export function PfApp() {
   else if (page === 'capture') content = <PfCapturePage />
   else if (page === 'tests') content = <PfTestCenterPage />
   else if (page === 'multi') content = <PfMultiPage />
+  else if (page === 'bridge') content = <PfBridgePage />
   else content = <PfPlaceholder />
 
   const hasBanner = Boolean(schemaWarning) || backpressure || droppedFrames > 0

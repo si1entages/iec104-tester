@@ -26,7 +26,7 @@ from pathlib import Path
 from core.version import __version__
 
 # Web UI 默认 HTTP 端口（按角色区分，避免主站/子站同时启动时端口冲突）
-_DEFAULT_HTTP_PORT = {"slave": 8766, "master": 8765}
+_DEFAULT_HTTP_PORT = {"slave": 8766, "master": 8765, "bridge": 8767}
 
 # 打开浏览器前的端口探测参数
 _PROBE_INTERVAL_S = 0.05
@@ -560,11 +560,11 @@ def cli(default_role: str | None = None) -> int:
     logger = logging.getLogger("iec104")
     logger.info("Starting IEC 60870-5-104 Tester...")
 
-    # 透明桥模式（T73）：headless 旁路观察器，不加载点表/历史库/Web UI，
-    # 也不消费 AppConfig 语义（桥两侧为既有明文/TLS 链路的透传，TLS 桥接为后续项）。
-    if args.mode == "bridge":
+    # 透明桥（T73/T74）：--no-gui 时 headless 旁路观察器（不加载点表/历史库/Web UI）；
+    # 否则 Web 桥模式（role="bridge"），桥在 UI 上配置启停（T74）。
+    if args.mode == "bridge" and args.no_gui:
         if not args.upstream_host:
-            print("--mode bridge 需要 --upstream-host（真实子站地址）", flush=True)
+            print("--mode bridge --no-gui 需要 --upstream-host（真实子站地址）", flush=True)
             return 2
         return _run_bridge(args, logger)
 
@@ -587,6 +587,10 @@ def cli(default_role: str | None = None) -> int:
         config.connection.port = args.port
     if args.point_table:
         config.point_table.file = args.point_table
+    if args.upstream_host:
+        config.connection.host = args.upstream_host
+    if args.upstream_port:
+        config.connection.port = args.upstream_port
 
     # TLS 命令行覆盖（T20）。优先级：命令行 > 配置文件。
     if args.tls:
@@ -643,7 +647,7 @@ def cli(default_role: str | None = None) -> int:
     # 历史数据库（T17：默认开启，落盘到 <数据目录>/history_<role>.db）
     # 优先级：--no-history > --history-db > config.history.enabled
     mode = args.mode or config.mode
-    role = "slave" if mode == "slave" else "master"
+    role = ("slave" if mode == "slave" else "bridge" if mode == "bridge" else "master")
     roles = ["master", "slave"] if mode == "both" else [role]
     history_db = None
     history_dbs: dict = {}

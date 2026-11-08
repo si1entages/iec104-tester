@@ -14,6 +14,7 @@ export const MASTER = `http://127.0.0.1:${8765 + PORT_OFFSET}`
 export const SLAVE = `http://127.0.0.1:${8766 + PORT_OFFSET}`
 /** 合并模式：一个进程、一个端口，同时提供主站 + /slave 子站 */
 export const COMBINED = `http://127.0.0.1:${8767 + PORT_OFFSET}`
+export const BRIDGE = `http://127.0.0.1:${8769 + PORT_OFFSET}`
 /** 视觉基线专用：单角色主站、无引擎/无帧/无历史，内容可复现 */
 export const VISUAL = `http://127.0.0.1:${8768 + PORT_OFFSET}`
 export const IEC_PORT = 2404

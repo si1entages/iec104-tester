@@ -579,6 +579,41 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
             "warnings": result.warnings,
         })
 
+    async def api_bridge_start(request: web.Request) -> web.Response:
+        """启动透明桥（T74）.
+
+        body JSON: ``{listen_host?, listen_port?, upstream_host?, upstream_port?}``；
+        缺省回填 0.0.0.0:2404 与 status 的 host/port（CLI ``--upstream-*`` 预填）。
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            return web.json_response({"ok": False, "error": "invalid body"}, status=400)
+        listen_host = str(body.get("listen_host") or "0.0.0.0")
+        if bridge.role != "bridge":
+            return web.json_response(
+                {"ok": False, "error": "仅 bridge 角色支持该操作"})
+        upstream_host = str(body.get("upstream_host")
+                            or bridge.config.connection.host or "127.0.0.1")
+        try:
+            listen_port = int(body.get("listen_port") or 2404)
+            upstream_port = int(body.get("upstream_port")
+                                or bridge.config.connection.port or 2404)
+        except (TypeError, ValueError):
+            return web.json_response({"ok": False, "error": "端口必须是整数"}, status=400)
+        if not (0 < listen_port < 65536 and 0 < upstream_port < 65536):
+            return web.json_response({"ok": False, "error": "端口超出范围 1-65535"}, status=400)
+        return web.json_response(await bridge.start_bridge(
+            listen_host, listen_port, upstream_host, upstream_port))
+
+    async def api_bridge_stop(request: web.Request) -> web.Response:
+        if bridge.role != "bridge":
+            return web.json_response(
+                {"ok": False, "error": "仅 bridge 角色支持该操作"})
+        return web.json_response(await bridge.stop_bridge())
+
     async def api_points_batch(request: web.Request) -> web.Response:
         try:
             body = await request.json()
@@ -1205,26 +1240,45 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
     app.router.add_get("/api/points", api_points)
     app.router.add_get("/api/recent", api_recent)
     app.router.add_get("/api/frames/decode", api_frames_decode)
-    app.router.add_post("/api/master/start", api_master_start)
-    app.router.add_post("/api/master/stop", api_master_stop)
-    app.router.add_post("/api/master/gi", api_gi)
-    app.router.add_post("/api/master/yk", api_yk)
-    app.router.add_post("/api/master/setpoint", api_sp)
-    app.router.add_post("/api/master/step", api_step)
-    app.router.add_post("/api/master/bitstring", api_bitstring)
-    app.router.add_post("/api/master/delay", api_delay)
-    app.router.add_post("/api/master/clock", api_clock)
-    app.router.add_post("/api/master/ci", api_ci)
-    app.router.add_post("/api/master/reset", api_reset)
-    app.router.add_post("/api/master/test", api_test)
-    app.router.add_post("/api/master/read", api_read)
-    app.router.add_post("/api/master/param", api_param)
-    app.router.add_get("/api/master/param_state", api_param_state)
-    app.router.add_get("/api/master/params", api_params)
-    app.router.add_post("/api/master/file", api_file)
+    # 桥启停端点在所有角色应用上注册（契约单一表）；非 bridge 角色在
+    # handler 层业务拒绝。桥应用则跳过引擎专属路由（见 else 分支注释）。
+    app.router.add_post("/api/bridge/start", api_bridge_start)
+    app.router.add_post("/api/bridge/stop", api_bridge_stop)
+    if bridge.role != "bridge":
+        app.router.add_post("/api/master/start", api_master_start)
+        app.router.add_post("/api/master/stop", api_master_stop)
+        app.router.add_post("/api/master/gi", api_gi)
+        app.router.add_post("/api/master/yk", api_yk)
+        app.router.add_post("/api/master/setpoint", api_sp)
+        app.router.add_post("/api/master/step", api_step)
+        app.router.add_post("/api/master/bitstring", api_bitstring)
+        app.router.add_post("/api/master/delay", api_delay)
+        app.router.add_post("/api/master/clock", api_clock)
+        app.router.add_post("/api/master/ci", api_ci)
+        app.router.add_post("/api/master/reset", api_reset)
+        app.router.add_post("/api/master/test", api_test)
+        app.router.add_post("/api/master/read", api_read)
+        app.router.add_post("/api/master/param", api_param)
+        app.router.add_get("/api/master/param_state", api_param_state)
+        app.router.add_get("/api/master/params", api_params)
+        app.router.add_post("/api/master/file", api_file)
+        app.router.add_post("/api/points/yaml", api_points_yaml_put)
+        app.router.add_post("/api/points/import", api_points_import)
+        app.router.add_post("/api/points/batch", api_points_batch)
+        app.router.add_post("/api/slave/start", api_slave_start)
+        app.router.add_post("/api/slave/stop", api_slave_stop)
+        app.router.add_post("/api/slave/yx", api_slave_yx)
+        app.router.add_post("/api/slave/yc", api_slave_yc)
+        app.router.add_post("/api/slave/ym", api_slave_ym)
+        app.router.add_post("/api/slave/step", api_slave_step)
+        app.router.add_post("/api/slave/ep", api_slave_ep)
+        app.router.add_post("/api/slave/ps", api_slave_ps)
+        app.router.add_post("/api/slave/response", api_slave_response)
+        app.router.add_get("/api/slave/response", api_slave_response_get)
+        app.router.add_post("/api/slave/sim", api_slave_sim)
+        app.router.add_post("/api/multi/start", api_multi_start)
+        app.router.add_post("/api/multi/stop", api_multi_stop)
     app.router.add_get("/api/points/yaml", api_points_yaml_get)
-    app.router.add_post("/api/points/yaml", api_points_yaml_put)
-    app.router.add_post("/api/points/import", api_points_import)
     app.router.add_post("/api/scd/preview", api_scd_preview)
     app.router.add_get("/api/export/points.csv", api_export_csv)
     app.router.add_get("/api/export/session.json", api_export_session)
@@ -1254,24 +1308,11 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
     app.router.add_post("/api/capture/playback/stop", api_capture_playback_stop)
     app.router.add_post("/api/capture/playback/pause", api_capture_playback_pause)
     app.router.add_post("/api/capture/step", api_capture_step)
-    app.router.add_get("/api/simulation", api_network_simulation_get)
-    app.router.add_post("/api/simulation", api_network_simulation_set)
-    app.router.add_post("/api/simulation/reset", api_network_simulation_reset)
-    app.router.add_post("/api/simulation/disconnect", api_network_simulation_disconnect)
-    app.router.add_post("/api/points/batch", api_points_batch)
-    app.router.add_post("/api/slave/start", api_slave_start)
-    app.router.add_post("/api/slave/stop", api_slave_stop)
-    app.router.add_post("/api/slave/yx", api_slave_yx)
-    app.router.add_post("/api/slave/yc", api_slave_yc)
-    app.router.add_post("/api/slave/ym", api_slave_ym)
-    app.router.add_post("/api/slave/step", api_slave_step)
-    app.router.add_post("/api/slave/ep", api_slave_ep)
-    app.router.add_post("/api/slave/ps", api_slave_ps)
-    app.router.add_post("/api/slave/response", api_slave_response)
-    app.router.add_get("/api/slave/response", api_slave_response_get)
-    app.router.add_post("/api/slave/sim", api_slave_sim)
-    app.router.add_post("/api/multi/start", api_multi_start)
-    app.router.add_post("/api/multi/stop", api_multi_stop)
+    if bridge.role != "bridge":
+        app.router.add_get("/api/simulation", api_network_simulation_get)
+        app.router.add_post("/api/simulation", api_network_simulation_set)
+        app.router.add_post("/api/simulation/reset", api_network_simulation_reset)
+        app.router.add_post("/api/simulation/disconnect", api_network_simulation_disconnect)
     app.router.add_get("/api/multi/status", api_multi_status)
     app.router.add_get("/api/multi/summary", api_multi_summary)
     app.router.add_get("/ws", ws_feed)
@@ -1295,7 +1336,8 @@ async def _run(role: str, host: str = "127.0.0.1", port: int = 8765,
             "或改回 --http-host 127.0.0.1。", host)
     bridge = EngineBridge(role, point_table=point_table, connection=connection,
                           history_db=history_db, app_config=app_config)
-    bridge.ensure_demo_points()
+    if role != "bridge":
+        bridge.ensure_demo_points()
     app = create_app(bridge, auth_token=auth_token)
     runner = web.AppRunner(app)
     await runner.setup()

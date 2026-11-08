@@ -426,7 +426,9 @@ graph TD
 
 | **T73** | 透明桥/旁路监听：真实主站 ↔ 测试器 ↔ 真实子站（2026-11-08） | 用户选定迭代方向③。① **内核** `core/engine/tcp_bridge.py`：`TcpBridge`（asyncio）字节级透传——转发先行、解析纯旁路（观察者异常绝不影响数据路径）；双向独立 APCI 切帧（`FrameSplitter`：半包跨段缓存、脏字节丢 1 字节重同步并计数）；方向约定 `tx`=主站→子站/`rx`=子站→主站，回调与引擎 `on_frame(data,direction,client_id)` 同签名（直挂 capture/WS）；多客户端各占独立上游连接，上游不可达即关客户端由主站按既有逻辑重连；`describe_frame` 单帧摘要（APCI + ASDU 类型/CA/COT，解析失败回退 raw）。② **CLI** `--mode bridge`（headless 现场可用）：`--listen-host/port` + `--upstream-host/port` + `--capture-file`（复用 `PacketRecorder`，支持 .json/.pcap）；帧日志逐帧打点；绑定失败给人话一行（exit 1）而非 traceback。③ Web UI 桥接页拆至 **T74**（需角色管道改造）。验证：pytest **11 项**（切帧器单元 6 + 真主站↔桥↔真子站全链路集成：STARTDT/GI 往返、STARTDT_CON 透传内容校验、capture 落盘链路）+ CLI 实弹（真子站+桥+真主站，帧日志与录制文件产物核对）；后端全量 **1589 passed**、e2e **44 passed**（app.py 模式改动回归）、ruff 通过 |
 
-> **累计统计**：T01~T49、T51~T73 **全部完成**；**待办 2**（T50 真机复测、T74 桥接 Web UI 页，均待窗口/排期；T39 第三方实测已回填）。
+| **T74** | 桥接 Web UI 页：bridge 角色接入 webui 三件套（2026-11-08） | ① `EngineBridge` 增 **bridge 角色**：无 104 引擎；`_BridgeRoleSessionStub` 占位会话把全部引擎操作统一拒绝为干净错误 dict（替代 20 处散落守卫，漏一处即 500）；`start_bridge/stop_bridge`（幂等 + 失败人话）；`status()` 携带 `bridge_stats/bridge_cfg`；`_on_raw_frame` 对桥角色 1Hz 节流广播状态刷新（帧流量大时不逐帧触发前端重拉）。② server：`POST /api/bridge/start|stop`（仅桥应用注册）；**引擎专属路由按角色跳过**（master/slave/multi 启停、点表写入、网络模拟在桥应用 404——纵深防御 + UI 不显示对应菜单）；`_run` 跳过桥角色演示点表。③ app.py：`--mode bridge` 默认 **Web 模式**（8767，`run_web` 端口表扩展），`--no-gui` 保留 T73 headless 形态；`--upstream-host/port` 经 `config.connection` 预填 UI 表单。④ 前端（Carbon/PF，经典版冻结不加）：`Role`/`PageKey` 增 bridge、`roleSchema`/`statusSchema` 契约扩展（编译期键集比对同步）、菜单按角色过滤（both/master/slave 部署不显示桥菜单）、**桥接观察页**：配置启停（`ok:false` 业务错误显形——端口被占不再静默）+ KvList 运行统计 + 复用 FrameViewer 的 WS 实时帧。⑤ e2e：第 4 个 webServer（8769，`SERVER_ENV` UTF-8）+ `bridge.spec.ts`——用例内 echo 上游 + `node:net` STARTDT_ACT 经桥回环探针 + 页面帧行/统计/停止断言；本机部分端口段 bind 10048（无监听进程仍失败）→ 测试监听口改 **OS 派空闲口**。验证：后端 15 项桥 Web pytest（status 形状/启停往返/echo 回环帧流/404 守卫/重复启动/非法端口）；UI 端到端全流程通过；后端全量与 e2e 全量随提交前运行回填 |
+
+> **累计统计**：T01~T49、T51~T74 **全部完成**；**待办 1**（T50 真机复测，暂缓待窗口；T39 第三方实测已回填）。
 
 ---
 

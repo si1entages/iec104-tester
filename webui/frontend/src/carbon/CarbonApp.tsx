@@ -19,6 +19,7 @@ import { useLocale, useT } from '../i18n'
 import type { MessageKey } from '../i18n'
 import { useUiStore } from '../store/uiStore'
 import type { PageKey } from '../store/uiStore'
+import { CarbonBridgePage } from './pages/CarbonBridgePage'
 import { CarbonCapturePage } from './pages/CarbonCapturePage'
 import { CarbonHistoryPage } from './pages/CarbonHistoryPage'
 import { CarbonLogsPage } from './pages/CarbonLogsPage'
@@ -35,6 +36,7 @@ const PAGES: { key: PageKey; labelKey: MessageKey }[] = [
   { key: 'status', labelKey: 'menu.status' },
   { key: 'logs', labelKey: 'menu.logs' },
   { key: 'history', labelKey: 'menu.history' },
+  { key: 'bridge', labelKey: 'menu.bridge' },
   { key: 'capture', labelKey: 'menu.capture' },
   { key: 'tests', labelKey: 'menu.tests' },
 ]
@@ -97,7 +99,9 @@ export function CarbonApp() {
   useEffect(() => {
     if (!status?.role || initialized.current) return
     initialized.current = true
-    if (!window.location.hash) go(status.role === 'master' ? 'master' : 'slave')
+    if (!window.location.hash)
+      go(status.role === 'bridge' ? 'bridge'
+        : status.role === 'master' ? 'master' : 'slave')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status?.role])
 
@@ -139,6 +143,10 @@ export function CarbonApp() {
     <SideNav aria-label={t('menu.master')} expanded isChildOfHeader={false} className="app-sidenav">
       <SideNavItems>
         {PAGES.filter(({ key }) => {
+          if (key === 'bridge') {
+            const rs = availableRoles.length > 0 ? availableRoles : status?.role ? [status.role] : []
+            return rs.includes('bridge')
+          }
           if (key !== 'master' && key !== 'slave') return true
           const roles = availableRoles.length > 0 ? availableRoles : status?.role ? [status.role] : []
           return roles.includes(key)
@@ -168,6 +176,7 @@ export function CarbonApp() {
   else if (page === 'capture') content = <CarbonCapturePage />
   else if (page === 'tests') content = <CarbonTestCenterPage />
   else if (page === 'multi') content = <CarbonMultiPage />
+  else if (page === 'bridge') content = <CarbonBridgePage />
   else content = null
 
   const hasBanner = Boolean(schemaWarning) || backpressure || droppedFrames > 0

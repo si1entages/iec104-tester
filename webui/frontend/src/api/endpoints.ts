@@ -196,6 +196,17 @@ export const api = {
   exportPointsCsv: () => apiGetText(POINTS_CSV_URL),
   exportSession: () => apiGet('/api/export/session.json', sessionExportSchema),
 
+  // ── 透明桥（T74；仅 bridge 角色应用注册这两个端点）────────────────
+  bridge: {
+    start: (body: {
+      listen_host?: string
+      listen_port?: number
+      upstream_host?: string
+      upstream_port?: number
+    }) => apiPost('/api/bridge/start', looseOkSchema, body),
+    stop: () => apiPost('/api/bridge/stop', looseOkSchema),
+  },
+
   // ── 日志 ─────────────────────────────────────────────────────────────
   logs: (params: LogQueryParams = {}) =>
     apiGet('/api/logs', logsResponseSchema, logsQuery(params)),

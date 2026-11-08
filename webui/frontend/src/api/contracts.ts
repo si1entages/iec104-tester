@@ -94,7 +94,7 @@ export const looseOkSchema = looseObj({ ok: bool(), error: optional(str()) })
 
 // ── 状态与点表 ─────────────────────────────────────────────────────────
 
-const roleSchema = enumOf('master', 'slave')
+const roleSchema = enumOf('master', 'slave', 'bridge')
 
 const redundancyStatusSchema = obj({
   enabled: bool(),
@@ -130,6 +130,14 @@ export const statusSchema = obj({
   simulation_yc: optional(bool()),
   redundancy: optional(redundancyStatusSchema),
   schemaVersion: optional(num()),
+  // 桥角色（T74）：running 时存在
+  bridge_stats: optional(dict(num())),
+  bridge_cfg: optional(obj({
+    listen_host: optional(str()),
+    listen_port: optional(num()),
+    upstream_host: optional(str()),
+    upstream_port: optional(num()),
+  })),
 })
 
 export const pointSchema = obj({

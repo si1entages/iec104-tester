@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
 from core.config import AppConfig
 from core.data.point_table import PointTable
+from core.engine.tcp_bridge import BridgeConfig, TcpBridge
 from core.logging_manager import LogManager
 
 from .capture import CaptureService
@@ -18,6 +20,39 @@ from .testcenter import TestCenterService
 
 logger = logging.getLogger("iec104.webui")
 
+# 桥角色统计刷新节流：帧流量大时不能每帧都触发前端状态重拉
+_BRIDGE_STATS_TICK_S = 1.0
+
+
+class _BridgeRoleSessionStub:
+    """bridge 角色的会话占位.
+
+    桥没有 104 引擎/状态机，master/slave 的全部会话操作在此角色上一律
+    拒绝——返回 ``{"ok": False, "error": ...}``（异步）或错误 dict（同步），
+    与引擎未启动时的错误形状一致。路由层（create_app）同时跳过引擎专属
+    路由，正常 UI 流量到不了这里；占位是纵深防御，防直接 API 调用。
+    """
+
+    engine = None
+
+    async def shutdown(self) -> None:  # 与 EngineSession.shutdown 同签名
+        return None
+
+    def status_fields(self) -> dict:
+        return {"started": False, "running": False}
+
+    def get_response(self) -> dict:
+        return {"ok": False, "error": "bridge 角色不支持应答行为"}
+
+    def network_simulation_status(self) -> dict:
+        return {"ok": False, "error": "bridge 角色不支持网络模拟"}
+
+    def __getattr__(self, name: str):
+        async def _unsupported(*args, **kwargs) -> dict:
+            return {"ok": False, "error": "bridge 角色不支持该引擎操作"}
+
+        return _unsupported
+
 
 class EngineBridge:
     """在独立 asyncio 循环上运行主站或子站引擎，并向 UI 推送事件."""
@@ -25,7 +60,7 @@ class EngineBridge:
     def __init__(self, role: str = "master", point_table: PointTable | None = None,
                  connection: dict | None = None, history_db=None,
                  app_config: AppConfig | None = None):
-        assert role in ("master", "slave")
+        assert role in ("master", "slave", "bridge")
         self.role = role
         # D3 接线：CLI/`--config` 解析出的 AppConfig 经 app.py → run_server 传入。
         # 未传入（既有测试/契约自检路径）时保持原有行为：新建默认配置。
@@ -49,11 +84,18 @@ class EngineBridge:
         self.bus = EventBus()
         self.points = PointService(point_table)
         self.point_table: PointTable = self.points.table
-        self.session = EngineSession(
-            role, self.config,
-            on_event=lambda etype, data: self.bus.publish("event", {"type": etype, "data": data}),
-            on_frame=self._on_raw_frame,
-        )
+        if role == "bridge":
+            # 桥角色：无 104 引擎；TcpBridge 在 start_bridge 时创建
+            self.session: EngineSession | _BridgeRoleSessionStub = _BridgeRoleSessionStub()
+            self.tcp_bridge: TcpBridge | None = None
+            self._bridge_cfg: dict[str, Any] = {}
+            self._stats_tick_at = 0.0
+        else:
+            self.session = EngineSession(
+                role, self.config,
+                on_event=lambda etype, data: self.bus.publish("event", {"type": etype, "data": data}),
+                on_frame=self._on_raw_frame,
+            )
         self.loop = None
         self._status: dict[str, Any] = {"role": role, "running": False}
 
@@ -141,6 +183,12 @@ class EngineBridge:
                 self._history.record_frame(direction, data, client_id=client_id)
             except Exception as e:  # noqa: BLE001 — 历史库不得影响报文主路径
                 logger.warning(f"history record_frame failed: {e}")
+        if self.role == "bridge":
+            # 桥角色：帧流量可能很大，节流广播状态刷新（前端重拉 stats）
+            now = time.monotonic()
+            if now - self._stats_tick_at >= _BRIDGE_STATS_TICK_S:
+                self._stats_tick_at = now
+                self.bus.publish("event", {"type": "ui", "data": {"msg": "bridge-stats"}})
 
     def ensure_demo_points(self) -> None:
         """点表为空时生成演示点表.
@@ -160,7 +208,14 @@ class EngineBridge:
 
     def status(self) -> dict:
         st = dict(self._status)
-        st.update(self.session.status_fields())
+        if self.role == "bridge":
+            st["started"] = self.tcp_bridge is not None
+            st["running"] = self.tcp_bridge is not None
+            if self.tcp_bridge is not None:
+                st["bridge_stats"] = self.tcp_bridge.stats.as_dict()
+                st["bridge_cfg"] = dict(self._bridge_cfg)
+        else:
+            st.update(self.session.status_fields())
         # 引擎未启动时也必须给出配置里的连接参数——否则前端输入框回落到
         # HTML 默认值 2404，用户点「启动监听」会把子站悄悄搬到另一个端口，
         # 主站（按原端口重连）就永远连不上。
@@ -227,6 +282,46 @@ class EngineBridge:
         r = await self.session.stop_slave()
         self._notify_ui("已停止监听")
         return r
+
+    # ── 透明桥（T73/T74）──────────────────────────────────────────
+
+    async def start_bridge(self, listen_host: str, listen_port: int,
+                           upstream_host: str, upstream_port: int) -> dict:
+        """启动透明桥（幂等保护：运行中再启动返回错误，与引擎行为一致）."""
+        if self.tcp_bridge is not None:
+            self._notify_ui("桥已在运行")
+            return {"ok": False, "error": "bridge already running"}
+        bridge = TcpBridge(
+            BridgeConfig(listen_host=listen_host, listen_port=listen_port,
+                         upstream_host=upstream_host, upstream_port=upstream_port),
+            on_frame=self._on_raw_frame,
+        )
+        try:
+            await bridge.start()
+        except OSError as e:
+            self._notify_ui(f"桥接启动失败: {e}")
+            return {"ok": False, "error": f"监听 {listen_host}:{listen_port} 失败: {e}"}
+        self.tcp_bridge = bridge
+        self._bridge_cfg = {
+            "listen_host": listen_host, "listen_port": listen_port,
+            "upstream_host": upstream_host, "upstream_port": upstream_port,
+        }
+        self._status.update({"running": True, "host": listen_host, "port": listen_port})
+        self._notify_ui(
+            f"桥接 {listen_host}:{listen_port} → {upstream_host}:{upstream_port}")
+        return {"ok": True}
+
+    async def stop_bridge(self) -> dict:
+        """停止透明桥（未运行时也广播，让页面状态对齐——与 stop_master 同策略）."""
+        if self.tcp_bridge is None:
+            self._notify_ui("桥未运行")
+            return {"ok": True}
+        await self.tcp_bridge.stop()
+        self.tcp_bridge = None
+        self._bridge_cfg = {}
+        self._status["running"] = False
+        self._notify_ui("桥已停止")
+        return {"ok": True}
 
     async def general_interrogation(self, qoi: int = 20) -> dict:
         return await self._cmd(self.session.general_interrogation(qoi))
@@ -388,6 +483,13 @@ class EngineBridge:
                     self.captures.stop()
                 except Exception as e:  # noqa: BLE001
                     logger.warning("capture stop on shutdown: %s", e)
+            # 0.5) 透明桥运行中则停止（T74；幂等）
+            if getattr(self, "tcp_bridge", None) is not None:
+                try:
+                    await self.tcp_bridge.stop()
+                    self.tcp_bridge = None
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("tcp bridge stop on shutdown: %s", e)
             # 1) 测试中心子进程（若在运行）
             try:
                 await self.testcenter.shutdown()

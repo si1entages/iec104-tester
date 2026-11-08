@@ -162,6 +162,18 @@
 > 说明：`/api/points/import` 的 `auto` 嗅探顺序为 —— 以 `{` 开头 → `json`；
 > 首行含 `,` 且含 `type` → `csv`；否则 → `yaml`。
 >
+### 2.4a 透明桥（所有角色应用均注册；非 bridge 角色调用人话业务拒绝 `{ok: false, error: 仅 bridge 角色支持该操作}`）
+
+| 方法 | 路径 | 请求 | 响应 |
+|------|------|------|------|
+| POST | `/api/bridge/start` | `{listen_host?, listen_port?, upstream_host?, upstream_port?}`（缺省回填 `0.0.0.0:2404` 与 status 的 host/port） | `{ok, error?}` |
+| POST | `/api/bridge/stop` | — | `{ok, error?}` |
+
+> 桥角色（T74）的 `GET /api/status` 额外携带 `bridge_stats`（frames/bytes/
+> clients/resyncs/upstream_errors 计数，running 时存在）与 `bridge_cfg`
+> （当前桥配置）；帧观察复用 `/ws` 的 `frame` 事件与 `/api/capture/*`。
+> 桥应用**不注册**引擎专属路由（master/slave/multi 启停、点表写入、网络模拟）。
+
 > `/api/scd/preview`（T72）**无副作用**：不修改当前点表，返回可直接投给
 > `/api/points/import?format=yaml` 的点表 YAML 文本。映射规则
 > （IEC 61850-80-1 `Private/Address(casdu,ioa,ti)` 精确映射优先，
