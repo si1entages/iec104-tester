@@ -550,10 +550,13 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
             limit = max(1, min(int(request.query.get("limit") or 300), 5000))
         except ValueError:
             return web.json_response({"ok": False, "error": "limit 必须是整数"}, status=400)
+        lt = getattr(bridge, "loadtest", None)
+        lt_summary = lt.last_summary() if lt is not None else None
         html_text = build_session_report_html(
             bridge.role, bridge.status(),
             bridge.recent("frame", 5000), bridge.recent("event", 2000),
-            title=title, notes=notes, max_frames=limit)
+            title=title, notes=notes, max_frames=limit,
+            loadtest_summary=lt_summary)
         fname = time.strftime("iec104_report_%Y%m%d_%H%M%S.html")
         return web.Response(
             text=html_text, content_type="text/html",

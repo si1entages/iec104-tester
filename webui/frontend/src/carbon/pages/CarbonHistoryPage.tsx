@@ -8,13 +8,14 @@ import { useHistoryDataQuery, useHistoryFramesQuery, useHistoryStatsQuery } from
 import type { HistoryDataRecord, HistoryFrameRecord } from '../../api/types'
 import { useLocale, useT } from '../../i18n'
 import { formatDate, formatDateTime, localeTag } from '../../lib/format'
+import { CarbonHistoryCurve } from '../components/CarbonHistoryCurve'
 import { CarbonQualityTags } from '../components/CarbonQualityTags'
 import { Panel, Pager, TableFrame } from '../components/ui'
 
 const PAGE_SIZE = 50
 const DEFAULT_LIMIT = 1000
 
-type TabKey = 'data' | 'frames'
+type TabKey = 'data' | 'frames' | 'curve'
 
 function formatBytes(n: number): string {
   if (!n) return '0 B'
@@ -139,7 +140,9 @@ export function CarbonHistoryPage() {
               ) : null}
             </>
           ) : null}
-          <Tag size="sm" type="blue">{t('history.view', { n: rows.length })}</Tag>
+          {tab !== 'curve' ? (
+            <Tag size="sm" type="blue">{t('history.view', { n: rows.length })}</Tag>
+          ) : null}
         </span>
       }
     >
@@ -170,6 +173,15 @@ export function CarbonHistoryPage() {
           }}
         >
           {t('history.tab.frames')}
+        </Button>
+        <Button
+          kind={tab === 'curve' ? 'primary' : 'secondary'}
+          onClick={() => {
+            setTab('curve')
+            setPage(1)
+          }}
+        >
+          {t('history.tab.curve')}
         </Button>
         <div style={{ width: 210, minWidth: 210 }}>
           <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 4 }}>{t('history.start')}</div>
@@ -255,11 +267,18 @@ export function CarbonHistoryPage() {
         <Button kind="secondary" onClick={reset}>
           {t('common.reset')}
         </Button>
-        <Button kind="ghost" onClick={() => window.open(exportUrl, '_blank')}>
-          {t('history.export')}
-        </Button>
+        {tab !== 'curve' ? (
+          <Button kind="ghost" onClick={() => window.open(exportUrl, '_blank')}>
+            {t('history.export')}
+          </Button>
+        ) : null}
       </div>
 
+      {tab === 'curve' ? (
+        <div style={{ marginTop: 12 }}>
+          <CarbonHistoryCurve start={applied.start} end={applied.end} />
+        </div>
+      ) : (
       <div style={{ marginTop: 12 }}>
         <TableFrame>
           <table className="cds--data-table cds--data-table--md" style={{ width: '100%', tableLayout: 'fixed' }}>
@@ -320,10 +339,13 @@ export function CarbonHistoryPage() {
           </table>
         </TableFrame>
       </div>
+      )}
 
-      <div style={{ marginTop: 8 }}>
-        <Pager page={currentPage} pageSize={PAGE_SIZE} totalItems={rows.length} onChange={setPage} />
-      </div>
+      {tab !== 'curve' ? (
+        <div style={{ marginTop: 8 }}>
+          <Pager page={currentPage} pageSize={PAGE_SIZE} totalItems={rows.length} onChange={setPage} />
+        </div>
+      ) : null}
     </Panel>
   )
 }

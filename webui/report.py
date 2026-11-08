@@ -78,6 +78,7 @@ def build_session_report_html(
     title: str = "",
     notes: str = "",
     max_frames: int = 300,
+    loadtest_summary: dict | None = None,
 ) -> str:
     """生成自包含 HTML 测试报告.
 
@@ -131,6 +132,15 @@ def build_session_report_html(
                      or "<tr><td colspan=6>缓冲内无帧</td></tr>")
     events_html = ("".join(_ev_row(e) for e in events[-_MAX_EVENT_ROWS:][::-1])
                    or "<tr><td colspan=3>缓冲内无事件</td></tr>")
+    loadtest_html = ""
+    if loadtest_summary:
+        lt_rows = "".join(
+            f"<tr><td>{_escape(k)}</td><td class=n>{_escape(v)}</td></tr>"
+            for k, v in sorted(loadtest_summary.items())
+            if not k.startswith("target_") and not k.startswith("duration_"))
+        loadtest_html = (f"<h2>5. 压测汇总</h2>"
+                         f'<table class=meta>{lt_rows}</table>'
+                         "<p class=foot>压测口径：子站按目标速率自发事件，主站侧差分统计。</p>")
     notes_html = f"<p class=notes><b>备注：</b>{_escape(notes)}</p>" if notes else ""
 
     return f"""<!DOCTYPE html>
@@ -181,5 +191,6 @@ def build_session_report_html(
   <tr><th>时间</th><th>类型</th><th>内容</th></tr>
   {events_html}
 </table>
+{loadtest_html}
 <p class=foot>由 iec104-tester 自动生成；本文件自包含（无外部引用），浏览器「打印 → 另存为 PDF」即可归档交付。</p>
 </body></html>"""

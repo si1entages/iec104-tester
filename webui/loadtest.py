@@ -107,6 +107,10 @@ class LoadTestService:
             "summary": self._summary,
         }
 
+    def last_summary(self) -> dict | None:
+        """最近一次压测的汇总（从未运行过返回 None）——报告生成（T78）取用."""
+        return self._summary
+
     def summary(self) -> dict:
         if self._summary is not None:
             return self._summary

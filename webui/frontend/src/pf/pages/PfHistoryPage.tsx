@@ -15,6 +15,7 @@ import {
 
 import { buildUrl } from '../../api/client'
 import { HISTORY_EXPORT_URL } from '../../api/endpoints'
+import { PfHistoryCurve } from '../components/PfHistoryCurve'
 import { useHistoryDataQuery, useHistoryFramesQuery, useHistoryStatsQuery } from '../../api/queries'
 import type { HistoryDataRecord, HistoryFrameRecord } from '../../api/types'
 import { useLocale, useT } from '../../i18n'
@@ -24,7 +25,7 @@ import { PfQualityTags } from '../components/PfQualityTags'
 const PAGE_SIZE = 50
 const DEFAULT_LIMIT = 1000
 
-type TabKey = 'data' | 'frames'
+type TabKey = 'data' | 'frames' | 'curve'
 
 function formatBytes(n: number): string {
   if (!n) return '0 B'
@@ -155,9 +156,11 @@ export function PfHistoryPage() {
               ) : null}
             </>
           ) : null}
-          <Label isCompact color="blue">
-            {t('history.view', { n: rows.length })}
-          </Label>
+          {tab !== 'curve' ? (
+            <Label isCompact color="blue">
+              {t('history.view', { n: rows.length })}
+            </Label>
+          ) : null}
         </Flex>
       </CardTitle>
       <CardBody>
@@ -176,6 +179,9 @@ export function PfHistoryPage() {
           </Button>
           <Button variant={tab === 'frames' ? 'primary' : 'secondary'} onClick={() => { setTab('frames'); setPage(1) }}>
             {t('history.tab.frames')}
+          </Button>
+          <Button variant={tab === 'curve' ? 'primary' : 'secondary'} onClick={() => { setTab('curve'); setPage(1) }}>
+            {t('history.tab.curve')}
           </Button>
           <div style={{ width: 210, minWidth: 210 }}>
             <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 4 }}>{t('history.start')}</div>
@@ -241,11 +247,18 @@ export function PfHistoryPage() {
           <Button variant="secondary" onClick={reset}>
             {t('common.reset')}
           </Button>
-          <Button variant="link" onClick={() => window.open(exportUrl, '_blank')}>
-            {t('history.export')}
-          </Button>
+          {tab !== 'curve' ? (
+            <Button variant="link" onClick={() => window.open(exportUrl, '_blank')}>
+              {t('history.export')}
+            </Button>
+          ) : null}
         </Flex>
 
+        {tab === 'curve' ? (
+          <div style={{ marginTop: 12 }}>
+            <PfHistoryCurve start={applied.start} end={applied.end} />
+          </div>
+        ) : (
         <div style={{ marginTop: 12, overflowX: 'auto' }}>
           <table className="pf-v6-c-table pf-m-compact" style={{ width: '100%', tableLayout: 'fixed' }}>
             <thead className="pf-v6-c-table__thead">
@@ -304,16 +317,19 @@ export function PfHistoryPage() {
             </tbody>
           </table>
         </div>
+        )}
 
-        <div style={{ marginTop: 8 }}>
-          <Pagination
-            itemCount={rows.length}
-            perPage={PAGE_SIZE}
-            page={currentPage}
-            onSetPage={(_event, p) => setPage(p)}
-            isCompact
-          />
-        </div>
+        {tab !== 'curve' ? (
+          <div style={{ marginTop: 8 }}>
+            <Pagination
+              itemCount={rows.length}
+              perPage={PAGE_SIZE}
+              page={currentPage}
+              onSetPage={(_event, p) => setPage(p)}
+              isCompact
+            />
+          </div>
+        ) : null}
       </CardBody>
     </Card>
   )

@@ -94,3 +94,14 @@ async def test_report_endpoint():
     finally:
         await bridge.shutdown()
         await client.close()
+
+
+def test_report_includes_loadtest_summary_when_present():
+    """压测汇总存在时生成 §5（T78 贯通）；缺省无该节."""
+    base = build_session_report_html("master", _fake_status(), _envelopes(), [])
+    assert "压测汇总" not in base
+    with_lt = build_session_report_html(
+        "master", _fake_status(), _envelopes(), [],
+        loadtest_summary={"events_sent": 6000, "rx_frames": 5980,
+                          "avg_eps": 100.0, "avg_fps": 99.7, "errors": 0})
+    assert "压测汇总" in with_lt and "6000" in with_lt and "99.7" in with_lt

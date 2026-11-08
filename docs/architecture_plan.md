@@ -432,7 +432,10 @@ graph TD
 
 | **T76** | 压测编排（吞吐验收）（2026-11-08） | 候选方向④。`webui/loadtest.py` `LoadTestService`：**编排层不改引擎**——驱动既有 `slave_set_yx/yc` 自发事件路径按目标速率（tick 均摊）循环触发（4:1 YC/YX 交替，值随机扰动），主站侧以 `ConnectionStats` **差分**统计（frames/i_frames/bytes/errors received）；时长/速率钳位（1~3600s / 1~10000 eps）；异常收敛为汇总不崩 UI。端点 `POST /api/loadtest/start|stop` + `GET /api/loadtest/status`：**全应用注册**（契约单一表），未挂载编排服务的应用返回 `{ok:false}` 业务拒绝（巡检把 4xx 一律计失败请求——首版 404 JSON 被审计抓住改为 200 业务拒绝）；仅 both 模式 `_run_dual` 挂载双桥编排（`master_bridge.loadtest` 属性注入）。UI：测试中心页压测卡（Carbon/PF；仅双角色部署显示；运行中 1s 轮询 refetchInterval 按 data 驱动）。pytest 3 项（真主站↔真子站 1.5s@80eps 吞吐差分端到端、未运行拒绝、重复启动幂等） |
 
-> **累计统计**：T01~T49、T51~T76 **全部完成**；**待办 1**（T50 真机复测，暂缓待窗口；T39 第三方实测已回填）。
+| **T77** | 历史趋势回放：历史页「曲线」页签（2026-11-08） | 数据地基早就在（`data_history` 点位时间序列 + `/api/history/data` 查询端点），本轮补上消费侧。**后端零改动**；前端（Carbon/PF，经典版冻结不加）：历史页增「曲线」页签——页签内自管序列（类型 yx/yc/ym + IOA，1~8 条，DismissibleTag/链接标签可移除），时间范围复用页面「查询」按钮的 applied 状态；每序列一次 `GET /api/history/data`（`useQueries` 并行，limit 5000）；ECharts 时间轴曲线（遥信/遥脉阶梯 step、遥测折线，`toNumericValue` 过滤非数值行），0×0 防护同实时趋势图（回调 ref + ResizeObserver）；view 标签/导出按钮/分页在曲线页签下隐藏（语义不适用）。前端 i18n 8 键 |
+| **T78** | 压测×报告贯通（2026-11-08） | `LoadTestService.last_summary()` 公开最近一次汇总；`GET /api/export/report.html` 自动读取（both 模式 master 桥挂载的编排服务），报告新增「5. 压测汇总」段落（事件数/帧数/平均速率/错误，参数类字段不入表）——压测跑完报告自动带证据，未跑过压测则无该节。pytest 报告用例 6→7 |
+
+> **累计统计**：T01~T49、T51~T78 **全部完成**；**待办 1**（T50 真机复测，暂缓待窗口；T39 第三方实测已回填）。
 
 ---
 
