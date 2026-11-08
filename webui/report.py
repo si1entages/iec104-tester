@@ -80,6 +80,8 @@ def build_session_report_html(
     max_frames: int = 300,
     loadtest_summary: dict | None = None,
     compliance_violations: list[dict] | None = None,
+    conclusion: str = "",
+    conclusion_kind: str = "",
 ) -> str:
     """生成自包含 HTML 测试报告.
 
@@ -154,6 +156,13 @@ def build_session_report_html(
                            f"{v_rows}</table>"
                            "<p class=foot>类型：seq-jump=发送序号跳变；ack-ahead=确认超前；"
                            "t1/t2/t3=超时；no-startdt=未启动传数据；k-exceed=超流控窗口。</p>")
+    _kind_color = {"pass": "#1a7f37", "fail": "#c62828", "conditional": "#9a6700"}
+    kind = conclusion_kind if conclusion_kind in _kind_color else ""
+    conclusion_html = ""
+    if conclusion.strip():
+        color = _kind_color.get(kind, "#454545")
+        conclusion_html = (f'<p class="conclusion" style="border-color: {color}; '
+                           f'color: {color};"><b>测试结论：</b>{_escape(conclusion.strip()[:500])}</p>')
     notes_html = f"<p class=notes><b>备注：</b>{_escape(notes)}</p>" if notes else ""
 
     return f"""<!DOCTYPE html>
@@ -172,11 +181,14 @@ def build_session_report_html(
   td.mono, .mono {{ font-family: "IBM Plex Mono", Consolas, monospace; font-size: 12px; }}
   .meta td:first-child {{ width: 160px; background: #f4f4f4; font-weight: 600; }}
   .notes {{ background: #edf5ff; border-left: 3px solid #0f62fe; padding: 8px 12px; }}
+  .conclusion {{ background: #f4f4f4; border-left: 4px solid #454545; padding: 10px 14px;
+                font-size: 15px; }}
   .foot {{ margin-top: 32px; font-size: 12px; color: #6f6f6f; }}
   @media print {{ body {{ margin: 8mm; }} h2 {{ page-break-after: avoid; }} }}
 </style></head><body>
 <h1>{_escape(title or "IEC 60870-5-104 测试报告")}</h1>
 <p class=mono>生成时间 {now} ｜ 生成器 iec104-tester {__version__}</p>
+{conclusion_html}
 {notes_html}
 <h2>1. 会话信息</h2>
 <table class=meta>

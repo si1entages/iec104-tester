@@ -25,6 +25,7 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from core.protocol.apci import APCICodec
+from core.protocol.asdu import ASDU
 from core.protocol.constants import (
     U_STARTDT_ACT,
     U_STARTDT_CON,
@@ -32,9 +33,15 @@ from core.protocol.constants import (
     U_TESTFR_ACT,
     U_TESTFR_CON,
 )
+from core.protocol.types import COT, TypeID
 
 _SEQ_MOD = 32768
 _MAX_VIOLATIONS = 200
+
+# 应用层语义规则（T81）的参与类型集合——从 TypeID 单源派生
+_CMD_TYPES = {t.value for t in TypeID if t.name.startswith("C_") and 45 <= t.value <= 64}
+_MON_TYPES = {t.value for t in TypeID if t.name.startswith("M_")}
+_ACT_EXPIRE_S = 60.0
 
 
 @dataclass
@@ -77,6 +84,9 @@ class ComplianceMonitor:
     master: _SideState = field(default_factory=_SideState)   # 发送方向 = tx（主站→子站）
     slave: _SideState = field(default_factory=_SideState)    # 发送方向 = rx（子站→主站）
     last_frame_time: float = 0.0
+    _pending_acts: dict = field(default_factory=dict)        # type_id → 最近 ACT 时刻（T81）
+    _gi_pending: bool = False
+    _ci_pending: bool = False
     t3_reported: bool = False
     _frames_seen: int = 0
 
@@ -111,6 +121,8 @@ class ComplianceMonitor:
             # I 帧的 rx_seq 字段同时确认接收方已发送的帧
             self._check_ack(receiver, apci.rx_seq, now, direction)
             sender.last_ack_time = now
+            # 应用层语义检查（T81）
+            self._observe_asdu(direction, frame, now)
         elif apci.frame_type.name == "S":
             # S 帧是发送方对**接收方**发送帧的显式确认
             self._check_ack(receiver, apci.rx_seq, now, direction)
@@ -190,6 +202,56 @@ class ComplianceMonitor:
         elif func == U_TESTFR_CON:
             # 对端（TESTFR_ACT 的发送方）的 pending 由本端 CON 解除
             peer.pending_testfr = False
+
+    def _observe_asdu(self, direction: str, frame: bytes, now: float) -> None:
+        """应用层语义检查（T81）：方向错位 / 无请求响应 / 总召唤终止 / COT 合法性.
+
+        只用 ``ASDU.decode_header``（不解析信息体——畸形对象体不影响监视）。
+        规则刻意保守：仅指认无歧义的违规，宁漏勿错（现场误报比漏报更伤信任）。
+        """
+        try:
+            asdu = ASDU.decode_header(frame[6:])
+        except Exception:  # noqa: BLE001 — 半包/畸形由桥 resync 覆盖
+            return
+        type_id = asdu.type_id
+        value = type_id.value if isinstance(type_id, TypeID) else type_id
+        cot = asdu.cot
+        from_master = direction == "tx"
+
+        if cot == 0:
+            self._add(now, "cot-zero", _side_of(direction), "传送原因 COT=0（非法）")
+        # 方向错位：子站发送控制激活帧 / 主站发送监视帧
+        if (not from_master) and value in _CMD_TYPES and cot == COT.ACT:
+            self._add(now, "dir-wrong", _side_of(direction),
+                      f"监视方向出现控制激活帧（类型 {value}，COT=6）")
+        if from_master and value in _MON_TYPES:
+            self._add(now, "dir-wrong", _side_of(direction),
+                      f"控制方向出现监视类型（类型 {value}）")
+        # 请求/响应配对
+        if from_master and cot == COT.ACT:
+            if value == TypeID.C_IC_NA_1.value and self._gi_pending:
+                self._add(now, "gi-not-term", _side_of(direction),
+                          "总召唤未终止（未见 COT=10）即再次启动")
+            self._pending_acts[value] = now
+            if value == TypeID.C_IC_NA_1.value:
+                self._gi_pending = True
+            if value == TypeID.C_CI_NA_1.value:
+                self._ci_pending = True
+        if (not from_master) and cot == COT.ACTCON:
+            sent_at = self._pending_acts.pop(value, None)
+            if sent_at is None or now - sent_at > _ACT_EXPIRE_S:
+                self._add(now, "no-request-ack", _side_of(direction),
+                          f"无对应请求的响应帧（类型 {value}，COT=7）")
+        # 总召唤数据必须在召唤期内
+        if (not from_master) and not self._gi_pending and (cot == COT.INTROGEN or 21 <= cot <= 36):
+            self._add(now, "intg-no-gi", _side_of(direction),
+                      f"非总召唤期收到召唤响应数据（COT={cot}）")
+        if (not from_master) and not self._ci_pending and COT.COUNTER_REQ <= cot <= 41:
+            self._add(now, "ci-no-req", _side_of(direction),
+                      f"非累计量召唤期收到累计量响应（COT={cot}）")
+        # 总召唤终止帧到达 → 召唤期结束
+        if (not from_master) and value == TypeID.C_IC_NA_1.value and cot == COT.INTROGEN:
+            self._gi_pending = False
 
     def _check_send_seq(self, sender: _SideState, seq: int, direction: str,
                         now: float) -> None:

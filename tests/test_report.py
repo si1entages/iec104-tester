@@ -116,3 +116,15 @@ def test_report_compliance_violations_section():
         compliance_violations=[{"ts": 1000.0, "side": "slave", "kind": "seq-jump",
                                 "detail": "I 帧发送序号 5，期望 1"}])
     assert "合规违规" in with_v and "seq-jump" in with_v and "slave" in with_v
+
+
+def test_report_conclusion_banner():
+    """结论横幅：颜色按 kind、文本转义；无结论时无横幅."""
+    base = build_session_report_html("master", _fake_status(), _envelopes(), [])
+    assert "测试结论" not in base
+    ok = build_session_report_html("master", _fake_status(), _envelopes(), [],
+                                   conclusion="合格", conclusion_kind="pass")
+    assert "测试结论：</b>合格" in ok and "#1a7f37" in ok
+    bad = build_session_report_html("master", _fake_status(), _envelopes(), [],
+                                    conclusion="不合格：<b>注入</b>", conclusion_kind="fail")
+    assert "#c62828" in bad and "&lt;b&gt;注入&lt;/b&gt;" in bad

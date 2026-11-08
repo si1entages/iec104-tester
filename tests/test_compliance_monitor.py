@@ -147,3 +147,93 @@ def test_stopdt_reallows_startdt():
     m.observe("tx", _u(U_STOPDT_ACT), 0.2)
     m.observe("tx", _u(U_STARTDT_ACT), 0.3)  # STOPDT 后再启动不算重复
     assert "startdt-dup" not in _kinds(m)
+
+
+# ── 应用层语义规则（T81）────────────────────────────────────────────────
+
+def _asdu(type_id: int, cot: int, body: bytes = b"") -> bytes:
+    """最小 ASDU：type/vsq/cot/origin/ca(2) + body."""
+    return bytes([type_id, 1, cot, 0, 1, 0]) + body
+
+
+def _started(m: ComplianceMonitor, t0: float = 0.0) -> None:
+    m.observe("tx", _u(U_STARTDT_ACT), t0)
+    m.observe("rx", _u(U_STARTDT_CON), t0 + 0.1)
+
+
+def test_asdu_direction_mismatch_rx_control_act():
+    """子站在监视方向发控制激活帧 → dir-wrong."""
+    m = ComplianceMonitor()
+    _started(m)
+    m.observe("rx", _i(0, 0, _asdu(45, 6, bytes([1, 0]))), 0.2)  # C_SC ACT
+    assert "dir-wrong" in _kinds(m)
+
+
+def test_asdu_direction_mismatch_tx_monitor():
+    """主站在控制方向发监视类型 → dir-wrong."""
+    m = ComplianceMonitor()
+    _started(m)
+    m.observe("tx", _i(0, 0, _asdu(1, 3, bytes([1]))), 0.2)  # M_SP
+    assert "dir-wrong" in _kinds(m)
+
+
+def test_asdu_response_without_request():
+    """子站响应帧（COT=7）此前无对应 ACT → no-request-ack."""
+    m = ComplianceMonitor()
+    _started(m)
+    m.observe("rx", _i(0, 0, _asdu(106, 7, bytes(7))), 0.2)  # 时钟确认却无请求
+    assert "no-request-ack" in _kinds(m)
+
+
+def test_asdu_response_matching_request_ok():
+    """有请求有响应 → 不违规."""
+    m = ComplianceMonitor()
+    _started(m)
+    m.observe("tx", _i(0, 0, _asdu(106, 6, bytes(7))), 0.2)
+    m.observe("rx", _i(0, 1, _asdu(106, 7, bytes(7))), 0.3)
+    assert "no-request-ack" not in _kinds(m)
+
+
+def test_asdu_gi_not_terminated():
+    """总召唤未终止（未见 COT=10）即再次启动 → gi-not-term."""
+    m = ComplianceMonitor()
+    _started(m)
+    m.observe("tx", _i(0, 0, _asdu(100, 6, bytes([20]))), 0.2)
+    m.observe("tx", _i(1, 0, _asdu(100, 6, bytes([20]))), 0.3)
+    assert "gi-not-term" in _kinds(m)
+
+
+def test_asdu_clean_gi_flow_no_violations():
+    """完整总召唤流：ACT → 确认 → COT=20 数据 → S 确认 → COT=10 终止 → 零违规."""
+    m = ComplianceMonitor()
+    _started(m)
+    m.observe("tx", _i(0, 0, _asdu(100, 6, bytes([20]))), 0.2)    # GI ACT（主站 seq0）
+    m.observe("rx", _i(0, 1, _asdu(100, 7, bytes([20]))), 0.3)    # 子站 seq0，确认主站 seq0
+    m.observe("rx", _i(1, 1, _asdu(1, 20, bytes([1]))), 0.4)      # 召唤期数据（子站 seq1）
+    m.observe("tx", APCICodec.encode_s(rx_seq=1), 0.45)           # 主站 S 帧确认子站 seq0
+    m.observe("rx", _i(2, 1, _asdu(100, 10, bytes([20]))), 0.5)   # 终止（子站 seq2）
+    m.observe("rx", _i(3, 1, _asdu(1, 3, bytes([1]))), 0.6)       # 后续自发（合法）
+    assert m.violation_counts == {}, m.violations
+
+
+def test_asdu_intg_data_without_gi():
+    """非总召唤期收到 COT=20 数据 → intg-no-gi."""
+    m = ComplianceMonitor()
+    _started(m)
+    m.observe("rx", _i(0, 0, _asdu(1, 20, bytes([1]))), 0.2)
+    assert "intg-no-gi" in _kinds(m)
+
+
+def test_asdu_ci_response_without_request():
+    """非累计量召唤期收到 COT=37 响应 → ci-no-req."""
+    m = ComplianceMonitor()
+    _started(m)
+    m.observe("rx", _i(0, 0, _asdu(15, 37, bytes(5))), 0.2)
+    assert "ci-no-req" in _kinds(m)
+
+
+def test_asdu_cot_zero():
+    m = ComplianceMonitor()
+    _started(m)
+    m.observe("tx", _i(0, 0, _asdu(1, 0, bytes([1]))), 0.2)
+    assert "cot-zero" in _kinds(m)

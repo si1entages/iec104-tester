@@ -32,6 +32,7 @@ export function PfLoadTestCard() {
 
   const [duration, setDuration] = useState('60')
   const [eps, setEps] = useState('100')
+  const [connections, setConnections] = useState('1')
 
   const st = useQuery({
     queryKey: ['loadtest'],
@@ -48,6 +49,7 @@ export function PfLoadTestCard() {
       api.loadtest.start({
         duration_s: Number(duration) || 60,
         events_per_s: Number(eps) || 100,
+        connections: Number(connections) || 1,
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['loadtest'] })
@@ -99,6 +101,10 @@ export function PfLoadTestCard() {
             <TextInput id="pf-lt-eps" type="number" value={eps} isDisabled={running}
                        onChange={(_e, v) => setEps(v)} />
           </FormGroup>
+          <FormGroup label={t('loadtest.connections')} fieldId="pf-lt-conn">
+            <TextInput id="pf-lt-conn" type="number" value={connections} isDisabled={running}
+                       onChange={(_e, v) => setConnections(v)} />
+          </FormGroup>
           <FlexItem>
             <Button variant="primary" isDisabled={busy || running} onClick={() => start.mutate()}>
               {t('loadtest.start')}
@@ -124,6 +130,19 @@ export function PfLoadTestCard() {
             </DescriptionListGroup>
           ))}
         </DescriptionList>
+        {Array.isArray(data?.per_connection) && (data!.per_connection as Array<{ connection: number; frames_received: number; errors: number }>).length > 1 ? (
+          <div style={{ marginTop: 8, fontSize: 12, opacity: 0.85 }}>
+            {(data!.per_connection as Array<{ connection: number; frames_received: number; errors: number }>).map((row) => (
+              <div key={row.connection}>
+                {t('loadtest.conn', {
+                  n: row.connection,
+                  frames: row.frames_received,
+                  err: row.errors > 0 ? t('loadtest.connErr', { errors: row.errors }) : '',
+                })}
+              </div>
+            ))}
+          </div>
+        ) : null}
         {summary ? (
           <div style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>
             {t('loadtest.summary')}: {JSON.stringify(summary)}

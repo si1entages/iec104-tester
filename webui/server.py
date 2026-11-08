@@ -561,6 +561,8 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
 
         title = request.query.get("title") or ""
         notes = request.query.get("notes") or ""
+        conclusion = request.query.get("conclusion") or ""
+        conclusion_kind = request.query.get("conclusion_kind") or ""
         try:
             limit = max(1, min(int(request.query.get("limit") or 300), 5000))
         except ValueError:
@@ -573,7 +575,8 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
             bridge.role, bridge.status(),
             bridge.recent("frame", 5000), bridge.recent("event", 2000),
             title=title, notes=notes, max_frames=limit,
-            loadtest_summary=lt_summary, compliance_violations=comp_violations)
+            loadtest_summary=lt_summary, compliance_violations=comp_violations,
+            conclusion=conclusion, conclusion_kind=conclusion_kind)
         fname = time.strftime("iec104_report_%Y%m%d_%H%M%S.html")
         return web.Response(
             text=html_text, content_type="text/html",
@@ -676,9 +679,10 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
         try:
             duration_s = float(body.get("duration_s") or 60.0)
             events_per_s = float(body.get("events_per_s") or 100.0)
+            connections = int(body.get("connections") or 1)
         except (TypeError, ValueError):
             return web.json_response({"ok": False, "error": "参数必须是数字"}, status=400)
-        return web.json_response(await loadtest.start(duration_s, events_per_s))
+        return web.json_response(await loadtest.start(duration_s, events_per_s, connections))
 
     async def api_loadtest_stop(request: web.Request) -> web.Response:
         loadtest = getattr(bridge, "loadtest", None)
@@ -1474,7 +1478,7 @@ async def _run_dual(host: str = "127.0.0.1", port: int = 8765,
     from .loadtest import LoadTestService
 
     master_bridge.loadtest = LoadTestService(
-        slave_bridge, master_bridge,
+        slave_bridge,
         publish=lambda kind, data: master_bridge.bus.publish(kind, data))
 
     schema_roles = ["master", "slave"]

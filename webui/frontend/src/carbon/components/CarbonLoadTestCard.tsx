@@ -21,6 +21,7 @@ export function CarbonLoadTestCard() {
 
   const [duration, setDuration] = useState('60')
   const [eps, setEps] = useState('100')
+  const [connections, setConnections] = useState('1')
 
   const st = useQuery({
     queryKey: ['loadtest'],
@@ -37,6 +38,7 @@ export function CarbonLoadTestCard() {
       api.loadtest.start({
         duration_s: Number(duration) || 60,
         events_per_s: Number(eps) || 100,
+        connections: Number(connections) || 1,
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['loadtest'] })
@@ -73,6 +75,9 @@ export function CarbonLoadTestCard() {
         <NumField id="cb-lt-eps" label={t('loadtest.eps')} value={Number(eps) || 0}
                   onChange={(v) => setEps(String(v))} width={160} min={1} max={10000}
                   disabled={running} />
+        <NumField id="cb-lt-conn" label={t('loadtest.connections')} value={Number(connections) || 1}
+                  onChange={(v) => setConnections(String(v))} width={140} min={1} max={8}
+                  disabled={running} />
         <Button kind="primary" size="sm" disabled={busy || running} onClick={() => start.mutate()}>
           {t('loadtest.start')}
         </Button>
@@ -87,6 +92,19 @@ export function CarbonLoadTestCard() {
           { term: t('loadtest.rx'), value: String(data?.rx_frames ?? '—') },
           { term: t('loadtest.fps'), value: String(data?.fps ?? '—') },
         ]} />
+        {Array.isArray(data?.per_connection) && (data!.per_connection as Array<{ connection: number; frames_received: number; errors: number }>).length > 1 ? (
+          <div style={{ marginTop: 4, fontSize: 12, opacity: 0.85 }}>
+            {(data!.per_connection as Array<{ connection: number; frames_received: number; errors: number }>).map((row) => (
+              <div key={row.connection}>
+                {t('loadtest.conn', {
+                  n: row.connection,
+                  frames: row.frames_received,
+                  err: row.errors > 0 ? t('loadtest.connErr', { errors: row.errors }) : '',
+                })}
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
       {summary ? (
         <div style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>

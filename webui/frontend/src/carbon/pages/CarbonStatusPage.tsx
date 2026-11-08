@@ -1,6 +1,8 @@
-import { Button } from '@carbon/react'
+import { Button, Select, SelectItem, TextInput } from '@carbon/react'
 
 import { exportReportUrl } from '../../api/endpoints'
+import { useState } from 'react'
+
 import { usePointsQuery, useStatusQuery } from '../../api/queries'
 import { useT } from '../../i18n'
 import type { MessageKey } from '../../i18n'
@@ -21,13 +23,54 @@ export function CarbonStatusPage() {
     { term: 'conn.window', value: status?.window ?? '-' },
   ]
 
+  const [conclusionKind, setConclusionKind] = useState('')
+  const [conclusionNote, setConclusionNote] = useState('')
+  const conclusionTexts: Record<string, string> = {
+    pass: t('status.reportConclusionPass'),
+    fail: t('status.reportConclusionFail'),
+    conditional: t('status.reportConclusionConditional'),
+  }
   const exportReport = (): void => {
-    window.open(exportReportUrl(t('status.exportReportTitle', { role: status?.role ?? '-' })), '_blank')
+    const conclusion = conclusionKind
+      ? conclusionTexts[conclusionKind] + (conclusionNote ? `：${conclusionNote}` : '')
+      : ''
+    window.open(
+      exportReportUrl(t('status.exportReportTitle', { role: status?.role ?? '-' }), {
+        conclusion,
+        conclusion_kind: conclusionKind,
+      }),
+      '_blank',
+    )
   }
 
   return (
     <div className="app-gap">
-      <div className="app-row" style={{ justifyContent: 'flex-end' }}>
+      <div className="app-row" style={{ justifyContent: 'flex-end', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div style={{ width: 150, minWidth: 150 }}>
+          <Select
+            id="cb-status-conclusion"
+            labelText={t('status.reportConclusion')}
+            hideLabel
+            value={conclusionKind}
+            onChange={(event) => setConclusionKind((event.target as HTMLSelectElement).value)}
+          >
+            <SelectItem value="" text={t('status.reportConclusionNone')} />
+            <SelectItem value="pass" text={t('status.reportConclusionPass')} />
+            <SelectItem value="fail" text={t('status.reportConclusionFail')} />
+            <SelectItem value="conditional" text={t('status.reportConclusionConditional')} />
+          </Select>
+        </div>
+        <div style={{ width: 220, minWidth: 220 }}>
+          <TextInput
+            id="cb-status-conclusion-note"
+            type="text"
+            labelText={t('status.reportConclusionNote')}
+            hideLabel
+            placeholder={t('status.reportConclusionNote')}
+            value={conclusionNote}
+            onChange={(event) => setConclusionNote(event.target.value)}
+          />
+        </div>
         <Button
           kind="secondary"
           size="sm"

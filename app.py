@@ -434,6 +434,30 @@ def cli(default_role: str | None = None) -> int:
         help="[bridge] 旁路帧录制文件（按扩展名分派格式：.bin/.json/.pcap；可选）"
     )
     parser.add_argument(
+        "--bridge-listen-tls-cert", type=str, default=None,
+        help="[bridge] 监听侧服务端证书 (PEM)：桥对主站扮演子站（主站以 TLS 接入）"
+    )
+    parser.add_argument(
+        "--bridge-listen-tls-key", type=str, default=None,
+        help="[bridge] 监听侧私钥 (PEM)；缺省假定与证书同文件"
+    )
+    parser.add_argument(
+        "--bridge-upstream-tls-ca", type=str, default=None,
+        help="[bridge] 上游受信 CA (PEM)：桥以 TLS 接入真实子站并校验其证书"
+    )
+    parser.add_argument(
+        "--bridge-upstream-tls-cert", type=str, default=None,
+        help="[bridge] 上游客户端证书 (PEM)：真实子站要求 mTLS 时提供"
+    )
+    parser.add_argument(
+        "--bridge-upstream-tls-key", type=str, default=None,
+        help="[bridge] 上游客户端私钥 (PEM)"
+    )
+    parser.add_argument(
+        "--bridge-upstream-tls-hostname", type=str, default=None,
+        help="[bridge] 上游证书主机名校验（按 IP 连接而证书只签域名时必填）"
+    )
+    parser.add_argument(
         "--config", type=str, default=None,
         help="配置文件路径 (YAML)"
     )
@@ -759,7 +783,27 @@ def _run_bridge(args, logger) -> int:
         listen_port=args.listen_port or 2404,
         upstream_host=args.upstream_host,
         upstream_port=args.upstream_port or 2404,
+        upstream_hostname=args.bridge_upstream_tls_hostname or "",
     )
+    # 桥 TLS（T84）：监听侧=服务端 context（对主站扮演子站）；上游侧=客户端
+    # context（对子站扮演主站）。两侧独立可配（明文↔TLS 混合桥接同样支持）。
+    from core.transport.tls_context import build_client_context, build_server_context
+
+    try:
+        if args.bridge_listen_tls_cert:
+            cfg.listen_ssl = build_server_context(
+                certfile=args.bridge_listen_tls_cert,
+                keyfile=args.bridge_listen_tls_key or "")
+        if args.bridge_upstream_tls_ca or args.bridge_upstream_tls_cert:
+            cfg.upstream_ssl = build_client_context(
+                cafile=args.bridge_upstream_tls_ca or "",
+                certfile=args.bridge_upstream_tls_cert or "",
+                keyfile=args.bridge_upstream_tls_key or "",
+                verify=bool(args.bridge_upstream_tls_ca),
+            )
+    except Exception as e:  # TlsConfigError / OSError / ValueError
+        print(f"桥 TLS 配置无效，拒绝启动: {e}", flush=True)
+        return 2
 
     async def run():
         recorder = None  # PacketRecorder（可选 --capture-file）

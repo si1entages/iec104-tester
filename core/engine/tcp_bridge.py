@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import ssl
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
@@ -39,7 +40,13 @@ FrameCallback = Callable[[bytes, str, str], Awaitable[None]] | Callable[[bytes, 
 
 @dataclass
 class BridgeConfig:
-    """桥接配置：监听侧（面向真实主站）+ 上游侧（真实子站）."""
+    """桥接配置：监听侧（面向真实主站）+ 上游侧（真实子站）.
+
+    TLS（T84）：``listen_ssl`` 为服务端 context（桥对主站扮演"子站"），
+    ``upstream_ssl`` 为客户端 context（桥对子站扮演"主站"，可校验真实
+    子站证书）。两侧独立可配：明文↔TLS 混合桥接（一侧明文一侧加密）同样
+    支持。TLS 终结在桥——帧内容对桥可见，合规监视/录制照常工作。
+    """
     listen_host: str = "0.0.0.0"
     listen_port: int = 2404
     upstream_host: str = "127.0.0.1"
@@ -47,6 +54,9 @@ class BridgeConfig:
     connect_timeout: float = 5.0     # 上游建连超时（秒）
     read_chunk: int = 4096
     idle_warning_s: float = 0.0      # >0 时链路静默超阈值打 info（0=关闭）
+    listen_ssl: ssl.SSLContext | None = None    # 监听侧 TLS（None=明文）
+    upstream_ssl: ssl.SSLContext | None = None  # 上游侧 TLS（None=明文）
+    upstream_hostname: str = ""      # 上游证书主机名校验（空=不校验名）
 
 
 @dataclass
@@ -159,7 +169,8 @@ class TcpBridge:
         if self._server is not None:
             raise RuntimeError("TcpBridge already started")
         self._server = await asyncio.start_server(
-            self._handle_client, self.config.listen_host, self.config.listen_port)
+            self._handle_client, self.config.listen_host, self.config.listen_port,
+            ssl=self.config.listen_ssl)
         logger.info(
             "TcpBridge listening on %s:%d → upstream %s:%d",
             self.config.listen_host, self.listen_port,
@@ -202,7 +213,10 @@ class TcpBridge:
 
         try:
             up_reader, up_writer = await asyncio.wait_for(
-                asyncio.open_connection(self.config.upstream_host, self.config.upstream_port),
+                asyncio.open_connection(
+                    self.config.upstream_host, self.config.upstream_port,
+                    ssl=self.config.upstream_ssl,
+                    server_hostname=self.config.upstream_hostname or None),
                 timeout=self.config.connect_timeout,
             )
         except Exception as e:

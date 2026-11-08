@@ -86,8 +86,15 @@ export const testReportUrl = (runId: string, name: string) =>
       .replace('{run_id}', encodeURIComponent(runId))
       .replace('{name}', encodeURIComponent(name)),
   )
-export const exportReportUrl = (title: string): string =>
-  `/api/export/report.html?${new URLSearchParams({ title }).toString()}`
+export const exportReportUrl = (
+  title: string,
+  opts?: { conclusion?: string; conclusion_kind?: string },
+): string => {
+  const q = new URLSearchParams({ title })
+  if (opts?.conclusion) q.set('conclusion', opts.conclusion)
+  if (opts?.conclusion_kind) q.set('conclusion_kind', opts.conclusion_kind)
+  return `/api/export/report.html?${q.toString()}`
+}
 
 function logsQuery(params: LogQueryParams): Record<string, string | number | undefined> {
   return {
@@ -202,7 +209,7 @@ export const api = {
 
   // ── 透明桥（T74；仅 bridge 角色应用注册这两个端点）────────────────
   loadtest: {
-    start: (body: { duration_s?: number; events_per_s?: number }) =>
+    start: (body: { duration_s?: number; events_per_s?: number; connections?: number }) =>
       apiPost('/api/loadtest/start', looseOkSchema, body),
     stop: () => apiPost('/api/loadtest/stop', looseOkSchema),
     status: () => apiGet('/api/loadtest/status', looseOkSchema),

@@ -207,3 +207,82 @@ async def test_bridge_capture_recording(tmp_path):
         assert cap.exists() and cap.stat().st_size > 0
     finally:
         await slave.stop()
+
+
+# ── TLS 桥（T84）：明文↔TLS 混合桥接，证书复用 tests/certs ──────────────
+
+from core.transport.tls_context import build_client_context, build_server_context  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+CERTS = Path(__file__).parent / "certs"
+
+
+@pytest.mark.asyncio
+async def test_bridge_tls_mixed_upstream():
+    """明文主站 → 桥 → TLS 子站（混合桥接）：透传 + 双向观察正常."""
+    from core.engine.slave import SlaveEngine
+
+    pt = PointTable()
+    pt.generate_demo_points(yx_count=5, yc_count=3, yk_count=0, ym_count=0)
+    # 真实子站：TLS 服务端（server.pem，主站侧需信任 ca1）
+    slave = SlaveEngine(port=0, point_table=pt,
+                        ssl_context=build_server_context(certfile=str(CERTS / "server.pem"),
+                                                         keyfile=str(CERTS / "server.key")))
+    await slave.start()
+    upstream_port = slave._server._server.sockets[0].getsockname()[1]
+
+    observed: list[tuple[str, bytes]] = []
+    bridge = TcpBridge(BridgeConfig(
+        listen_host="127.0.0.1", listen_port=0,
+        upstream_host="127.0.0.1", upstream_port=upstream_port,
+        upstream_ssl=build_client_context(cafile=str(CERTS / "ca1.pem"), verify=True),
+        upstream_hostname="localhost",
+    ), on_frame=lambda data, direction, cid: observed.append((direction, data)))
+    await bridge.start()
+
+    # 明文客户端：STARTDT_ACT 经桥（TLS 上游）往返
+    reader, writer = await asyncio.open_connection("127.0.0.1", bridge.listen_port)
+    writer.write(bytes([0x68, 0x04, 0x07, 0x00, 0x00, 0x00]))
+    await writer.drain()
+    data = await asyncio.wait_for(reader.readexactly(6), timeout=10.0)
+    assert data == bytes([0x68, 0x04, 0x0B, 0x00, 0x00, 0x00])  # STARTDT_CON
+    writer.close()
+
+    await asyncio.sleep(0.3)
+    assert {d for d, _ in observed} == {"tx", "rx"}   # 解密后帧双向可见（合规监视/录制可用）
+    await bridge.stop()
+    await slave.stop()
+
+
+@pytest.mark.asyncio
+async def test_bridge_tls_listen_side():
+    """TLS 主站 → 桥（listen TLS）→ 明文子站：监听侧加密同样透传."""
+    pt = PointTable()
+    pt.generate_demo_points(yx_count=5, yc_count=3, yk_count=0, ym_count=0)
+    slave = SlaveEngine(port=0, point_table=pt)
+    await slave.start()
+    upstream_port = slave._server._server.sockets[0].getsockname()[1]
+
+    observed: list[tuple[str, bytes]] = []
+    bridge = TcpBridge(BridgeConfig(
+        listen_host="127.0.0.1", listen_port=0,
+        upstream_host="127.0.0.1", upstream_port=upstream_port,
+        listen_ssl=build_server_context(certfile=str(CERTS / "server.pem"),
+                                        keyfile=str(CERTS / "server.key")),
+    ), on_frame=lambda data, direction, cid: observed.append((direction, data)))
+    await bridge.start()
+
+    # TLS 客户端（信任 ca1，主机名 localhost）接入桥
+    client_ctx = build_client_context(cafile=str(CERTS / "ca1.pem"), verify=True)
+    reader, writer = await asyncio.open_connection(
+        "127.0.0.1", bridge.listen_port, ssl=client_ctx, server_hostname="localhost")
+    writer.write(bytes([0x68, 0x04, 0x07, 0x00, 0x00, 0x00]))
+    await writer.drain()
+    data = await asyncio.wait_for(reader.readexactly(6), timeout=10.0)
+    assert data == bytes([0x68, 0x04, 0x0B, 0x00, 0x00, 0x00])
+    writer.close()
+
+    await asyncio.sleep(0.3)
+    assert {d for d, _ in observed} == {"tx", "rx"}
+    await bridge.stop()
+    await slave.stop()

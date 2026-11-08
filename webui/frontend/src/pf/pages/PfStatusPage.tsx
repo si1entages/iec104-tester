@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 import {
   Card,
   CardBody,
@@ -12,7 +14,12 @@ import {
   Title,
 } from '@patternfly/react-core'
 
-import { Button } from '@patternfly/react-core'
+import {
+  Button,
+  FormSelect,
+  FormSelectOption,
+  TextInput,
+} from '@patternfly/react-core'
 
 import { exportReportUrl } from '../../api/endpoints'
 import { usePointsQuery, useStatusQuery } from '../../api/queries'
@@ -50,14 +57,48 @@ export function PfStatusPage() {
     { term: 'conn.window', value: status?.window ?? '-' },
   ]
 
+  const [conclusionKind, setConclusionKind] = useState('')
+  const [conclusionNote, setConclusionNote] = useState('')
+  const conclusionTexts: Record<string, string> = {
+    pass: t('status.reportConclusionPass'),
+    fail: t('status.reportConclusionFail'),
+    conditional: t('status.reportConclusionConditional'),
+  }
   const exportReport = (): void => {
-    window.open(exportReportUrl(t('status.exportReportTitle', { role: status?.role ?? '-' })), '_blank')
+    const conclusion = conclusionKind
+      ? conclusionTexts[conclusionKind] + (conclusionNote ? `：${conclusionNote}` : '')
+      : ''
+    window.open(
+      exportReportUrl(t('status.exportReportTitle', { role: status?.role ?? '-' }), {
+        conclusion,
+        conclusion_kind: conclusionKind,
+      }),
+      '_blank',
+    )
   }
 
   return (
     <>
       <PageSection variant="secondary">
-        <Flex justifyContent={{ default: 'justifyContentFlexEnd' }}>
+        <Flex justifyContent={{ default: 'justifyContentFlexEnd' }} gap={{ default: 'gapSm' }} flexWrap={{ default: 'wrap' }}>
+          <FormSelect
+            id="pf-status-conclusion"
+            aria-label={t('status.reportConclusion')}
+            value={conclusionKind}
+            onChange={(_e, v) => setConclusionKind(v)}
+          >
+            <FormSelectOption value="" label={t('status.reportConclusionNone')} />
+            <FormSelectOption value="pass" label={t('status.reportConclusionPass')} />
+            <FormSelectOption value="fail" label={t('status.reportConclusionFail')} />
+            <FormSelectOption value="conditional" label={t('status.reportConclusionConditional')} />
+          </FormSelect>
+          <TextInput
+            id="pf-status-conclusion-note"
+            aria-label={t('status.reportConclusionNote')}
+            placeholder={t('status.reportConclusionNote')}
+            value={conclusionNote}
+            onChange={(_e, v) => setConclusionNote(v)}
+          />
           <Button variant="secondary" data-testid="export-report"
                   onClick={exportReport} title={t('status.exportReportHint')}>
             {t('status.exportReport')}

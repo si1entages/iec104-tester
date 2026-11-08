@@ -186,7 +186,9 @@
 
 > 压测（T76）编排层不改引擎：驱动既有 `slave_set_yx/yc` 自发事件路径按目标速率
 > 循环触发，主站侧以 `ConnectionStats` 差分统计吞吐（验收口径：每秒 N 条遥测
-> 稳定上送不断链）。仅 both 模式挂载（双桥同进程）。
+> 稳定上送不断链）。**多连接（T83）**：connections>1 时压测自建 N 条主站连接
+> 同时接入子站，子站每次自发事件推送给所有已连主站（总帧数 ≈ 事件数×连接数），
+> status/summary 携带 per_connection 分行统计。仅 both 模式挂载（双桥同进程）。
 
 > `/api/scd/preview`（T72）**无副作用**：不修改当前点表，返回可直接投给
 > `/api/points/import?format=yaml` 的点表 YAML 文本。映射规则
