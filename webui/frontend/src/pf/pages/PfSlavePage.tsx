@@ -1,12 +1,22 @@
 import { useState } from 'react'
 
-import { Card, CardBody, PageSection, Tab, Tabs } from '@patternfly/react-core'
+import {
+  Card,
+  CardBody,
+  Flex,
+  FlexItem,
+  PageSection,
+  Tab,
+  Tabs,
+  Title,
+} from '@patternfly/react-core'
 
 import { useStatusQuery } from '../../api/queries'
 import type { Point } from '../../api/types'
 import { useT } from '../../i18n'
 import { PfFrameViewer } from '../components/PfFrameViewer'
 import { PfManualSetPanel } from '../components/PfManualSetPanel'
+import { PfPointsImport } from '../components/PfPointsImport'
 import { PfPointsTable } from '../components/PfPointsTable'
 import { PfResponsePanel } from '../components/PfResponsePanel'
 import { PfSimulationPanel } from '../components/PfSimulationPanel'
@@ -30,6 +40,14 @@ export function PfSlavePage() {
       <PageSection>
         <Card>
           <CardBody>
+            <Flex justifyContent={{ default: 'justifyContentSpaceBetween' }} alignItems={{ default: 'alignItemsCenter' }}>
+              <FlexItem>
+                <Title headingLevel="h3" size="md">{t('pt2.title')}</Title>
+              </FlexItem>
+              <FlexItem>
+                <PfPointsImport />
+              </FlexItem>
+            </Flex>
             <PfPointsTable selected={selected} onSelect={setSelected} height={520} selectHint={t('slave.selectHint')} />
           </CardBody>
         </Card>

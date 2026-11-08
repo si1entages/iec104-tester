@@ -1,6 +1,8 @@
 /**
  * T15 子站交互 e2e：手动置数（YX/YC/YM/STEP，STEP 夹紧 -64..63）→ 应答行为配置下发。
  */
+import path from 'node:path'
+
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 
@@ -155,4 +157,24 @@ test('模拟控制：YX/YC 可独立开启（只开 YX 时请求 yc_enabled=fals
   // 收尾：停止模拟，避免影响后续用例
   await expect(page.getByRole('button', { name: '停止模拟' })).toBeEnabled()
   await page.getByRole('button', { name: '停止模拟' }).click()
+})
+
+test('SCD 点表导入：80-1 预览（告警+计数）→ 应用生效', async ({ page }) => {
+  const scdPath = path.resolve(__dirname, '../../fixtures/sample_104.scd')
+  await gotoApp(page, SLAVE, '子站工作台')
+
+  // 选择 .scd 文件 → 预览弹窗（统计 + 告警 + 可编辑 YAML）
+  await page.getByTestId('points-import-file').setInputFiles(scdPath)
+  const modal = page.locator('.pf-v6-c-modal-box')
+  await expect(modal).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('[data-testid="scd-preview-yaml"]')).toBeVisible()
+  await expect(modal).toContainText('IOA 冲突')
+  await expect(modal).toContainText('yx: 3')
+
+  // 应用导入 → 弹窗关闭 → 点表刷新出现 SCD 里的点位名
+  await page.getByTestId('scd-apply').click()
+  await expect(modal).toBeHidden({ timeout: 15_000 })
+  await expect(
+    page.locator('[data-testid="point-row"]').filter({ hasText: '断路器位置' }).first(),
+  ).toBeVisible({ timeout: 20_000 })
 })

@@ -395,6 +395,17 @@ export interface BatchPointsRequest {
 
 export type ImportFormat = 'csv' | 'yaml' | 'json' | 'auto'
 
+/** SCD/CID/ICD（IEC 61850-6 SCL + 80-1 映射）预览响应（契约 §2.4a） */
+export interface ScdPreviewResponse {
+  ok: boolean
+  /** 生成的点表 YAML 文本（可直接投给 /api/points/import?format=yaml） */
+  yaml: string
+  station_name: string
+  common_addr: number
+  stats: Record<string, number>
+  warnings: string[]
+}
+
 // ── 主站参数状态（T08，契约 §2.6 / §4.6）───────────────────────────────
 
 export type ParameterResult =

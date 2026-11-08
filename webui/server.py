@@ -13,7 +13,10 @@ import ssl
 import time
 from pathlib import Path
 
+import yaml
 from aiohttp import WSMsgType, web
+
+from core.data.scd_import import import_scd
 
 from .bridge import EngineBridge
 from .events import SCHEMA_VERSION
@@ -540,6 +543,41 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
                 "Content-Disposition":
                     f'attachment; filename="iec104_{bridge.role}_session.json"',
             })
+
+    async def api_scd_preview(request: web.Request) -> web.Response:
+        """SCD/CID/ICD（IEC 61850-6 SCL + 80-1 映射）→ 104 点表预览（无副作用）.
+
+        body 为 SCL 原始 XML 文本；``?common_addr=`` 显式指定公共地址（缺省取
+        SCD 中出现最多的 casdu）；``?station=`` 覆盖站名。返回生成的点表 YAML
+        文本（可直接投给 ``/api/points/import?format=yaml``），**不修改当前点表**。
+        """
+        try:
+            text = await request.text()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid body"}, status=400)
+        kwargs: dict = {}
+        common_addr = request.query.get("common_addr")
+        if common_addr:
+            try:
+                kwargs["common_addr"] = int(common_addr)
+            except ValueError:
+                return web.json_response(
+                    {"ok": False, "error": "common_addr 必须是整数"}, status=400)
+        station = request.query.get("station")
+        if station:
+            kwargs["station_name"] = station
+        try:
+            result = import_scd(text, **kwargs)
+        except ValueError as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=400)
+        return web.json_response({
+            "ok": True,
+            "yaml": yaml.safe_dump(result.points, allow_unicode=True, sort_keys=True),
+            "station_name": result.station_name,
+            "common_addr": result.common_addr,
+            "stats": result.stats,
+            "warnings": result.warnings,
+        })
 
     async def api_points_batch(request: web.Request) -> web.Response:
         try:
@@ -1187,6 +1225,7 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
     app.router.add_get("/api/points/yaml", api_points_yaml_get)
     app.router.add_post("/api/points/yaml", api_points_yaml_put)
     app.router.add_post("/api/points/import", api_points_import)
+    app.router.add_post("/api/scd/preview", api_scd_preview)
     app.router.add_get("/api/export/points.csv", api_export_csv)
     app.router.add_get("/api/export/session.json", api_export_session)
     app.router.add_get("/api/logs", api_logs)

@@ -155,11 +155,17 @@
 | GET | `/api/points/yaml` | — | `text/yaml` 文本 |
 | POST | `/api/points/yaml` | 原始 YAML 文本（非 JSON） | `{ok, error?, ...}` |
 | POST | `/api/points/import` | 原始文本；`?format=csv\|yaml\|json\|auto`（默认 `auto` 按内容嗅探） | `{ok, error?, ...}` |
+| POST | `/api/scd/preview` | SCD/CID/ICD 原始 XML 文本（IEC 61850-6 SCL）；`?common_addr=` 可选显式指定公共地址（缺省取出现最多的 casdu）、`?station=` 可选覆盖站名 | `{ok, yaml, station_name, common_addr, stats: Record<string,number>, warnings: string[]}` |
 | GET | `/api/export/points.csv` | — | `text/csv` 文本 |
 | GET | `/api/export/session.json` | — | `{role, status: Status, frames: WsEnvelope<'frame', Frame>[], events: WsEnvelope<'event', EngineEvent>[]}`（`recent()` 原样导出） |
 
 > 说明：`/api/points/import` 的 `auto` 嗅探顺序为 —— 以 `{` 开头 → `json`；
 > 首行含 `,` 且含 `type` → `csv`；否则 → `yaml`。
+>
+> `/api/scd/preview`（T72）**无副作用**：不修改当前点表，返回可直接投给
+> `/api/points/import?format=yaml` 的点表 YAML 文本。映射规则
+> （IEC 61850-80-1 `Private/Address(casdu,ioa,ti)` 精确映射优先，
+> 无映射按 DOType `cdc` 推断 + IOA 自动分配）见 `core/data/scd_import.py`。
 
 ### 2.5 日志
 

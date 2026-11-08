@@ -32,6 +32,7 @@ import {
   paramsResponseSchema,
   pointsResponseSchema,
   recentResponseSchema,
+  scdPreviewSchema,
   schemaResponseSchema,
   sessionExportSchema,
   simulationSetResponseSchema,
@@ -183,6 +184,13 @@ export const api = {
     apiPostText(
       format === 'auto' ? '/api/points/import' : `/api/points/import?format=${format}`,
       looseOkSchema,
+      text,
+    ),
+  /** SCD/CID/ICD → 104 点表预览（无副作用；返回的 YAML 可直接投 importPoints('yaml')） */
+  scdPreview: (text: string, commonAddr?: number) =>
+    apiPostText(
+      commonAddr === undefined ? '/api/scd/preview' : `/api/scd/preview?common_addr=${commonAddr}`,
+      scdPreviewSchema,
       text,
     ),
   exportPointsCsv: () => apiGetText(POINTS_CSV_URL),

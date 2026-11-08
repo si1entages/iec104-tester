@@ -168,11 +168,11 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - [x] 非文本对比 + 视觉回归基线：新增 `ui-nontext-contrast.spec.ts`（WCAG 1.4.11 / 2.4.7）：控件边框、Switch 轨道、纯图标按钮、键盘 Tab 焦点环与相邻背景 ≥3:1；702 处 0 硬失败（禁用控件豁免）。修复 `colorBorder`（浅 #8c8c8c / 深 #6b6b6b）、Button `defaultBorderColor`、深色选中 Switch 轨道 #0b7f7f、全局 `:focus-visible` 焦点环（浅 #0a7575 / 深 #5cdbd3）。新增 `visual.spec.ts`：专用单角色服务 8768（无引擎/无帧/无历史），浅/深主站工作台 + 状态总览整页基线；按平台分目录（已提交 win32 基线，`windows-build` CI job 自动跑视觉回归；无基线平台自动 skip，`VISUAL_UPDATE=1 --update-snapshots` 生成新平台基线）；Windows 全量 Playwright **38/38 passed**（Linux 35 passed + 3 skipped）
 - [x] 界面套件共存（同地址即时切换）：根入口与 UI 解耦（`src/main.tsx` 常驻 QueryClient/WS/契约协商，`PfRoot`/`ClassicRoot`/`CarbonRoot` 只做 UI），**PatternFly / 经典版（antd 6，v1.3.1 冻结）/ Carbon** 三套在 `/app/` 同一文档内切换——不刷新、不改 URL、连接与页面保持，深浅主题/语言跟随；`useKitCss` 保证 `<head>` 同时只有当前套件的全局样式表（PF 逐组件 CSS 置空、Carbon styles.css 含全局 reset 同样按需挂载），经典版数据层用 re-export shim 指向共享层。右下角 UI 圆钮切换，`?kit=pf|classic|carbon` + localStorage。e2e 41 passed（`ui-kit.spec.ts` 3 条含 Carbon）、前端单测 133 passed、视觉基线重拍、exe 重建（19.0 MB；Carbon 的 IBM Plex 字体本地化进包）。详见 `docs/ui_kits.md`
 - [x] T71 反馈批次：**Carbon 设为默认套件**（`resolveInitialKit`：`?kit=` → localStorage → `carbon`，存量 pf 偏好视为未设置）；三套外壳头部统一收敛为**只留中英切换 + 深浅图标切换**（Sun/Moon 类图标，不再用文字），状态类信息只在页面内呈现；主站工作台**选中行与趋势 watch 移入共享 `uiStore`**（切菜单/切套件回来不丢），且选中行按 key 从点表缓存现取——命令面板「当前值」继续跟随 WS 刷新（不回退到快照冻结，与经典版同一 bug 修复）；**趋势图「没有曲线」根因修复**：三套件趋势图的容器 div 是条件渲染（无 watch 时占位），一次性 init effect 挂载时读到空 ref 即永久 bail，之后「加入趋势」也不会建图——改为回调 ref，容器每次出现都重挂 ResizeObserver 并重试 init（隐藏面板 0×0 时跳过，可见后再创建）；「加入趋势」并立即以当前值写入首采样（连接空闲也有曲线起点）。e2e `ui-kit.spec.ts` 增至 5 条（含「加入趋势后切页返回，选中与曲线保留」）；修正 2 处 e2e 自身问题：@carbon/react 1.120 无 `--selected` 修饰类改语义选择器、Carbon↔PF 互切用例改等 `dataset.kit` 完成信号（原用 PF/Carbon 同名 point-row 判断切换完成，属竞态）
+- [x] T72 SCD/CID/ICD 点表导入（IEC 61850 → 104）：`core/data/scd_import.py` 双路径映射——**IEC 61850-80-1 精确映射优先**（`Private/Address(casdu,ioa,ti)`，ti→类别按本仓 `TypeID` 对表且 ti 优先于 CDC），无映射按 DOType `cdc` 推断 + IOA 自动分区分配；iterparse 流式（数十 MB 可用）、SDI/DAI/BDA 嵌套路径保留；多公共地址取众数+明细告警（可显式指定）；IOA 冲突/越界/不支持 ti 全部告警。`POST /api/scd/preview` 无副作用预览（契约 §2.4a + 前端编译期键集比对），Carbon/PF 子站工作台「导入」按钮：SCD 预览（计数+告警+可编辑 YAML）→ 应用走既有导入端点（经典版按冻结承诺不加）。后端 16 项 pytest + 真实厂商 SCD（58KB/65 信号）实弹通过；Dependabot 残留分支清理（PR #5 核实 MERGED 后删除）
 
 ### TODO（暂缓，等待外部条件）
 
 - [ ] **C4 真机复测**：真机窗口到位后，按 [`docs/file_transfer_open_items.md`](docs/file_transfer_open_items.md) 的 5 项清单（NOF/SCQ/DEACT/多节/FRQ-SRQ）逐项复测并回填。已完成两轮 lib60870-C v2.4.1 第三方回归（2026-11-07，含 v1.3.0 复测），第三方结论不能替代真机。
-- [ ] 清理远端 Dependabot 分支 `dependabot/github_actions/actions-4eb699f393`（PR #5 已合并；GitHub 未自动删除）。
 
 ## 双应用入口（纯 Web UI）
 

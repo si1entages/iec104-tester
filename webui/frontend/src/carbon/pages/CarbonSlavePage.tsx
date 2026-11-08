@@ -7,6 +7,7 @@ import type { Point } from '../../api/types'
 import { useT } from '../../i18n'
 import { CarbonFrameViewer } from '../components/CarbonFrameViewer'
 import { CarbonManualSetPanel } from '../components/CarbonManualSetPanel'
+import { CarbonPointsImport } from '../components/CarbonPointsImport'
 import { CarbonPointsTable } from '../components/CarbonPointsTable'
 import { CarbonResponsePanel } from '../components/CarbonResponsePanel'
 import { CarbonSimulationPanel } from '../components/CarbonSimulationPanel'
@@ -26,7 +27,7 @@ export function CarbonSlavePage() {
     <div className="app-gap">
       <CarbonSlaveConnectionPanel />
 
-      <Panel>
+      <Panel title={t('pt2.title')} right={<CarbonPointsImport />}>
         <CarbonPointsTable
           selected={selected}
           onSelect={setSelected}

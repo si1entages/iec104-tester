@@ -68,6 +68,7 @@ import type {
   PointsResponse,
   RecentResponse,
   RedundancyStatus,
+  ScdPreviewResponse,
   SchemaResponse,
   SessionExport,
   SimulationStatusResponse,
@@ -146,6 +147,16 @@ export const pointSchema = obj({
 })
 
 export const pointsResponseSchema = obj({ points: arr(pointSchema) })
+
+/** SCD/CID/ICD（IEC 61850-6 SCL + 80-1 映射）预览响应（T72）：无副作用，返回可导入的点表 YAML。 */
+export const scdPreviewSchema = obj({
+  ok: bool(),
+  yaml: str(),
+  station_name: str(),
+  common_addr: num(),
+  stats: dict(num()),
+  warnings: arr(str()),
+})
 
 export const frameSchema = obj({
   ts: optional(num()),
@@ -581,6 +592,7 @@ export type ContractKeyChecks = [
   Assert<Equal<SchemaKeys<typeof redundancyStatusSchema>, keyof RedundancyStatus>>,
   Assert<Equal<SchemaKeys<typeof pointSchema>, keyof Point>>,
   Assert<Equal<SchemaKeys<typeof pointsResponseSchema>, keyof PointsResponse>>,
+  Assert<Equal<SchemaKeys<typeof scdPreviewSchema>, keyof ScdPreviewResponse>>,
   Assert<Equal<SchemaKeys<typeof frameSchema>, keyof Frame>>,
   Assert<Equal<SchemaKeys<typeof engineEventSchema>, keyof EngineEvent>>,
   Assert<Equal<SchemaKeys<typeof recentResponseSchema>, keyof RecentResponse>>,
