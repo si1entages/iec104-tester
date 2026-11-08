@@ -467,15 +467,10 @@ class SlaveResponseBuilder:
         await self._apply_command_delay()
         logger.info(f"Clock Sync from {state.conn.name}")
 
-        # 回复确认（使用收到的时间）
-        received_time = None
-        if asdu.objects and hasattr(asdu.objects[0].data, 'time_tag'):
-            received_time = asdu.objects[0].data.time_tag
-        elif asdu.objects and isinstance(asdu.objects[0].data, CP56Time2a):
-            received_time = asdu.objects[0].data
-
+        # 回复确认（IEC 60870-5-104：确认帧携带**子站当前时钟**，
+        # 主站据此测量时钟偏差——曾错误回显主站发来的时间，偏差无法测量）
         ack = ASDUBuilder.build_clock_sync_ack(
-            e._common_addr, time_tag=received_time,
+            e._common_addr, time_tag=CP56Time2a.now(),
             cot=self._reply_cot(COT.ACTCON),
         )
         await e._send_i_frame(state, ack)

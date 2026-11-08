@@ -128,10 +128,10 @@ class MasterCommandHandler:
         """发送时钟同步命令."""
         e = self._engine
         asdu_data = ASDUBuilder.build_clock_sync(e._common_addr, time_tag)
-        await e._send_command_asdu(asdu_data)
-
-        # 记录发送时间用于校验
+        # 先记录发送时间再发帧：确认帧可能极快返回，后记会漏采（T80 偏差测量）
         e._last_clock_sync_sent_time = time.monotonic()
+        e._last_clock_sync_sent_wall = time.time()
+        await e._send_command_asdu(asdu_data)
 
         logger.info("Clock Sync sent")
         e._fire_event(MasterEvent.CLOCK_SYNC)

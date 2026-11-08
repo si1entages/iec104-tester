@@ -536,6 +536,21 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
                     f'attachment; filename="iec104_{bridge.role}_points.csv"',
             })
 
+    async def api_master_clock_offset(request: web.Request) -> web.Response:
+        """时钟偏差测量（T80）：连发 N 次时钟同步，按子站确认时标计算偏差（ms）."""
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            return web.json_response({"ok": False, "error": "invalid body"}, status=400)
+        samples = body.get("samples") or 5
+        try:
+            samples = max(1, min(int(samples), 20))
+        except (TypeError, ValueError):
+            return web.json_response({"ok": False, "error": "samples 必须是整数"}, status=400)
+        return web.json_response(await bridge.measure_clock_offset(samples))
+
     async def api_export_report(request: web.Request) -> web.Response:
         """会话测试报告（T75）：自包含单文件 HTML，浏览器打印即 PDF 归档.
 
@@ -552,11 +567,13 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
             return web.json_response({"ok": False, "error": "limit 必须是整数"}, status=400)
         lt = getattr(bridge, "loadtest", None)
         lt_summary = lt.last_summary() if lt is not None else None
+        comp = getattr(bridge, "compliance", None)
+        comp_violations = comp.violation_list(50) if comp is not None else None
         html_text = build_session_report_html(
             bridge.role, bridge.status(),
             bridge.recent("frame", 5000), bridge.recent("event", 2000),
             title=title, notes=notes, max_frames=limit,
-            loadtest_summary=lt_summary)
+            loadtest_summary=lt_summary, compliance_violations=comp_violations)
         fname = time.strftime("iec104_report_%Y%m%d_%H%M%S.html")
         return web.Response(
             text=html_text, content_type="text/html",
@@ -1325,6 +1342,7 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
         app.router.add_get("/api/master/param_state", api_param_state)
         app.router.add_get("/api/master/params", api_params)
         app.router.add_post("/api/master/file", api_file)
+        app.router.add_post("/api/master/clock_offset", api_master_clock_offset)
         app.router.add_post("/api/points/yaml", api_points_yaml_put)
         app.router.add_post("/api/points/import", api_points_import)
         app.router.add_post("/api/points/batch", api_points_batch)

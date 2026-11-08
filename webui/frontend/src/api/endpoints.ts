@@ -132,6 +132,8 @@ export const api = {
     stop: () => apiPost('/api/master/stop', okSchema),
     gi: (body: GiRequest = {}) => apiPost('/api/master/gi', okSchema, body),
     clock: () => apiPost('/api/master/clock', okSchema),
+    clockOffset: (samples: number) =>
+      apiPost('/api/master/clock_offset', looseOkSchema, { samples }),
     ci: () => apiPost('/api/master/ci', okSchema),
     reset: () => apiPost('/api/master/reset', okSchema),
     test: () => apiPost('/api/master/test', okSchema),

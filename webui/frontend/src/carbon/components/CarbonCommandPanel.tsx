@@ -75,6 +75,10 @@ export function CarbonCommandPanel({ point, disabled = false }: Props) {
   const gi = useCommand(api.master.gi)
   const ci = useCommandNoArgs(api.master.ci)
   const clock = useCommandNoArgs(api.master.clock)
+  const clockOffset = useCommand(api.master.clockOffset)
+  const clockOffsetResult = clockOffset.data as
+    | { ok: boolean; error?: string; avg_ms?: number; min_ms?: number; max_ms?: number; count?: number }
+    | undefined
   const reset = useCommandNoArgs(api.master.reset)
   const test = useCommandNoArgs(api.master.test)
 
@@ -264,6 +268,16 @@ export function CarbonCommandPanel({ point, disabled = false }: Props) {
             </div>
             <div style={{ opacity: 0.75, fontSize: 12 }}>{t('cmd.yk.hint')}</div>
           </div>
+          {clockOffsetResult && clockOffsetResult.ok && clockOffsetResult.avg_ms !== undefined ? (
+            <div style={{ marginTop: 8, fontSize: 12, opacity: 0.85 }}>
+              {t('cmd.clockOffset.done', {
+                avg: String(clockOffsetResult.avg_ms),
+                count: String(clockOffsetResult.count ?? 0),
+                min: String(clockOffsetResult.min_ms ?? 0),
+                max: String(clockOffsetResult.max_ms ?? 0),
+              })}
+            </div>
+          ) : null}
         </AccordionItem>
 
         <AccordionItem title={t('cmd.sp.title')} {...section('sp')}>
@@ -353,6 +367,13 @@ export function CarbonCommandPanel({ point, disabled = false }: Props) {
               </Button>
               <Button kind="secondary" disabled={noRun || busy} onClick={() => void run(t('cmd.clock.label'), clock.mutateAsync())}>
                 {t('cmd.clock.label')}
+              </Button>
+              <Button
+                kind="secondary"
+                disabled={noRun || busy}
+                onClick={() => void run(t('cmd.clockOffset.label'), clockOffset.mutateAsync(5))}
+              >
+                {t('cmd.clockOffset.label')}
               </Button>
               <Button kind="secondary" disabled={noRun || busy} onClick={() => void run(t('cmd.reset.label'), reset.mutateAsync())}>
                 {t('cmd.reset.label')}

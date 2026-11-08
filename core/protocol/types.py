@@ -342,6 +342,15 @@ class CP56Time2a:
             weekday=t.tm_wday + 1,
         )
 
+    def to_epoch(self) -> float:
+        """转 epoch 秒（时钟偏差测量 T80 用；年份 0-99 按 2000-2099 解析）."""
+        from datetime import datetime
+
+        dt = datetime(2000 + self.year, self.month, self.day,
+                      self.hour, self.minute, self.millisecond // 1000,
+                      self.millisecond % 1000 * 1000)
+        return dt.timestamp()
+
     def to_datetime_str(self) -> str:
         return (f"20{self.year:02d}-{self.month:02d}-{self.day:02d} "
                 f"{self.hour:02d}:{self.minute:02d}:{self.millisecond // 1000:02d}"

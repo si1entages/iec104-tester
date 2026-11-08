@@ -435,7 +435,10 @@ graph TD
 | **T77** | 历史趋势回放：历史页「曲线」页签（2026-11-08） | 数据地基早就在（`data_history` 点位时间序列 + `/api/history/data` 查询端点），本轮补上消费侧。**后端零改动**；前端（Carbon/PF，经典版冻结不加）：历史页增「曲线」页签——页签内自管序列（类型 yx/yc/ym + IOA，1~8 条，DismissibleTag/链接标签可移除），时间范围复用页面「查询」按钮的 applied 状态；每序列一次 `GET /api/history/data`（`useQueries` 并行，limit 5000）；ECharts 时间轴曲线（遥信/遥脉阶梯 step、遥测折线，`toNumericValue` 过滤非数值行），0×0 防护同实时趋势图（回调 ref + ResizeObserver）；view 标签/导出按钮/分页在曲线页签下隐藏（语义不适用）。前端 i18n 8 键 |
 | **T78** | 压测×报告贯通（2026-11-08） | `LoadTestService.last_summary()` 公开最近一次汇总；`GET /api/export/report.html` 自动读取（both 模式 master 桥挂载的编排服务），报告新增「5. 压测汇总」段落（事件数/帧数/平均速率/错误，参数类字段不入表）——压测跑完报告自动带证据，未跑过压测则无该节。pytest 报告用例 6→7 |
 
-> **累计统计**：T01~T49、T51~T78 **全部完成**；**待办 1**（T50 真机复测，暂缓待窗口；T39 第三方实测已回填）。
+| **T79** | 协议合规监视器：桥旁路自动违规指认（2026-11-08） | `core/engine/compliance_monitor.py`（观察-only，异常绝不影响透传）：按链路对维护传输账目，检测——I 帧发送序号跳变/重复（mod 32768）、确认序号超前（确认未发出的帧）、未 STARTDT 即传数据、STARTDT 重复（中间无 STOPDT）、TESTFR 重复、k 超窗、t1 确认超时、t2 确认迟滞、t3 链路静默（超时类由状态轮询驱动 poll，每滞留期只报一次，ack 到达即解除）；U 常量从 `core.protocol.constants` 单源导入（手抄 0x11 vs 实际 0x43 曾错）。接线：`EngineBridge.start_bridge` 创建监视器，`_on_raw_frame` 即时观察 + 1Hz tick `poll`（无帧也报 t3 静默）；status 携带 `compliance{violation_total, counts, frames_seen, violations[20]}`；报告自动带「6. 合规违规」段；桥接页违规列表（Carbon/PF）。pytest 12 项（合成帧序列确定性验证：正常握手零违规/跳变/重复/确认超前/未启动/STARTDT 重复/t1/t2/t3/k/mod 回绕/STOPDT 后重启） |
+| **T80** | 时钟偏差测量（2026-11-08） | **规约符合性修复**：子站时钟同步确认帧曾**回显主站发来的时间**——按 IEC 60870-5-104 应携带**子站当前时钟**（否则偏差不可测），改为 `CP56Time2a.now()`（无回显语义断言需改）。主站侧：ACK 处理解析子站 CP56Time2a → 偏差 ≈ 子站时标 − (本端发送时刻+本端接收时刻)/2（单向延迟取 RTT/2），`_clock_offsets_ms` 有界暂存（32）；发送前先记 wall/monotonic 时间（曾后记——确认帧极快返回时漏采，竞态已修）；`CP56Time2a.to_epoch()` 新增。测量端点 `POST /api/master/clock_offset {samples}`（1~20）→ `EngineSession.measure_clock_offset`（连发 N 次、逐次等入账）→ `{ok, samples[], avg_ms, min_ms, max_ms, count}`。UI：主站命令面板时钟区「测量时钟偏差」按钮 + 偏差结果行（Carbon/PF）。pytest：真引擎 3 连测偏差近 0 稳定（含发送/回执竞态回归） |
+
+> **累计统计**：T01~T49、T51~T80 **全部完成**；**待办 1**（T50 真机复测，暂缓待窗口；T39 第三方实测已回填）。
 
 ---
 

@@ -105,3 +105,14 @@ def test_report_includes_loadtest_summary_when_present():
         loadtest_summary={"events_sent": 6000, "rx_frames": 5980,
                           "avg_eps": 100.0, "avg_fps": 99.7, "errors": 0})
     assert "压测汇总" in with_lt and "6000" in with_lt and "99.7" in with_lt
+
+
+def test_report_compliance_violations_section():
+    """合规违规列表存在时生成 §6（T79 报告贯通）；缺省无该节."""
+    base = build_session_report_html("master", _fake_status(), _envelopes(), [])
+    assert "合规违规" not in base
+    with_v = build_session_report_html(
+        "master", _fake_status(), _envelopes(), [],
+        compliance_violations=[{"ts": 1000.0, "side": "slave", "kind": "seq-jump",
+                                "detail": "I 帧发送序号 5，期望 1"}])
+    assert "合规违规" in with_v and "seq-jump" in with_v and "slave" in with_v

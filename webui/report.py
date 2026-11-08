@@ -79,6 +79,7 @@ def build_session_report_html(
     notes: str = "",
     max_frames: int = 300,
     loadtest_summary: dict | None = None,
+    compliance_violations: list[dict] | None = None,
 ) -> str:
     """生成自包含 HTML 测试报告.
 
@@ -141,6 +142,18 @@ def build_session_report_html(
         loadtest_html = (f"<h2>5. 压测汇总</h2>"
                          f'<table class=meta>{lt_rows}</table>'
                          "<p class=foot>压测口径：子站按目标速率自发事件，主站侧差分统计。</p>")
+    compliance_html = ""
+    if compliance_violations:
+        v_rows = "".join(
+            f"<tr><td>{_escape(time.strftime('%H:%M:%S', time.localtime(v['ts'])))}</td>"
+            f"<td>{_escape(v['side'])}</td><td>{_escape(v['kind'])}</td>"
+            f"<td>{_escape(v['detail'])}</td></tr>"
+            for v in compliance_violations)
+        compliance_html = (f"<h2>6. 合规违规（桥旁路监视，最近 {len(compliance_violations)} 条）</h2>"
+                           '<table><tr><th>时间</th><th>归属</th><th>类型</th><th>详情</th></tr>'
+                           f"{v_rows}</table>"
+                           "<p class=foot>类型：seq-jump=发送序号跳变；ack-ahead=确认超前；"
+                           "t1/t2/t3=超时；no-startdt=未启动传数据；k-exceed=超流控窗口。</p>")
     notes_html = f"<p class=notes><b>备注：</b>{_escape(notes)}</p>" if notes else ""
 
     return f"""<!DOCTYPE html>
@@ -192,5 +205,6 @@ def build_session_report_html(
   {events_html}
 </table>
 {loadtest_html}
+{compliance_html}
 <p class=foot>由 iec104-tester 自动生成；本文件自包含（无外部引用），浏览器「打印 → 另存为 PDF」即可归档交付。</p>
 </body></html>"""

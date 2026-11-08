@@ -50,6 +50,13 @@ export interface Status {
     upstream_host?: string
     upstream_port?: number
   }
+  /** 桥角色合规监视（running 时存在）（T79） */
+  compliance?: {
+    violation_total?: number
+    counts?: Record<string, number>
+    frames_seen?: number
+    violations?: Array<{ ts?: number; side?: string; kind?: string; detail?: string }>
+  }
   schemaVersion?: number
 }
 

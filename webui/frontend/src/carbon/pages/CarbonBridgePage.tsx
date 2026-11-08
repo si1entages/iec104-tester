@@ -117,6 +117,29 @@ export function CarbonBridgePage() {
         ]} />
       </Panel>
 
+      {status?.compliance ? (
+        <Panel title={t('compliance.title')}>
+          <KvList items={[
+            { term: t('compliance.total'), value: String(status.compliance.violation_total ?? 0) },
+            { term: t('compliance.frames'), value: String(status.compliance.frames_seen ?? 0) },
+          ]} />
+          {status.compliance.violations && status.compliance.violations.length > 0 ? (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 4 }}>
+                {t('compliance.violations')}
+              </div>
+              {status.compliance.violations.map((v, i) => (
+                <div key={i} style={{ fontSize: 12, fontFamily: 'var(--cds-code-01, monospace)' }}>
+                  {new Date((v.ts ?? 0) * 1000).toLocaleTimeString()} [{v.side}] {v.kind}: {v.detail}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ marginTop: 8, fontSize: 12, opacity: 0.7 }}>{t('compliance.none')}</div>
+          )}
+        </Panel>
+      ) : null}
+
       <CarbonFrameViewer />
     </div>
   )

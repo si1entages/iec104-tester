@@ -138,6 +138,18 @@ export const statusSchema = obj({
     upstream_host: optional(str()),
     upstream_port: optional(num()),
   })),
+  // 桥角色合规监视（T79）：running 时存在
+  compliance: optional(obj({
+    violation_total: optional(num()),
+    counts: optional(dict(num())),
+    frames_seen: optional(num()),
+    violations: optional(arr(obj({
+      ts: optional(num()),
+      side: optional(str()),
+      kind: optional(str()),
+      detail: optional(str()),
+    }))),
+  })),
 })
 
 export const pointSchema = obj({

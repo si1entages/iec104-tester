@@ -831,6 +831,29 @@ class EngineSession:
             except Exception as e:  # noqa: BLE001
                 logger.warning("network simulation remove failed: %s", e)
 
+    async def measure_clock_offset(self, samples: int = 5) -> dict:
+        """时钟偏差测量（T80）：连发 N 次 C_CS_NA_1，收集子站时标偏移（ms）.
+
+        每次：发送 → 等待确认帧入账（_clock_offsets_ms 增长）→ 下一发。
+        """
+        eng = self.require_master()
+        total = max(1, min(int(samples), 20))
+        offsets: list[float] = []
+        for _ in range(total):
+            before = len(eng._clock_offsets_ms)
+            await eng.clock_sync()
+            for _ in range(40):  # 最长 2s 等确认入账
+                await asyncio.sleep(0.05)
+                if len(eng._clock_offsets_ms) > before:
+                    break
+            if len(eng._clock_offsets_ms) > before:
+                offsets.append(eng._clock_offsets_ms[-1])
+        if not offsets:
+            return {"ok": False, "error": "未收到时钟同步确认（连接是否正常？）"}
+        return {"ok": True, "samples": offsets, "count": len(offsets),
+                "avg_ms": round(sum(offsets) / len(offsets), 1),
+                "min_ms": min(offsets), "max_ms": max(offsets)}
+
     async def slave_set_yx(self, ioa: int, value: bool) -> dict:
         eng = self.require_slave()
         await eng.send_spontaneous_yx(int(ioa), value)

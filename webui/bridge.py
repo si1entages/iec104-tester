@@ -9,6 +9,7 @@ from typing import Any
 
 from core.config import AppConfig
 from core.data.point_table import PointTable
+from core.engine.compliance_monitor import ComplianceMonitor
 from core.engine.tcp_bridge import BridgeConfig, TcpBridge
 from core.logging_manager import LogManager
 
@@ -85,9 +86,10 @@ class EngineBridge:
         self.points = PointService(point_table)
         self.point_table: PointTable = self.points.table
         if role == "bridge":
-            # 桥角色：无 104 引擎；TcpBridge 在 start_bridge 时创建
+            # 桥角色：无 104 引擎；TcpBridge 与合规监视器在 start_bridge 时创建
             self.session: EngineSession | _BridgeRoleSessionStub = _BridgeRoleSessionStub()
             self.tcp_bridge: TcpBridge | None = None
+            self.compliance: ComplianceMonitor | None = None
             self._bridge_cfg: dict[str, Any] = {}
             self._stats_tick_at = 0.0
         else:
@@ -183,11 +185,16 @@ class EngineBridge:
                 self._history.record_frame(direction, data, client_id=client_id)
             except Exception as e:  # noqa: BLE001 — 历史库不得影响报文主路径
                 logger.warning(f"history record_frame failed: {e}")
+        if self.role == "bridge" and self.compliance is not None:
+            # 合规监视：即时类违规（序号/确认/U 时序）随帧入账
+            self.compliance.observe(direction, data)
         if self.role == "bridge":
             # 桥角色：帧流量可能很大，节流广播状态刷新（前端重拉 stats）
             now = time.monotonic()
             if now - self._stats_tick_at >= _BRIDGE_STATS_TICK_S:
                 self._stats_tick_at = now
+                if self.compliance is not None:
+                    self.compliance.poll(time.time())  # t1/t2/t3 静默类随轮询发现
                 self.bus.publish("event", {"type": "ui", "data": {"msg": "bridge-stats"}})
 
     def ensure_demo_points(self) -> None:
@@ -214,6 +221,12 @@ class EngineBridge:
             if self.tcp_bridge is not None:
                 st["bridge_stats"] = self.tcp_bridge.stats.as_dict()
                 st["bridge_cfg"] = dict(self._bridge_cfg)
+                if self.compliance is not None:
+                    self.compliance.poll(time.time())
+                    st["compliance"] = {
+                        **self.compliance.as_dict(),
+                        "violations": self.compliance.violation_list(20),
+                    }
         else:
             st.update(self.session.status_fields())
         # 引擎未启动时也必须给出配置里的连接参数——否则前端输入框回落到
@@ -296,6 +309,7 @@ class EngineBridge:
                          upstream_host=upstream_host, upstream_port=upstream_port),
             on_frame=self._on_raw_frame,
         )
+        self.compliance = ComplianceMonitor()
         try:
             await bridge.start()
         except OSError as e:
@@ -318,10 +332,14 @@ class EngineBridge:
             return {"ok": True}
         await self.tcp_bridge.stop()
         self.tcp_bridge = None
+        self.compliance = None
         self._bridge_cfg = {}
         self._status["running"] = False
         self._notify_ui("桥已停止")
         return {"ok": True}
+
+    async def measure_clock_offset(self, samples: int = 5) -> dict:
+        return await self._cmd(self.session.measure_clock_offset(samples))
 
     async def general_interrogation(self, qoi: int = 20) -> dict:
         return await self._cmd(self.session.general_interrogation(qoi))
@@ -488,6 +506,7 @@ class EngineBridge:
                 try:
                     await self.tcp_bridge.stop()
                     self.tcp_bridge = None
+                    self.compliance = None
                 except Exception as e:  # noqa: BLE001
                     logger.warning("tcp bridge stop on shutdown: %s", e)
             # 1) 测试中心子进程（若在运行）

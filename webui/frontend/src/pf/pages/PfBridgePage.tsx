@@ -166,6 +166,40 @@ export function PfBridgePage() {
         </Card>
       </PageSection>
 
+      {status?.compliance ? (
+        <PageSection>
+          <Card>
+            <CardTitle>{t('compliance.title')}</CardTitle>
+            <CardBody>
+              <DescriptionList isHorizontal columnModifier={{ default: '1Col', md: '2Col' }}>
+                <DescriptionListGroup>
+                  <DescriptionListTerm>{t('compliance.total')}</DescriptionListTerm>
+                  <DescriptionListDescription>{String(status.compliance.violation_total ?? 0)}</DescriptionListDescription>
+                </DescriptionListGroup>
+                <DescriptionListGroup>
+                  <DescriptionListTerm>{t('compliance.frames')}</DescriptionListTerm>
+                  <DescriptionListDescription>{String(status.compliance.frames_seen ?? 0)}</DescriptionListDescription>
+                </DescriptionListGroup>
+              </DescriptionList>
+              {status.compliance.violations && status.compliance.violations.length > 0 ? (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 4 }}>
+                    {t('compliance.violations')}
+                  </div>
+                  {status.compliance.violations.map((v, i) => (
+                    <div key={i} style={{ fontSize: 12, fontFamily: 'var(--pf-t--global--font--family--mono)' }}>
+                      {new Date((v.ts ?? 0) * 1000).toLocaleTimeString()} [{v.side}] {v.kind}: {v.detail}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ marginTop: 8, fontSize: 12, opacity: 0.7 }}>{t('compliance.none')}</div>
+              )}
+            </CardBody>
+          </Card>
+        </PageSection>
+      ) : null}
+
       <PageSection>
         <PfFrameViewer />
       </PageSection>

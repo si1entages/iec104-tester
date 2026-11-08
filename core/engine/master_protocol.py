@@ -349,8 +349,26 @@ class MasterProtocolHandler:
         elif type_id == TypeID.C_CS_NA_1:
             if e._last_clock_sync_sent_time:
                 round_trip = time.monotonic() - e._last_clock_sync_sent_time
-                logger.info(f"Clock Sync ACK received: round-trip={round_trip*1000:.1f}ms, COT={cot}")
+                # 时钟偏差测量（T80）：子站确认帧携带子站当前时钟（CP56Time2a），
+                # 偏差 ≈ 子站时标 − (本端发送时刻 + 本端接收时刻)/2（单向延迟取 RTT/2）
+                sent_wall = e._last_clock_sync_sent_wall
+                slave_t1 = None
+                if asdu.objects and hasattr(asdu.objects[0].data, "time_tag"):
+                    slave_t1 = asdu.objects[0].data.time_tag
+                if slave_t1 is not None and sent_wall:
+                    try:
+                        offset_ms = round(
+                            (slave_t1.to_epoch() - (sent_wall + time.time()) / 2) * 1000, 1)
+                        e._clock_offsets_ms.append(offset_ms)
+                        logger.info(
+                            f"Clock Sync ACK: round-trip={round_trip*1000:.1f}ms, "
+                            f"offset={offset_ms:+.1f}ms, COT={cot}")
+                    except Exception as exc:  # noqa: BLE001 — 时标异常不影响确认处理
+                        logger.warning(f"Clock offset parse failed: {exc}")
+                else:
+                    logger.info(f"Clock Sync ACK received: round-trip={round_trip*1000:.1f}ms, COT={cot}")
                 e._last_clock_sync_sent_time = None
+                e._last_clock_sync_sent_wall = None
             else:
                 logger.info(f"Clock Sync ACK received, COT={cot}")
 

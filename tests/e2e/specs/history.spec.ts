@@ -91,3 +91,26 @@ test('历史页：统计标签、IOA 过滤、报文页签与导出可用', asyn
   await expect.poll(() => frameUrls.length).toBeGreaterThan(0)
   await expect(page.getByText('680E0400030064010600010000000014')).toBeVisible()
 })
+
+test('历史页曲线页签：添加序列 → 历史曲线绘制（T77）', async ({ page }) => {
+  // 拦截曲线数据请求：ioa=100 返回确定性 YX 序列，其余返回空
+  await page.route('**/api/history/data*', (route) => {
+    const url = route.request().url()
+    if (url.includes('ioa=100')) {
+      return route.fulfill({ json: { ok: true, enabled: true, rows: DATA_ROWS.filter((r) => r.ioa === 100) } })
+    }
+    return route.fulfill({ json: { ok: true, enabled: true, rows: [] } })
+  })
+  await gotoApp(page, MASTER, '历史')
+
+  await page.getByRole('button', { name: '曲线' }).click()
+  await expect(page.getByText(/添加 1~8 个点位序列|Add 1-8 point series/)).toBeVisible()
+
+  // 添加 yx-100 序列（曲线页签默认类型 yc → 切 yx）
+  await page.locator('#pf-hc-type').selectOption('yx')
+  await page.locator('#pf-hc-ioa').fill('100')
+  await page.getByRole('button', { name: '添加序列' }).click()
+
+  // 曲线画布出现（有数据行 → 渲染 ECharts）
+  await expect(page.locator('canvas').first()).toBeVisible({ timeout: 10_000 })
+})

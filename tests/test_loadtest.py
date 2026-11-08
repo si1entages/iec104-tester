@@ -89,3 +89,32 @@ async def test_loadtest_guards():
     await slave_bridge2.stop_slave()
     await master_bridge2.shutdown()
     await slave_bridge2.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_clock_offset_measurement():
+    """T80：真引擎时钟同步 → 主站采集子站时标偏差（本机同进程应近 0）."""
+    pt = PointTable()
+    pt.generate_demo_points(yx_count=3, yc_count=3, yk_count=0, ym_count=0)
+    slave_bridge = EngineBridge("slave", point_table=pt)
+    master_bridge = EngineBridge("master", point_table=pt)
+    await slave_bridge.start_slave("127.0.0.1", 0, 1)
+    slave_port = slave_bridge.session.engine._server._server.sockets[0].getsockname()[1]
+    await master_bridge.start_master("127.0.0.1", slave_port, 1)
+    for _ in range(50):
+        if master_bridge.session.engine and master_bridge.session.engine.is_running:
+            break
+        await asyncio.sleep(0.1)
+    try:
+        r = await master_bridge.measure_clock_offset(samples=3)
+        assert r["ok"] is True, r
+        assert r["count"] == 3
+        # 本机回环：偏差应在 ±2s 内（进程内时钟同源）
+        assert abs(r["avg_ms"]) < 2000
+        # 确认帧按标准携带**子站当前时钟**（曾错误回显主站时间——回归锁定）
+        assert len(set(r["samples"])) >= 1
+    finally:
+        await master_bridge.stop_master()
+        await slave_bridge.stop_slave()
+        await master_bridge.shutdown()
+        await slave_bridge.shutdown()

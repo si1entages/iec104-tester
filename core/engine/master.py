@@ -181,8 +181,10 @@ class MasterEngine(EngineBase):
         self._rx_buffer: deque = deque(maxlen=1000)
         self._tx_buffer: deque = deque(maxlen=1000)
 
-        # 时钟同步校验
+        # 时钟同步校验 + 时钟偏差测量（T80）
         self._last_clock_sync_sent_time: float | None = None
+        self._last_clock_sync_sent_wall: float | None = None
+        self._clock_offsets_ms: deque = deque(maxlen=32)
 
         # 文件传输管理器
         self._file_transfer = FileTransferMaster(common_addr)
