@@ -388,3 +388,38 @@ async def test_bridge_set_condition_realtime():
     finally:
         await bridge.stop()
         await slave.stop()
+
+
+@pytest.mark.asyncio
+async def test_bridge_injection_corrupt_and_delay_relays():
+    """损坏 100% + 延迟：转发帧字节被改、延迟后仍送达（字节流不丢）."""
+    from core.engine.slave import SlaveEngine
+
+    pt = PointTable()
+    pt.generate_demo_points(yx_count=5, yc_count=3, yk_count=0, ym_count=0)
+    slave = SlaveEngine(port=0, point_table=pt)
+    await slave.start()
+    upstream_port = slave._server._server.sockets[0].getsockname()[1]
+
+    observed: list[tuple[str, bytes]] = []
+    bridge = TcpBridge(BridgeConfig(
+        listen_host="127.0.0.1", listen_port=0,
+        upstream_host="127.0.0.1", upstream_port=upstream_port,
+        condition=NetworkCondition(corrupt_rate=1.0, corrupt_bits=1,
+                                   delay_ms=10, delay_variance_ms=0),
+    ), on_frame=lambda data, direction, cid: observed.append((direction, data)))
+    await bridge.start()
+    try:
+        reader, writer = await asyncio.open_connection("127.0.0.1", bridge.listen_port)
+        # STARTDT_ACT 被损坏 → 上游不识别，无响应；但观察侧仍是原始帧
+        writer.write(bytes([0x68, 0x04, 0x07, 0x00, 0x00, 0x00]))
+        await writer.drain()
+        await asyncio.sleep(0.2)
+        assert bridge.injection_stats()["corrupted"] >= 1
+        assert bridge.injection_stats()["delayed"] >= 1
+        assert any(d == "tx" and f == bytes([0x68, 0x04, 0x07, 0x00, 0x00, 0x00])
+                   for d, f in observed)
+        writer.close()
+    finally:
+        await bridge.stop()
+        await slave.stop()

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import random
 
+import pytest
+
 from core.engine.condition_injector import ConditionInjector, DeliverAction
 from core.protocol.apci import APCICodec
 from core.simulation.conditions import NetworkCondition
@@ -90,3 +92,46 @@ def test_reorder_batches_and_stats():
     # 乱序 = 附加延迟（后发先至），帧数守恒且每帧都带正延迟
     assert sum(len(o) for o in outs) == 3
     assert all(o[0].delay_s > 0 for o in outs)
+
+
+@pytest.mark.asyncio
+async def test_emit_actions_immediate_and_delayed():
+    """emit_actions：立即动作写 writer，延迟动作由 loop 调度后写入."""
+    import asyncio
+
+    from core.engine.condition_injector import _delayed_write, emit_actions
+
+    class FakeWriter:
+        def __init__(self):
+            self.buf = bytearray()
+            self.is_closing = lambda: False
+
+        def write(self, data):
+            self.buf.extend(data)
+
+        async def drain(self):
+            pass
+
+    w = FakeWriter()
+    await emit_actions([DeliverAction(b"now"), DeliverAction(b"later", 0.01)], w)
+    assert bytes(w.buf) == b"now"
+    await asyncio.sleep(0.03)
+    assert bytes(w.buf) == b"nowlater"
+
+    # 关闭态延迟写被吞（不抛）
+    closed = FakeWriter()
+    closed.is_closing = lambda: True
+    _delayed_write(closed, b"x")
+    assert bytes(closed.buf) == b""
+
+
+def test_disconnect_during_silence_drops_all():
+    """断线期内所有帧被丢弃."""
+    import time
+
+    inj = ConditionInjector(NetworkCondition(
+        disconnect_rate=1.0, disconnect_duration_s=0.05))
+    assert _process(inj) == []
+    assert _process(inj) == []
+    assert inj.stats.disconnects == 1 and inj.stats.dropped >= 1  # 触发 + 静默期丢弃
+    time.sleep(0.06)
