@@ -59,6 +59,9 @@ export function CarbonTrendChart({ watched, onRemove, onClear }: Props) {
     if (!chart) return
     const option = {
       backgroundColor: 'transparent',
+      // 关动画（真机联调反馈）：高频点值流下 2Hz 重绘若带默认动画，整条曲线
+      // 每次更新都滑动一遍，观感是「跑马灯」。工业趋势图按 ISA-101 应瞬时重绘。
+      animation: false,
       grid: { left: 48, right: 16, top: 32, bottom: 28 },
       tooltip: { trigger: 'axis' as const, confine: true },
       legend: { textStyle: { color: colors.text }, top: 0 },
