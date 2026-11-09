@@ -166,7 +166,8 @@ async def run_doctor(
 
     # ── ② STARTDT ACT → CON ──────────────────────────────────────
     startdt_ok = False
-    try:
+    pending: list[bytes] = []   # 检测阶段收到的帧：不少对端在 CON 后立刻自发上送，
+    try:                         # 这些帧必须并入数据流观察，不能丢（否则漏判数据流）
         writer.write(_u_startdt_act())
         await writer.drain()
         deadline = time.monotonic() + startdt_timeout
@@ -175,13 +176,13 @@ async def run_doctor(
             if rest <= 0:
                 break
             for frame in await _recv_frames(reader, splitter, rest):
+                pending.append(frame)
                 try:
                     apci, _ = APCICodec.decode(frame)
                 except ValueError:
                     continue
                 if apci.frame_type == APDUType.U and frame[2] == U_STARTDT_CON:
-                    startdt_ok = True
-                    break
+                    startdt_ok = True  # 不 break 内层：CON 同批到达的自发帧也要并入观察
             if startdt_ok:
                 break
     except (OSError, ConnectionError) as exc:
@@ -225,12 +226,10 @@ async def run_doctor(
             if apci.frame_type != APDUType.I:
                 continue
             i_frames += 1
+            unacked += 1   # 对端发来的 I 帧：未回 S 帧确认前计数
             n_r = _vr_of(frame)
             if n_r != 0:
                 n_r_advanced = True
-            # S 帧确认计数：对端 I 帧 N(R) 覆盖我方发送则视为确认（vs=0 → N(R)≥1）
-            if n_r > 0:
-                unacked = 0
             try:
                 asdu = frame[6:6 + apci.asdu_length]
                 if len(asdu) < 6:
@@ -248,7 +247,8 @@ async def run_doctor(
             except (ValueError, struct.error):
                 continue
 
-    # 先观察自发流
+    # 先并入 STARTDT 检测阶段的帧，再观察自发流
+    _observe(pending)
     _observe(await _recv_frames(reader, splitter, observe_seconds))
     if i_frames == 0:
         # 没有自发流：发一次总召唤（很多装置只在 GI 后上送）

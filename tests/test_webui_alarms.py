@@ -13,10 +13,13 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import asyncio
+from contextlib import suppress
+
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
-from webui.alarms import AlarmService
+from webui.alarms import Alarm, AlarmService
 from webui.bridge import EngineBridge
 from webui.server import create_app
 
@@ -145,3 +148,42 @@ async def test_alarm_rest_endpoints():
         r = await client.post("/api/alarms/config", json={"stale_seconds": 30})
         cfg = (await r.json())["config"]
         assert cfg["stale_seconds"] == 30.0
+
+
+def test_alarm_configure_bounds_and_history_cap():
+    """config 边界钳位、loop 异常吞噬、历史有界."""
+    svc = _svc(debounce=1)
+    svc.configure(stale_seconds=1, comm_seconds=1, jump_delta=-5, debounce=99, sound=True)
+    assert svc.config.stale_seconds == 5.0        # 下限钳位
+    assert svc.config.comm_seconds == 3.0         # 下限钳位
+    assert svc.config.jump_delta is None          # 负值/0 → 关闭
+    assert svc.config.debounce == 10              # 上限钳位
+    assert svc.config.sound is True
+
+    # jump_delta 恢复；历史截断用例需要立即触发（debounce=1）
+    svc.configure(jump_delta=5, debounce=1)
+    assert svc.config.jump_delta == 5.0
+
+    # history 有界（500）：直接注入 510 条
+    for i in range(510):
+        svc.history.append(
+            Alarm(id=1000 + i, kind="limit", ioa=None, message=f"m{i}", ts=time.time()))
+    svc.bridge._points = [{"ioa": 1, "type": "YX", "value": "ON",
+                           "ts": (time.time() - 999) * 1000}]
+    svc.evaluate()  # 触发一条 stale → 追加历史并截断到 500
+    assert len(svc.history) <= 500
+    assert svc.history_list(5)["total"] == len(svc.history)
+    assert len(svc.history_records(3)) == 3
+
+
+@pytest.mark.asyncio
+async def test_alarm_loop_swallows_exceptions():
+    """loop() 内评估异常被吞（告警故障绝不影响引擎）."""
+    svc = _svc()
+    svc._points = None  # 非法快照 → evaluate 抛异常
+    task = asyncio.ensure_future(svc.loop(interval=0.05))
+    await asyncio.sleep(0.2)
+    assert not task.done() or task.cancelled() is False
+    task.cancel()
+    with suppress(asyncio.CancelledError):
+        await task

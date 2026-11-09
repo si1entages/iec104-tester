@@ -242,7 +242,8 @@ class AlarmService:
             self.config.comm_seconds = max(3.0, min(float(kwargs["comm_seconds"]), 3600.0))
         if "jump_delta" in kwargs:
             jd = kwargs["jump_delta"]
-            self.config.jump_delta = None if jd in (None, 0) else max(1e-9, float(jd))
+            # None/0/负值 → 关闭（正值才启用，钳到正数）
+            self.config.jump_delta = None if jd is None or float(jd) <= 0 else float(jd)
         if "debounce" in kwargs and kwargs["debounce"] is not None:
             self.config.debounce = max(1, min(int(kwargs["debounce"]), 10))  # type: ignore[arg-type]
         if "sound" in kwargs and kwargs["sound"] is not None:
