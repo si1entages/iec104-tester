@@ -3,6 +3,41 @@
 本文件记录对外可见的功能/修复；版本号与 `pyproject.toml`、
 `core/version.py`、`webui/frontend/package.json` 保持一致。
 
+## [1.9.0] — 2026-11-10
+
+### Added
+
+- **值守告警引擎（T93）**：限值越限（点表 min/max）/ 死值陈旧（>60s，含点表
+  陈旧标记）/ 突变 / 通信中断（Running 且 rx 停滞 >10s）四类规则；1Hz 评估 +
+  去抖 + active→ack→cleared 生命周期 + 有界历史；`GET /api/alarms[/history]`、
+  `POST ack/config`；状态页「值守告警」卡（Carbon/PF，可选声音提示）；点表
+  值单元格陈旧灰化 + tooltip；告警历史自动进测试报告。
+- **连接医生（T94）**：`POST /api/master/doctor` 分层自检（TCP → STARTDT →
+  数据流 → 结论建议），取证含对端 S 帧计数、N(R) 推进、保留 COT 计数；对
+  「链路通但对端不回确认」类缺陷直接给结论（真机 simulator4 实测）；结论随
+  测试报告附存（报告新增「9. 连接诊断」段）；连接面板「诊断」按钮（Carbon/PF）。
+- **独立 104 主站验收工具**：`tools/qa_independent_master.py`（裸 socket 按标准
+  手写，不经本项目引擎）——外部互操作验收用。
+
+### Fixed
+
+- **I 帧 N(R) 隐式确认不停 t1（真机联调修复）**：原实现只认 S 帧确认，对
+  「用 N(R) 隐式确认、少发 S 帧」的合规设备，每发一条命令都会在 t1(15s) 后
+  误判超时断链。`process_rx_i_frame_ack` 返回确认窗口是否推进，主/子站会话
+  据此停 t1；回归用例锁死（假子站只回 N(R)=1 的 I 帧 → t1 不得超时）。
+- **趋势图关闭 ECharts 动画**：高频点值流下 2Hz 重绘的整线滑动像跑马灯，
+  按 ISA-101 改瞬时重绘（Carbon/PF）；趋势图单采样态提示（等待数据变化）。
+- **PF 桥接页条件卡遮挡**：条件卡裸放在两个 PageSection 之间被后续 section
+  覆盖，「应用条件」按钮真实不可点——包进独立 PageSection 修复。
+
+### Verified
+
+- 第三方 simulator4.exe（127.0.0.1:24040）真机联调：连接/STARTDT/GI/对时/
+  读/设点全部走通且连接稳定；趋势图像素级验证（曲线区 956 曲线色像素）；
+  子站外部通信经独立主站 80 点读取 PASS。后端 pytest **1667 passed**；
+  Playwright e2e **57 passed**（新增 trend-live 像素级回归 + T90 五条）；
+  前端单测 133 passed；CI 口径 core+webui 分支覆盖 91%。
+
 ## [1.8.0] — 2026-11-09
 
 ### Added

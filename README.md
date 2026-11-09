@@ -9,20 +9,20 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.8.0-blue.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.9.0-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/WebUI-aiohttp%20%2B%20React19-41CD52" alt="Web UI">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/IEC--104-72%20TypeIDs-brightgreen.svg" alt="IEC 104">
-  <img src="https://img.shields.io/badge/Tests-1656%20passed-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-1667%20passed-brightgreen.svg" alt="Tests">
 </p>
 
 ---
 
 工业级 IEC 60870-5-104 协议测试工具：主站/子站**单页浏览器工作台**（浏览器为唯一界面，同一进程、同一端口内切换主站/子站），协议引擎完整；附三套可即时切换的 UI、SCD 点表导入、透明桥与旁路合规监视、报文录制回放、YAML 自动化测试、压测编排、测试报告导出、TLS 传输加密与历史库。
 
-> 版本说明：当前发布基线 **v1.8.0**（2026-11-09）——桥上网络条件注入（混沌验收）、
-> 应用层合规规则第二批（合规规则合计 28 项）、测试报告嵌历史曲线快照。逐版特性见
+> 版本说明：当前发布基线 **v1.9.0**（2026-11-10）——值守告警引擎（限值/死值/突变/断链）、
+> 连接医生（分层自检诊断）、真机联调修复（I 帧 N(R) 隐式确认停 t1）。逐版特性见
 > [`CHANGELOG.md`](CHANGELOG.md)；已交付能力与后续计划见 [`PROJECT.md`](PROJECT.md)。
 
 ### 界面预览
@@ -262,7 +262,7 @@ custom_types: []   # 非标厂商私有 TypeID 注册
 ## 🧪 测试
 
 ```bash
-python -m pytest tests/ -q              # 单元 + 集成（1656 例；性能基准默认排除）
+python -m pytest tests/ -q              # 单元 + 集成（1667 例；性能基准默认排除）
 python -m pytest tests/ -q --cov=core --cov-branch --cov-report=term-missing --cov-fail-under=91
 python -m pytest tests/ -m perf -q      # 性能基准（解码/10 万点/20 客户端并发/环回 soak）
 IEC104_SOAK_SECONDS=7200 python -m pytest tests/perf/test_soak_loopback.py -m perf -q
@@ -272,7 +272,7 @@ python tests/e2e/qa_full_flow.py        # 全流程验收（12 阶段；CI job e
 python tools/mutation_smoke.py          # 协议层变异冒烟（12/12 必须被杀死）
 ```
 
-- 当前基线：**1656 passed，4 deselected**（v1.8.0 发布基线 1654 + 版本/文档守卫与 t1 隐式确认回归 2 例）+ 前端单测 **133 passed** + Playwright e2e **51 passed**（三套件页级门禁：巡检/对比度/非文本对比在 **Carbon 与 PatternFly 上各跑一遍**，`E2E_KITS=pf,carbon` 可裁剪）；`core/` 92.0%、`webui/` 89.0%，合并 **91.3%**（CI 口径 `--cov=core --cov=webui --cov-branch --cov-fail-under=91`，webui 独立门禁 85%）
+- 当前基线：**1667 passed，4 deselected**（v1.9.0）+ 前端单测 **133 passed** + Playwright e2e **57 passed**（三套件页级门禁：巡检/对比度/非文本对比在 **Carbon 与 PatternFly 上各跑一遍**，`E2E_KITS=pf,carbon` 可裁剪）；`core/` 92.0%、`webui/` 89.0%，合并 **91.3%**（CI 口径 `--cov=core --cov=webui --cov-branch --cov-fail-under=91`，webui 独立门禁 85%）
 - 20 客户端并发实测约 **2.9k 帧/秒**；2h soak 实测 **7200s / 34,765 次 GI / 内存 +0.64 MB**
 - 互操作语料库：`tests/fixtures/frames/`（合成基线 + `real/` 真机目录），
   `tests/test_frame_corpus_replay.py` 做 golden 解码与主站回放回归；

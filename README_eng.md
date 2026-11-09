@@ -9,12 +9,12 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.8.0-blue.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.9.0-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/WebUI-aiohttp%20%2B%20React19-41CD52" alt="Web UI">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/IEC--104-72%20TypeIDs-brightgreen.svg" alt="IEC 104">
-  <img src="https://img.shields.io/badge/Tests-1656%20passed-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-1667%20passed-brightgreen.svg" alt="Tests">
 </p>
 
 ---
@@ -26,9 +26,9 @@ import, a transparent bridge with bypass compliance monitoring and chaos injecti
 packet capture/replay, YAML scripted tests, load-test orchestration, test-report export,
 TLS encryption and a history DB.
 
-> Release baseline **v1.8.0** (2026-11-09) — bridge network-condition injection (chaos
-> acceptance), the second batch of application-layer compliance rules (28 rules total) and
-> chart snapshots embedded in test reports. Per-version details in
+> Release baseline **v1.9.0** (2026-11-10) — duty alarm engine (limit / stale / jump /
+> comm-loss), the connection doctor (layered self-check), and the real-device fix for
+> I-frame implicit-ACK not stopping t1. Per-version details in
 > [`CHANGELOG.md`](CHANGELOG.md); delivered scope and the next iteration in
 > [`PROJECT.md`](PROJECT.md).
 
@@ -231,7 +231,7 @@ python run_multi_station.py --stations 3
 ## Tests
 
 ```bash
-python -m pytest tests/ -q              # unit + integration (1656; perf excluded)
+python -m pytest tests/ -q              # unit + integration (1667; perf excluded)
 python -m pytest tests/ -q --cov=core --cov-branch --cov-report=term-missing --cov-fail-under=91
 python -m pytest tests/ -m perf -q      # decode / 100k snapshot / 20 clients / soak
 IEC104_SOAK_SECONDS=7200 python -m pytest tests/perf/test_soak_loopback.py -m perf -q

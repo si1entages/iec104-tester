@@ -1,6 +1,6 @@
 [project]
 name = "iec104-tester"
-version = "1.8.0"
+version = "1.9.0"
 description = "IEC 60870-5-104 协议测试工具 — 主站/子站模拟器"
 readme = "README.md"
 requires-python = ">=3.11"
