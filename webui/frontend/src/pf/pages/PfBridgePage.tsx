@@ -167,7 +167,9 @@ export function PfBridgePage() {
         </Card>
       </PageSection>
 
-      <PfConditionCard />
+      <PageSection>
+        <PfConditionCard />
+      </PageSection>
 
       {status?.compliance ? (
         <PageSection>
