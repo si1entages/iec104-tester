@@ -46,6 +46,9 @@ import type {
   CaptureStatus,
   EngineEvent,
   Frame,
+  Alarm,
+  AlarmsHistory,
+  AlarmsSnapshot,
   DoctorResponse,
   DoctorReport,
   DoctorStep,
@@ -172,6 +175,10 @@ export const pointSchema = obj({
   sbo: optional(bool()),
   unit: optional(str()),
   decimal_places: optional(num()),
+  // T93：最后更新时间（毫秒 epoch，0=未收到过数据）+ YC 限值（值守告警用）
+  ts: optional(num()),
+  min_value: optional(num()),
+  max_value: optional(num()),
 })
 
 export const pointsResponseSchema = obj({ points: arr(pointSchema) })
@@ -632,6 +639,37 @@ export const doctorResponseSchema = obj({
   report: doctorReportSchema,
 })
 
+export const alarmSchema = obj({
+  id: num(),
+  kind: enumOf('limit', 'stale', 'jump', 'comm'),
+  ioa: nullable(num()),
+  message: str(),
+  ts: num(),
+  age_s: num(),
+  acked: bool(),
+  cleared: bool(),
+})
+
+export const alarmsSnapshotSchema = obj({
+  ok: bool(),
+  config: obj({
+    stale_seconds: num(),
+    comm_seconds: num(),
+    jump_delta: nullable(num()),
+    debounce: num(),
+    sound: bool(),
+  }),
+  active: arr(alarmSchema),
+  new_since_poll: num(),
+  history_total: num(),
+})
+
+export const alarmsHistorySchema = obj({
+  ok: bool(),
+  history: arr(alarmSchema),
+  total: num(),
+})
+
 // ── 编译期契约检查（导出以避免 noUnusedLocals；不参与运行时）───────────
 export type ContractKeyChecks = [
   Assert<Equal<SchemaKeys<typeof okSchema>, keyof OkResponse>>,
@@ -649,6 +687,9 @@ export type ContractKeyChecks = [
   Assert<Equal<SchemaKeys<typeof doctorStepSchema>, keyof DoctorStep>>,
   Assert<Equal<SchemaKeys<typeof doctorReportSchema>, keyof DoctorReport>>,
   Assert<Equal<SchemaKeys<typeof doctorResponseSchema>, keyof DoctorResponse>>,
+  Assert<Equal<SchemaKeys<typeof alarmSchema>, keyof Alarm>>,
+  Assert<Equal<SchemaKeys<typeof alarmsSnapshotSchema>, keyof AlarmsSnapshot>>,
+  Assert<Equal<SchemaKeys<typeof alarmsHistorySchema>, keyof AlarmsHistory>>,
   Assert<Equal<SchemaKeys<typeof schemaResponseSchema>, keyof SchemaResponse>>,
   Assert<Equal<SchemaKeys<typeof sessionExportSchema>, keyof SessionExport>>,
   Assert<Equal<SchemaKeys<typeof logRowSchema>, keyof LogRow>>,

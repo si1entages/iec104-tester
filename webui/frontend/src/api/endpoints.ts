@@ -17,6 +17,8 @@ import {
   captureLoadResponseSchema,
   capturePlaybackActionSchema,
   captureStatusSchema,
+  alarmsHistorySchema,
+  alarmsSnapshotSchema,
   doctorResponseSchema,
   frameDecodeSchema,
   historyDataRecordSchema,
@@ -163,6 +165,13 @@ export const api = {
       apiGet('/api/master/param_state', paramStateResponseSchema, { ioa }),
     params: () => apiGet('/api/master/params', paramsResponseSchema),
   },
+
+  // ── 值守告警（T93）：2s 轮询（WS 契约不变）────────────────────
+  alarms: () => apiGet('/api/alarms', alarmsSnapshotSchema),
+  alarmsHistory: () => apiGet('/api/alarms/history', alarmsHistorySchema),
+  alarmsAck: (id: number) => apiPost('/api/alarms/ack', okSchema, { id }),
+  alarmsConfig: (body: Record<string, unknown>) =>
+    apiPost('/api/alarms/config', alarmsSnapshotSchema, body),
 
   // ── 子站命令 ─────────────────────────────────────────────────────────
   slave: {

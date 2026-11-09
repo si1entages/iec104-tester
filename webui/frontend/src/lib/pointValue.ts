@@ -145,3 +145,8 @@ export function mergePointValues(
   }
   return changed ? out : prev
 }
+
+/** T93：点值是否陈旧（ts=0 表示从未收到过数据，不算陈旧；阈值与告警一致 60s）. */
+export function isStalePoint(p: Pick<Point, 'ts'>, staleSeconds = 60): boolean {
+  return typeof p.ts === 'number' && p.ts > 0 && Date.now() - p.ts > staleSeconds * 1000
+}

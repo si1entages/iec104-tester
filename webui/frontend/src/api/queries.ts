@@ -6,6 +6,7 @@ import { applyPatches, mergePointValues } from '../lib/pointValue'
 import type { PointPatch } from '../lib/pointValue'
 import { useUiStore } from '../store/uiStore'
 import type {
+  AlarmsSnapshot,
   EngineEvent,
   Frame,
   HistoryDataParams,
@@ -64,6 +65,7 @@ export const queryKeys = {
     ['capture', activeRole(), 'frames', offset, limit] as const,
   testScripts: () => ['tests', activeRole(), 'scripts'] as const,
   testStatus: () => ['tests', activeRole(), 'status'] as const,
+  alarms: () => ['alarms', activeRole()] as const,
 }
 
 // ── 查询 ───────────────────────────────────────────────────────────────
@@ -303,6 +305,15 @@ export function useCommandNoArgs<R extends OkResponse = OkResponse>(fn: () => Pr
   return useMutation<R, Error, void>({
     mutationFn: () => fn(),
     onSettled,
+  })
+}
+
+/** 值守告警（T93）：2s 轮询（评估在服务端 1Hz，轮询时延足够值守场景）。 */
+export function useAlarmsQuery() {
+  return useQuery<AlarmsSnapshot>({
+    queryKey: queryKeys.alarms(),
+    queryFn: api.alarms,
+    refetchInterval: 2000,
   })
 }
 

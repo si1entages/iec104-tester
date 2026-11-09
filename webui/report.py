@@ -86,6 +86,7 @@ def build_session_report_html(
     condition: str = "",
     chart_images: list[str] | None = None,
     doctor: dict | None = None,
+    alarms: list[dict] | None = None,
 ) -> str:
     """生成自包含 HTML 测试报告.
 
@@ -171,6 +172,23 @@ def build_session_report_html(
             f'<table class=meta>{d_rows}</table>'
             "<p class=foot>连接医生：TCP → STARTDT → 数据流分层自检；证据含对端 S 帧计数、"
             "N(R) 推进与保留 COT 计数（对端不确认 I 帧属对端实现缺陷）。</p>")
+    alarms_html = ""
+    if alarms:
+        a_rows = "".join(
+            "<tr>"
+            f"<td>{_escape(time.strftime('%H:%M:%S', time.localtime(a.get('ts') or 0)))}</td>"
+            f"<td>{_escape(str(a.get('kind', '')))}</td>"
+            f"<td class=n>{_escape('—' if a.get('ioa') is None else str(a.get('ioa')))}</td>"
+            f"<td>{_escape(str(a.get('message', '')))}</td>"
+            f"<td>{_escape(('已解除' if a.get('cleared') else '激活中') + ('/已确认' if a.get('acked') else ''))}</td>"
+            "</tr>"
+            for a in alarms)
+        alarms_html = (
+            "<h2>10. 告警历史（T93 值守告警）</h2>"
+            '<table class=meta><tr><th>时间</th><th>类别</th><th>IOA</th>'
+            "<th>内容</th><th>状态</th></tr>" + a_rows + "</table>"
+            "<p class=foot>四类规则：限值越限 / 死值陈旧 / 突变 / 通信中断；"
+            "触发经去抖（连续 N 次评估）。</p>")
     injection_html = ""
     if injection is not None and injection.get("total", 0) > 0:
         inj_rows = "".join(
@@ -259,5 +277,6 @@ def build_session_report_html(
 {injection_html}
 {chart_html}
 {doctor_html}
+{alarms_html}
 <p class=foot>由 iec104-tester 自动生成；本文件自包含（无外部引用），浏览器「打印 → 另存为 PDF」即可归档交付。</p>
 </body></html>"""

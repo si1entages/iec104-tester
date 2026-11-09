@@ -70,24 +70,25 @@ class PointService:
         for p in self.table.get_all_yx():
             out.append({"ioa": p.ioa, "type": "YX", "name": p.name, "group": p.group,
                         "enabled": p.enabled, "value": "OFF",
-                        "subtype": p.point_type.value})
+                        "subtype": p.point_type.value, "ts": 0})
         for p in self.table.get_all_yc():
             out.append({"ioa": p.ioa, "type": "YC", "name": p.name, "group": p.group,
                         "enabled": p.enabled, "value": 0.0,
                         "subtype": p.data_type.value,
                         # 设计规范 §5.3：界面按声明的小数位与单位显示遥测值
-                        "unit": p.unit, "decimal_places": p.decimal_places})
+                        "unit": p.unit, "decimal_places": p.decimal_places, "ts": 0,
+                        "min_value": p.min_value, "max_value": p.max_value})
         for p in self.table.get_all_yk():
             out.append({"ioa": p.ioa, "type": "YK", "name": p.name, "group": p.group,
                         "enabled": p.enabled, "value": "—",
                         "subtype": str(p.command_type),
-                        "sbo": bool(p.select_before_execute)})
+                        "sbo": bool(p.select_before_execute), "ts": 0})
         for p in self.table.get_all_ym():
             out.append({"ioa": p.ioa, "type": "YM", "name": p.name, "group": p.group,
-                        "enabled": p.enabled, "value": 0})
+                        "enabled": p.enabled, "value": 0, "ts": 0})
         for p in self.table.get_all_step():
             out.append({"ioa": p.ioa, "type": "STEP", "name": p.name, "group": p.group,
-                        "enabled": p.enabled, "value": 0})
+                        "enabled": p.enabled, "value": 0, "ts": 0})
         if engine is not None:
             store = getattr(engine, "data_store", None)
             if store is not None:
@@ -97,21 +98,25 @@ class PointService:
                         if d:
                             row["value"] = "ON" if d.value else "OFF"
                             row["quality"] = str(d.quality)
+                            row["ts"] = int(d.last_update_time * 1000)
                     elif row["type"] == "YC":
                         d = store.get_yc(row["ioa"])
                         if d:
                             row["value"] = float(d.value)
                             row["quality"] = str(d.quality)
+                            row["ts"] = int(d.last_update_time * 1000)
                     elif row["type"] == "YM":
                         d = store.get_ym(row["ioa"])
                         if d:
                             row["value"] = int(d.value)
                             row["quality"] = str(d.quality)
+                            row["ts"] = int(d.last_update_time * 1000)
                     elif row["type"] == "STEP":
                         d = store.get_step(row["ioa"])
                         if d:
                             row["value"] = int(d.value)
                             row["quality"] = str(d.quality)
+                            row["ts"] = int(d.last_update_time * 1000)
         return out
 
     def batch(self, ptype: str, ioas: list[int], action: str,

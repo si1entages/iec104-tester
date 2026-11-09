@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { usePointsQuery, useStatusQuery } from '../../api/queries'
 import { useT } from '../../i18n'
 import type { MessageKey } from '../../i18n'
+import { CarbonAlarmCard } from '../components/CarbonAlarmCard'
 import { CarbonNetworkSimCard } from '../components/CarbonNetworkSimCard'
 import { CarbonPointsTable } from '../components/CarbonPointsTable'
 import { KvList, Panel, Stat } from '../components/ui'
@@ -110,6 +111,8 @@ export function CarbonStatusPage() {
         <Stat label={t('status.rx')} value={String(status?.rx ?? 0)} unit={t('status.unit.frames')} />
         <Stat label={t('status.dropped')} value={String(status?.dropped ?? 0)} unit={t('status.unit.frames')} />
       </div>
+
+      <CarbonAlarmCard />
 
       <CarbonNetworkSimCard />
 

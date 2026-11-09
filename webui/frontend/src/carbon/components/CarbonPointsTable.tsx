@@ -7,6 +7,7 @@ import { usePointsQuery } from '../../api/queries'
 import type { Point } from '../../api/types'
 import { useT } from '../../i18n'
 import { formatMeasurement } from '../../lib/format'
+import { isStalePoint } from '../../lib/pointValue'
 import { directCommandHint } from '../../lib/pointCommand'
 import { pointKey } from '../../lib/pointValue'
 import { CarbonQualityTags } from './CarbonQualityTags'
@@ -50,6 +51,7 @@ export function CarbonPointsTable({
   selectHint,
 }: Props) {
   const t = useT()
+  const staleTip = t('alarms.staleTip')
   const { data: points = [], isLoading, isError, error } = usePointsQuery()
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const [keyword, setKeyword] = useState('')
@@ -153,8 +155,9 @@ export function CarbonPointsTable({
                 textAlign: 'right',
                 fontVariantNumeric: 'tabular-nums',
                 cursor: hintForValue ? 'pointer' : undefined,
+                color: isStalePoint(p) ? 'var(--cds-text-secondary)' : undefined,
               }}
-              title={hintForValue ?? undefined}
+              title={isStalePoint(p) ? staleTip : hintForValue ?? undefined}
               data-testid={`point-value-${key}`}
               onDoubleClick={(event) => {
                 if (!onValueDoubleClick) return

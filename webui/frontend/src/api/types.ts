@@ -102,6 +102,11 @@ export interface Point {
   unit?: string
   /** 仅 YC：显式小数位（缺省按量级推断） */
   decimal_places?: number
+  /** T93：最后更新时间（毫秒 epoch；0=未收到过数据） */
+  ts?: number
+  /** 仅 YC：限值（值守告警 T93 限值规则） */
+  min_value?: number
+  max_value?: number
 }
 
 export interface PointsResponse {
@@ -441,6 +446,37 @@ export interface DoctorRequest {
   port: number
   addr?: number
   observe_seconds?: number
+}
+
+export interface Alarm {
+  id: number
+  kind: 'limit' | 'stale' | 'jump' | 'comm'
+  ioa: number | null
+  message: string
+  ts: number
+  age_s: number
+  acked: boolean
+  cleared: boolean
+}
+
+export interface AlarmsSnapshot {
+  ok: boolean
+  config: {
+    stale_seconds: number
+    comm_seconds: number
+    jump_delta: number | null
+    debounce: number
+    sound: boolean
+  }
+  active: Alarm[]
+  new_since_poll: number
+  history_total: number
+}
+
+export interface AlarmsHistory {
+  ok: boolean
+  history: Alarm[]
+  total: number
 }
 
 export interface ScdPreviewResponse {

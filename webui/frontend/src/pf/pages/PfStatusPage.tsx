@@ -25,6 +25,7 @@ import { useUiStore } from '../../store/uiStore'
 import { usePointsQuery, useStatusQuery } from '../../api/queries'
 import { useT } from '../../i18n'
 import type { MessageKey } from '../../i18n'
+import { PfAlarmCard } from '../components/PfAlarmCard'
 import { PfNetworkSimCard } from '../components/PfNetworkSimCard'
 import { PfPointsTable } from '../components/PfPointsTable'
 
@@ -146,6 +147,8 @@ export function PfStatusPage() {
       </PageSection>
 
       <PageSection>
+        <PfAlarmCard />
+
         <PfNetworkSimCard />
       </PageSection>
 

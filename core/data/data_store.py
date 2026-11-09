@@ -33,6 +33,7 @@ class YxData:
     double_state: int = 0       # 0=不确定, 1=分, 2=合, 3=中间
     quality: QualityDescriptor = field(default_factory=QualityDescriptor)
     timestamp: float = 0.0      # 最后更新时间 (monotonic)
+    last_update_time: float = 0.0  # 最后更新时间 (time.time()，供陈旧/告警判定 T93)
     change_count: int = 0       # 变化次数
     name: str = ""
     group: int = 1              # 组号
@@ -57,6 +58,8 @@ class YcData:
     raw_value: float = 0.0      # 原始值（未做比例偏移处理）
     quality: QualityDescriptor = field(default_factory=QualityDescriptor)
     timestamp: float = 0.0
+
+    last_update_time: float = 0.0  # 最后更新时间 (time.time()，供陈旧/告警判定 T93)
     change_count: int = 0
     name: str = ""
     unit: str = ""
@@ -83,6 +86,8 @@ class YkData:
     last_state: bool = False
     select_pending: bool = False
     timestamp: float = 0.0
+
+    last_update_time: float = 0.0  # 最后更新时间 (time.time()，供陈旧/告警判定 T93)
     name: str = ""
 
 
@@ -93,6 +98,8 @@ class YmData:
     value: int = 0
     quality: QualityDescriptor = field(default_factory=QualityDescriptor)
     timestamp: float = 0.0
+
+    last_update_time: float = 0.0  # 最后更新时间 (time.time()，供陈旧/告警判定 T93)
     change_count: int = 0
     name: str = ""
 
@@ -105,6 +112,8 @@ class StepData:
     transient: bool = False     # M_ST 暂态标志 (T 位)
     quality: QualityDescriptor = field(default_factory=QualityDescriptor)
     timestamp: float = 0.0
+
+    last_update_time: float = 0.0  # 最后更新时间 (time.time()，供陈旧/告警判定 T93)
     change_count: int = 0
     name: str = ""
     group: int = 1
@@ -254,6 +263,7 @@ class RealtimeDB:
             if quality is not None:
                 point.quality = quality
             point.timestamp = time.monotonic()
+            point.last_update_time = time.time()
 
             if changed:
                 point.change_count += 1
@@ -307,6 +317,7 @@ class RealtimeDB:
             if quality is not None:
                 point.quality = quality
             point.timestamp = time.monotonic()
+            point.last_update_time = time.time()
             point.update_min_max()
 
             if changed:
@@ -348,6 +359,7 @@ class RealtimeDB:
             point.last_command = command
             point.last_state = state
             point.timestamp = time.monotonic()
+            point.last_update_time = time.time()
             if command == "select":
                 point.select_pending = True
             elif command in ("execute", "cancel"):
@@ -384,6 +396,7 @@ class RealtimeDB:
             if quality is not None:
                 point.quality = quality
             point.timestamp = time.monotonic()
+            point.last_update_time = time.time()
 
             if changed:
                 point.change_count += 1
@@ -437,6 +450,7 @@ class RealtimeDB:
             if quality is not None:
                 point.quality = quality
             point.timestamp = time.monotonic()
+            point.last_update_time = time.time()
 
             if changed:
                 point.change_count += 1

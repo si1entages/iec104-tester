@@ -7,6 +7,7 @@ import { usePointsQuery } from '../../api/queries'
 import type { Point } from '../../api/types'
 import { useT } from '../../i18n'
 import { formatMeasurement } from '../../lib/format'
+import { isStalePoint } from '../../lib/pointValue'
 import { directCommandHint } from '../../lib/pointCommand'
 import { pointKey } from '../../lib/pointValue'
 import { PfQualityTags } from './PfQualityTags'
@@ -236,8 +237,15 @@ export function PfPointsTable({
                           ...(onValueDoubleClick && directCommandHint(p)
                             ? { cursor: 'pointer' }
                             : {}),
+                          ...(isStalePoint(p)
+                            ? { color: 'var(--pf-t--global--text--color--subtle)' }
+                            : {}),
                         }}
-                        title={(onValueDoubleClick ? directCommandHint(p) : undefined) ?? undefined}
+                        title={
+                          (isStalePoint(p) ? t('alarms.staleTip') : undefined) ??
+                          (onValueDoubleClick ? directCommandHint(p) : undefined) ??
+                          undefined
+                        }
                         data-testid={`point-value-${key}`}
                         onDoubleClick={(event) => {
                           if (!onValueDoubleClick) return

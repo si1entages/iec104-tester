@@ -406,6 +406,38 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
             bool(body.get("with_time", False)), deactivate,
         ))
 
+    async def api_alarms(request: web.Request) -> web.Response:
+        return web.json_response(bridge.alarms.snapshot())
+
+    async def api_alarms_history(request: web.Request) -> web.Response:
+        try:
+            limit = int(request.query.get("limit") or 100)
+        except (TypeError, ValueError):
+            limit = 100
+        return web.json_response(bridge.alarms.history_list(limit))
+
+    async def api_alarms_ack(request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        alarm_id = body.get("id") if isinstance(body, dict) else None
+        try:
+            alarm_id = int(alarm_id)
+        except (TypeError, ValueError):
+            return web.json_response({"ok": False, "error": "需要整数 id"}, status=400)
+        return web.json_response({"ok": bridge.alarms.ack(alarm_id)})
+
+    async def api_alarms_config(request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            return web.json_response({"ok": False, "error": "invalid body"}, status=400)
+        bridge.alarms.configure(**body)
+        return web.json_response(bridge.alarms.snapshot())
+
     async def api_master_doctor(request: web.Request) -> web.Response:
         """连接医生（T94）：分层自检（TCP → STARTDT → 数据流），结论随报告附存."""
         from core.engine.doctor import run_doctor
@@ -640,7 +672,9 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
             conclusion=conclusion, conclusion_kind=conclusion_kind,
             injection=injection, condition=condition,
             chart_images=chart_images,
-            doctor=getattr(bridge, "last_doctor", None))
+            doctor=getattr(bridge, "last_doctor", None),
+            alarms=(bridge.alarms.history_records(100)
+                    if getattr(bridge, "alarms", None) is not None else None))
         fname = time.strftime("iec104_report_%Y%m%d_%H%M%S.html")
         return web.Response(
             text=html_text, content_type="text/html",
@@ -1426,6 +1460,11 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
         app.router.add_post("/api/master/file", api_file)
         app.router.add_post("/api/master/clock_offset", api_master_clock_offset)
         app.router.add_post("/api/master/doctor", api_master_doctor)
+        # 值守告警（T93）：master/slave 角色各一个服务（bridge 角色无引擎不评估）
+        app.router.add_get("/api/alarms", api_alarms)
+        app.router.add_get("/api/alarms/history", api_alarms_history)
+        app.router.add_post("/api/alarms/ack", api_alarms_ack)
+        app.router.add_post("/api/alarms/config", api_alarms_config)
         app.router.add_post("/api/points/yaml", api_points_yaml_put)
         app.router.add_post("/api/points/import", api_points_import)
         app.router.add_post("/api/points/batch", api_points_batch)
@@ -1492,6 +1531,23 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
     app.router.add_get("/app/{tail:.*}", app_asset)
     app.router.add_get("/favicon.ico", favicon)
     app.router.add_get("/favicon.svg", favicon)
+
+    if bridge.role != "bridge":
+        from .alarms import AlarmService
+
+        bridge.alarms = AlarmService(bridge)
+
+        async def _start_alarms(app: web.Application) -> None:
+            app["alarms_task"] = asyncio.ensure_future(bridge.alarms.loop())
+
+        async def _stop_alarms(app: web.Application) -> None:
+            task = app.get("alarms_task")
+            if task is not None:
+                task.cancel()
+
+        app.on_startup.append(_start_alarms)
+        app.on_cleanup.append(_stop_alarms)
+
     return app
 
 
