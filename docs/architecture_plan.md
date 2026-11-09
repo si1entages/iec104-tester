@@ -468,7 +468,7 @@ graph TD
 | **T88** | 文档与发布收口（P0，0.5~1 人日；✅ 已交付） | README 按已发布基线重写：徽章 `version-1.8.0` / `Tests-1655`、删除 `## 🚧 开发中（v1.7.0 之后，尚未发版）` 小节（T85/T86/T87 提为正式特性——桥接页补「网络条件注入」描述，并把两项搁置工作移入新设「已知限制（按用户要求暂缓）」节）、`--mode bridge` 与 39 参数表复核；**英文版 `README_eng.md` 同步收口**（此前停在 1545 例 / 88.82% 覆盖 / 「ISA-101 industrial style」，缺桥/SCD/三套 UI/压测/报告/对时，已补齐到 1.8.0 parity）；新 logo 三文件入库（`resources/logo.svg` 760×200 wordmark 与 README 的 608×160 同 3.8:1、`resources/icon.svg`、`docs/pr-assets/logo-preview.png`）；`app.py` 三处帮助文本纠偏（`--mode bridge` 曾写 headless，实为默认 Web 桥接页 8767；`--http-port` 默认补 8767；模块 docstring 同步）；`PROJECT.md` 计数 → **1655**。**新增守卫** `tests/test_version_consistency.py::test_release_docs_match_version`：断言双语 README 的 `version-` 徽章 == `core/version.py`、`Tests-` 徽章双语一致、CHANGELOG 首条 == `__version__`（实测把徽章改成 1.7.0 即失败，已验证能抓漂移）。**验收证据**：后端全套 `pytest tests/ -q` **1655 passed / 4 deselected**（1654 + 本守卫 1 例）、ruff 全仓 `All checks passed`、`git status` 无未跟踪 logo/README 残留 |
 | **T89** | 默认套件 Carbon 纳入 UI 门禁（P1，2~3 人日；✅ 已交付） | 新增 `tests/e2e/specs/kitProfiles.ts`：套件档案（导航 `.pf-v6-c-nav__link`+`pf-m-current` ↔ `.cds--side-nav__link`+`--current`、折叠开关、主题按钮）+ 巡检选择器**两套件并集**（不存在的选择器匹配 0 个元素，无副作用）+ `GATE_KITS`（`E2E_KITS`，默认 `pf,carbon`）；`helpers.ts` 的 `appUrl(base, hash, kit)` 增套件维度；三项页级门禁逐套件参数化（**Playwright 46 → 50 例**：按套件复制 4 例、覆盖的页面矩阵翻倍；计划里「~85 例」是错估，实测按用例数而非页面数）；`expectKitApplied` 断言 `dataset.kit` 防「`?kit=` 未生效导致静默跑错界面」。**门禁自身 8 处度量缺陷按探针实测逐一修正**：① Carbon 焦点是 `outline-style:none` + **内嵌 box-shadow 环**（只认「偏移 0 / 模糊 0 / 扩散 >0」的环，投影不算）；② 内嵌环相邻色是**自身填充**（浅色填充按钮用浅色内环分隔）；③ 负 `outline-offset` 画在元素内部；④ 环常画在**子元素/伪元素**上（`.cds--toggle__switch`、`.cds--checkbox-label::before`）→ 扫描 target + 可见子元素 + `::before/::after`；⑤ **静态边框**不是焦点指示（曾把分页分隔线、表格描边当焦点环）；⑥ Carbon 焦点色有 0.1s 过渡，Tab 后立即读会读到 `rgba(0,0,0,0)`（实测）→ 读前等 120ms；⑦ `outline-style:auto` = 浏览器默认环，色值不可测 → 单独计数（2 处）；⑧ `:focus-visible=false`（鼠标/程序化聚焦）按 WCAG 2.4.7 不适用（2 处）；另加「1~2px 屏幕阅读器专用盒子（`.cds--visually-hidden`）是有意隐藏、不是裁切」与「纯图标按钮的边框是分隔线、可识别性由图标承担」两条豁免（Carbon 首轮 490 条误报里 480 条属前者）。**门禁抓到并修好 Carbon 真缺陷 3 类**：① 占位符 `--cds-text-placeholder` 浅色 **2.56:1**（规范 §4.4 要求占位符 ≥3:1）→ 提升到 `--cds-text-secondary`；② 空值破折号（`opacity:0.6` = 2.91:1）与 12px 提示/次级文字（`opacity:0.65~0.85` = 3.25~4.16:1，正文未达 AA）→ **63 处内联 opacity 改 `var(--cds-text-secondary)`（24 个文件）**；③ `.cds--header__name`（头部品牌链接）无可见焦点环 → 补 `:focus-visible` 主题环。**验收证据**：默认（双套件）与 `E2E_KITS=carbon` 全量 **50 passed / 5.9m**；Carbon 文本对比 **4273 处**、非文本 **288 处**、8 页×3 视口×中英/深浅巡检 —— **0 硬失败 · 0 建议项 · 0 裁切 · 0 横向滚动 · 0 console error**；PF 回归 0 硬失败（1086 文本 / 48 非文本）；前端单测 133、`test_frontend_style_tokens` 与 `test_frontend_routes`、ruff 全绿；`webui/static/app` 已重建（视觉基线 3 张未变）。**遗留（非本轮引入）**：PF 6 的控件边框画在伪元素/`box-shadow` 上，非文本门禁「边框」段对 PF **0 命中**（Carbon 10 命中）→ PF 控件边界对比度实际未被门禁覆盖 |
 | **T90** | v1.8.0 新特性 e2e 补齐（P1，3~4 人日） | 5 条：① 压测卡（both 部署，UI 启动 1 连接 × 1s@50eps → 分行统计帧数 > 0 → 停止后汇总冻结不归零，回归 T83「拆引擎后 status 算 0」）；② 桥条件卡（设丢帧 100% → 客户端无响应但页面帧视图仍显示干扰前原始帧，回归 T85）；③ 合规违规列表（`node:net` 探针造 I 帧序号跳变 → 桥接页违规行出现且计数 +1，覆盖 T79/T81/T86）；④ 时钟偏差测量（连接后点按钮 → 结果行出现 `avg_ms` 且 |avg| < 阈值，T80）；⑤ 报告结论 + 嵌曲线（选「有条件通过」+ 说明 → 导出 → 断言 HTML 含结论横幅且 `chart_images` 经 POST 嵌入，T82/T87）。用例范式复用 `bridge.spec.ts`（用例内 echo 上游 + OS 派空闲口，避开固定端口 10048）。验收：5 条在 PF 与 Carbon 下均绿、无 console error、无 4xx/5xx |
-| **T91** | 点表陈旧（stale）态（P2，1.5~2 人日） | 先修前提：`core/data/data_store.py` 五个数据类（YxData/YcData/YkData/YmData/StepData）现有 `timestamp` 是 **monotonic**（浏览器不可用），`last_change_time`（`time.time()`）仅 YcData 有且只在**值变化**时写——陈旧判定要的是**最后更新**时间，故新增统一 `last_update_time`（wall clock，毫秒）并在所有 `set_*` 路径写入；`webui/points.py:68-115` 快照每行带 `ts`（未更新为 0）。前端 Carbon/PF 点表按阈值（默认 60s）标灰 + 图标 + tooltip（满足「颜色只表达状态且必须有文字/图标」；经典版按冻结承诺不改界面，仅数据层透传）；`pointSchema` 增 `ts` 键（编译期键集比对同步）；i18n 词条。验收：注入停止后 60s 出现陈旧标记、恢复上送即消失；`/api/points` 契约用例 + 前端单测覆盖；`docs/design_guidelines.md` 附录 A 该项 ⚠→✓ |
+| **T91** | 点表陈旧（stale）态（P2，1.5~2 人日；**2026-11-10 决定并入 T93**——作为「死值」规则与数据层前提一并交付） | 先修前提：`core/data/data_store.py` 五个数据类（YxData/YcData/YkData/YmData/StepData）现有 `timestamp` 是 **monotonic**（浏览器不可用），`last_change_time`（`time.time()`）仅 YcData 有且只在**值变化**时写——陈旧判定要的是**最后更新**时间，故新增统一 `last_update_time`（wall clock，毫秒）并在所有 `set_*` 路径写入；`webui/points.py:68-115` 快照每行带 `ts`（未更新为 0）。前端 Carbon/PF 点表按阈值（默认 60s）标灰 + 图标 + tooltip（满足「颜色只表达状态且必须有文字/图标」；经典版按冻结承诺不改界面，仅数据层透传）；`pointSchema` 增 `ts` 键（编译期键集比对同步）；i18n 词条。验收：注入停止后 60s 出现陈旧标记、恢复上送即消失；`/api/points` 契约用例 + 前端单测覆盖；`docs/design_guidelines.md` 附录 A 该项 ⚠→✓ |
 
 ### 2026-11-10 真机联调批次（T92，第三方 simulator4.exe）
 
@@ -485,7 +485,28 @@ graph TD
 | 6 | 防回归 | `trend-live.spec.ts`（曲线区 >20 曲线色像素）+ `trend.waiting` 单采样提示（Carbon/PF）；后端 **1656 passed** / e2e **51 passed** |
 
 
-> **累计统计**：T01~T49、T51~T89、T92 **全部完成**；**待办 3**——**v1.9.0 剩余 T90~T91**（新特性 e2e / 点表陈旧态，2026-11-09 用户选定 A+B+D），**T50** 真机复测仍暂缓待装置窗口。
+### 2026-11-10 迭代方向比选（真机联调后，主题「不再是玩具，而是能用的调试工具」）
+
+> 以 2026-11-10 simulator4 真机联调（T92）暴露的工作流缺口为证据，用户选定
+> **T90 收口 + T93 值守告警（吸收 T91）+ T94 连接医生** 为 v1.9.0；A2/D/C 依现场节奏排 v1.10。
+
+| 候选 | 对应的真实缺口（T92 联调证据） | 成本（人日） | 验收阈值 | 结论 |
+|---|---|---|---|---|
+| A1 连接医生（分层自检） | 「连不上」人工排查花了整轮：TCP→STARTDT→GI→数据流→点表匹配逐层取证 | 0.5~1 | 对 simulator4 给出「链路通但对端不回确认」的明确结论；对本仓子站四层全绿 | ✅ 采纳 → T94 |
+| B 值守告警（限值/死值/突变/断链） | 调试要盯屏才能发现异常；点表 min/max 字段存在却无告警 | 3~4 | 四类规则各有一条真机/注入触发证据；告警历史自动进报告 | ✅ 采纳 → T93（T91 并入） |
+| A2 Excel(xlsx) 点表导入 + 设计 vs 实测比对 | 真机 IOA 16385+ 与演示表 1001 对不上，自动学习兜底但无法核对 | 2~3 | 真实 xlsx 导入 + 差异清单（多/缺/值域） | ⏸ v1.10 候选 |
+| D 离线报文对比（升级前后 diff） | 现场标准动作：装置升级前后各录一段人工逐帧对比 | 3~4 | 同录制自 diff 为空；人为改动可检出 | ⏸ v1.10 候选 |
+| C 桥场景化注入时间线 + 自动判定 | 注入要手动设置、无「注入丢包→应见 k 超窗」闭环判定 | 5~7 | 时间线编排 + 判定入报告结论；合成帧序列锁死防误报 | ⏸ v1.10 候选 |
+| 不投入 | 多用户/远程协作、IEC 62351 合规、SSR——不服务现场调试场景 | — | — | ❌ 排除 |
+
+### v1.9.0 增补任务（T93~T94）
+
+| 任务ID | 任务名称 | 交付物 / 验收证据 |
+|--------|---------|------------------|
+| **T93** | 值守告警引擎（P1，3~4 人日；吸收 T91） | 后端 `webui/alarms.py` 规则引擎（评估点值快照 + 连接状态）：① 限值越限（YC 超出点表 `min_value`/`max_value`）；② 死值/陈旧（最后更新超阈值，默认 60s 可配——数据层前提同 T91：`data_store` 各数据类补 `last_update_time` wall clock 毫秒，**不能复用只在值变化时写的 `last_change_time`**）；③ 突变（相邻更新变化幅度超阈）；④ 通信中断（state≠Running 或 rx 停止 N 秒，默认 10s）。生命周期 active→ack→clear + 去抖（连续 N 次评估才触发）+ 历史入库；`GET /api/alarms[/history]` + WS `alarm` 事件（契约 §2.x + 前端 schema 编译期键集比对）；UI（Carbon/PF）状态页告警卡（激活列表 + 确认 + 可选声音）+ 点表陈旧标记（`/api/points` 带 `ts`，三套件灰化 + 图标 + tooltip，阈值与告警一致，经典版按冻结承诺仅数据层透传）；告警历史段自动进测试报告；`docs/design_guidelines.md` 附录 A 陈旧项 ⚠→✓。验收：四类规则各有一条真机/注入触发证据（超限用置数越限、死值用停模拟、突变用大跨度置数、断链用手动断开）；契约 + 前端单测覆盖 |
+| **T94** | 连接医生（P1，0.5~1 人日） | `POST /api/master/doctor` 分层自检：① TCP connect（报「端口不通/防火墙」）；② STARTDT ACT→CON（t1 内）；③ 数据流观察（N 秒 rx>0 + 自动学习到了哪些 IOA/类型）；④ 结论 + 人话建议（端口错 / 对端不回确认 / 点表 IOA 分区不匹配）。复用 T92 取证逻辑（S 帧计数、N(R) 推进、COT 异常——对 simulator4 类对端直接给出「链路通但对端不回确认」结论，附证据计数）。UI（Carbon/PF）连接面板「诊断」按钮 → 逐层结果行（红绿 + 建议）；诊断结论可附进测试报告。验收：对 simulator4（N(R) 恒 0）给出明确对端不确认结论；对本仓子站四层全绿 |
+
+> **累计统计**：T01~T49、T51~T89、T92 **全部完成**；**待办 4**——**v1.9.0 剩余 T90 / T93 / T94**（T91 已并入 T93；2026-11-10 用户选定「收口+告警+连接医生」编排），**T50** 真机复测仍暂缓待装置窗口。
 
 ---
 
