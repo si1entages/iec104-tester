@@ -82,7 +82,7 @@ export function CarbonManualSetPanel({ point, disabled = false }: Props) {
       {!disabled && noIoa ? <Note kind="warning" title={t('cmd.needIoa')} style={{ marginTop: 8 }} /> : null}
       {last ? <Note kind={last.ok ? 'success' : 'error'} title={last.text} style={{ marginTop: 8 }} /> : null}
       {mismatch ? (
-        <div style={{ fontSize: 12, opacity: 0.75, marginTop: 8 }}>{t('msp.mismatch')}</div>
+        <div style={{ fontSize: 12, color: 'var(--cds-text-secondary)', marginTop: 8 }}>{t('msp.mismatch')}</div>
       ) : null}
 
       <div style={{ marginTop: 12 }} className="app-stack">
@@ -104,11 +104,11 @@ export function CarbonManualSetPanel({ point, disabled = false }: Props) {
         <NumField id="cb-msp-ioa" label={t('cmd.targetIoa')} value={ioa} onChange={setIoa} min={0} />
 
         {point ? (
-          <div style={{ opacity: 0.75, fontSize: 12 }}>
+          <div style={{ color: 'var(--cds-text-secondary)', fontSize: 12 }}>
             {t('cmd.currentValue', { name: point.name, value: formatValue(point.value) })}
           </div>
         ) : (
-          <div style={{ opacity: 0.75, fontSize: 12 }}>{t('cmd.pickHint')}</div>
+          <div style={{ color: 'var(--cds-text-secondary)', fontSize: 12 }}>{t('cmd.pickHint')}</div>
         )}
 
         <div className="app-row" style={{ alignItems: 'flex-end' }}>
@@ -143,7 +143,7 @@ export function CarbonManualSetPanel({ point, disabled = false }: Props) {
           </Button>
         </div>
 
-        <div style={{ fontSize: 12, opacity: 0.65 }}>
+        <div style={{ fontSize: 12, color: 'var(--cds-text-secondary)' }}>
           {kind === 'YX'
             ? t('msp.kind.yxHint')
             : kind === 'YC'

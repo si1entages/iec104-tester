@@ -89,7 +89,7 @@ export function CarbonMultiPage() {
           </span>
         }
       >
-        <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 8 }}>{t('multi.roleNoteDesc')}</div>
+        <div style={{ fontSize: 12, color: 'var(--cds-text-secondary)', marginBottom: 8 }}>{t('multi.roleNoteDesc')}</div>
         {last ? <Note kind={last.ok ? 'success' : 'error'} title={last.text} style={{ marginBottom: 8 }} /> : null}
         {issues.length > 0 ? (
           <Note kind="warning" title={t('multi.validationIssues', { n: issues.length })} style={{ marginBottom: 8 }}>

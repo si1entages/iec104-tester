@@ -20,15 +20,18 @@ export const VISUAL = `http://127.0.0.1:${8768 + PORT_OFFSET}`
 export const IEC_PORT = 2404
 
 /**
- * 功能用例统一跑在 **PatternFly 套件**上（这些用例的 DOM 断言按 PF 编写）。
- * Carbon 是产品默认套件，其外壳/切换/主题覆盖见 ui-kit.spec；
- * 两者共享同一数据层与业务逻辑，PF 用例即可覆盖核心流程。
+ * 功能用例（master/slave/multi/…）统一跑在 **PatternFly 套件**上：这些用例的 DOM
+ * 断言按 PF 编写，两套件共享同一数据层与业务逻辑。
+ *
+ * 页级门禁（ui-audit / ui-contrast / ui-nontext-contrast）**必须同时覆盖产品默认套件
+ * Carbon**，因此它们不直接用这里的常量，而是按 `kitProfiles.ts` 的 `GATE_KITS`
+ * （`E2E_KITS=pf,carbon`）逐个套件跑。
  */
 export const SPECS_KIT = 'pf'
 
-/** `/app/?kit=<SPECS_KIT>#<hash>`：功能用例的统一入口 URL */
-export function appUrl(base: string, hash = ''): string {
-  return `${base}/app/?kit=${SPECS_KIT}${hash ? `#${hash}` : ''}`
+/** `/app/?kit=<kit>#<hash>`：统一入口 URL（默认功能用例套件 PF） */
+export function appUrl(base: string, hash = '', kit: string = SPECS_KIT): string {
+  return `${base}/app/?kit=${kit}${hash ? `#${hash}` : ''}`
 }
 
 export interface CapturedRequest {

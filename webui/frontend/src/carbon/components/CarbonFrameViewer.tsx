@@ -55,10 +55,10 @@ function TranslateBody({ hex }: { hex: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hex])
 
-  if (!result) return <div style={{ padding: 8, opacity: 0.75 }}>…</div>
+  if (!result) return <div style={{ padding: 8, color: 'var(--cds-text-secondary)' }}>…</div>
   if (result.error || !result.data) {
     return (
-      <div style={{ opacity: 0.8 }}>
+      <div style={{ color: 'var(--cds-text-secondary)' }}>
         {t('frameTranslate.failedWith', { error: result.error ?? t('frameTranslate.unknown') })}
       </div>
     )
@@ -271,7 +271,7 @@ export function CarbonFrameViewer() {
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={8} style={{ textAlign: 'center', padding: 24, opacity: 0.7 }}>
+                  <td colSpan={8} style={{ textAlign: 'center', padding: 24, color: 'var(--cds-text-secondary)' }}>
                     {t('frameViewer.empty')}
                   </td>
                 </tr>

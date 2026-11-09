@@ -116,7 +116,7 @@ export function BoolField({
         disabled={disabled}
         onToggle={onChange}
       />
-      {hint ? <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>{hint}</div> : null}
+      {hint ? <div style={{ fontSize: 12, color: 'var(--cds-text-secondary)', marginTop: 4 }}>{hint}</div> : null}
     </div>
   )
 }

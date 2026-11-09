@@ -51,7 +51,7 @@ export function CarbonAuthGate({ children }: { children: ReactNode }) {
   if (state === 'ok') return <>{children}</>
   if (state === 'checking') {
     return (
-      <div style={{ padding: 64, textAlign: 'center', opacity: 0.7 }}>{t('auth.checking')}</div>
+      <div style={{ padding: 64, textAlign: 'center', color: 'var(--cds-text-secondary)' }}>{t('auth.checking')}</div>
     )
   }
 
@@ -61,7 +61,7 @@ export function CarbonAuthGate({ children }: { children: ReactNode }) {
         <h3 className="app-panel-title" style={{ marginBottom: 12 }}>
           {t('auth.title')}
         </h3>
-        <div style={{ marginBottom: 12, fontSize: 13, opacity: 0.85 }}>
+        <div style={{ marginBottom: 12, fontSize: 13, color: 'var(--cds-text-secondary)' }}>
           {state === 'error'
             ? t('auth.errorDesc')
             : `${t('auth.desc')} /app/?token=<token> ${t('auth.descSuffix')}`}

@@ -82,7 +82,7 @@ export function CarbonBridgePage() {
             {showError}
           </Note>
         ) : null}
-        <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 12 }}>{t('bridge.hint')}</div>
+        <div style={{ fontSize: 12, color: 'var(--cds-text-secondary)', marginBottom: 12 }}>{t('bridge.hint')}</div>
         <form onSubmit={(e) => e.preventDefault()}>
           <div className="app-row" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
             <TextField id="cb-br-lh" label={t('bridge.listenHost')} value={listenHost}
@@ -128,7 +128,7 @@ export function CarbonBridgePage() {
           ]} />
           {status.compliance.violations && status.compliance.violations.length > 0 ? (
             <div style={{ marginTop: 8 }}>
-              <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 4 }}>
+              <div style={{ fontSize: 12, color: 'var(--cds-text-secondary)', marginBottom: 4 }}>
                 {t('compliance.violations')}
               </div>
               {status.compliance.violations.map((v, i) => (
@@ -138,7 +138,7 @@ export function CarbonBridgePage() {
               ))}
             </div>
           ) : (
-            <div style={{ marginTop: 8, fontSize: 12, opacity: 0.7 }}>{t('compliance.none')}</div>
+            <div style={{ marginTop: 8, fontSize: 12, color: 'var(--cds-text-secondary)' }}>{t('compliance.none')}</div>
           )}
         </Panel>
       ) : null}

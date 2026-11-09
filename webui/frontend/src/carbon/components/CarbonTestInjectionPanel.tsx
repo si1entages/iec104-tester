@@ -58,7 +58,7 @@ export function CarbonTestInjectionPanel({ disabled = false }: Props) {
     <Panel title={t('tip.title')}>
       {disabled ? <Note kind="info" title={t('tip.slaveOff')} /> : null}
       {last ? <Note kind={last.ok ? 'success' : 'error'} title={last.text} style={{ marginTop: 8 }} /> : null}
-      <div style={{ fontSize: 12, opacity: 0.7, margin: '8px 0' }}>{t('tip.hint')}</div>
+      <div style={{ fontSize: 12, color: 'var(--cds-text-secondary)', margin: '8px 0' }}>{t('tip.hint')}</div>
 
       <div className="app-row" style={{ alignItems: 'flex-start', gap: '2.5rem' }}>
         <div style={{ minWidth: 280, flex: 1 }} className="app-stack">

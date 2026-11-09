@@ -163,7 +163,7 @@ export function CarbonPointsTable({
               }}
             >
               {formatMeasurement(p.value, p.decimal_places)}
-              {p.unit ? <span style={{ marginInlineStart: 4, opacity: 0.65 }}>{p.unit}</span> : null}
+              {p.unit ? <span style={{ marginInlineStart: 4, color: 'var(--cds-text-secondary)' }}>{p.unit}</span> : null}
             </td>
             <td style={{ width: COLUMNS[6].width }}>
               <CarbonQualityTags quality={p.quality} />
@@ -204,7 +204,7 @@ export function CarbonPointsTable({
               </Button>
             ))}
           </span>
-          <span style={{ marginLeft: 'auto', opacity: 0.75, fontSize: 13 }}>
+          <span style={{ marginLeft: 'auto', color: 'var(--cds-text-secondary)', fontSize: 13 }}>
             {t('common.total', { n: rows.length })}
           </span>
         </div>
@@ -244,9 +244,9 @@ export function CarbonPointsTable({
 
           <div ref={scrollRef} data-testid="points-scroll" style={{ height, overflow: 'auto' }}>
             {isLoading ? (
-              <div style={{ padding: 24, opacity: 0.7 }}>…</div>
+              <div style={{ padding: 24, color: 'var(--cds-text-secondary)' }}>…</div>
             ) : rows.length === 0 ? (
-              <div style={{ padding: 24, opacity: 0.7 }}>{t('pt2.empty')}</div>
+              <div style={{ padding: 24, color: 'var(--cds-text-secondary)' }}>{t('pt2.empty')}</div>
             ) : (
               <div style={{ height: totalHeight, position: 'relative' }}>
                 {items.map((vi) => renderRow(vi))}

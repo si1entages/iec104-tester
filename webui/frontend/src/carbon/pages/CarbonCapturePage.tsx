@@ -89,11 +89,11 @@ export function CarbonCapturePage() {
             {t('cap.resume')}
           </Button>
         </div>
-        <div style={{ fontSize: 12, opacity: 0.7, marginTop: 8 }}>{t('cap.startHint')}</div>
+        <div style={{ fontSize: 12, color: 'var(--cds-text-secondary)', marginTop: 8 }}>{t('cap.startHint')}</div>
 
         <div style={{ marginTop: 16, fontSize: 13, marginBottom: 4 }}>{t('cap.files')}</div>
         {(status?.files ?? []).length === 0 ? (
-          <div style={{ opacity: 0.7, fontSize: 12 }}>{t('cap.noFiles')}</div>
+          <div style={{ color: 'var(--cds-text-secondary)', fontSize: 12 }}>{t('cap.noFiles')}</div>
         ) : (
           <TableFrame>
             <table className="cds--data-table cds--data-table--md" style={{ width: '100%', tableLayout: 'fixed' }}>
@@ -193,7 +193,7 @@ export function CarbonCapturePage() {
             {t('cap.next')}
           </Button>
         </div>
-        <div style={{ fontSize: 12, opacity: 0.7, marginTop: 8 }}>{t('cap.playbackHint')}</div>
+        <div style={{ fontSize: 12, color: 'var(--cds-text-secondary)', marginTop: 8 }}>{t('cap.playbackHint')}</div>
 
         {playback?.loaded ? (
           <div style={{ marginTop: 12 }}>
@@ -202,12 +202,12 @@ export function CarbonCapturePage() {
               max={100}
               label={t('cap.playback')}
             />
-            <div style={{ fontSize: 12, opacity: 0.75, marginTop: 4 }}>
+            <div style={{ fontSize: 12, color: 'var(--cds-text-secondary)', marginTop: 4 }}>
               {playback.index ?? 0}/{playback.total ?? 0}
             </div>
           </div>
         ) : (
-          <div style={{ opacity: 0.7, fontSize: 12, marginTop: 12 }}>{t('cap.noLoaded')}</div>
+          <div style={{ color: 'var(--cds-text-secondary)', fontSize: 12, marginTop: 12 }}>{t('cap.noLoaded')}</div>
         )}
 
         {playback?.loaded ? (

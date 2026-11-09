@@ -191,11 +191,11 @@ export function CarbonCommandPanel({ point, disabled = false }: Props) {
       </div>
 
       {point ? (
-        <div style={{ opacity: 0.75, fontSize: 12, margin: '8px 0' }}>
+        <div style={{ color: 'var(--cds-text-secondary)', fontSize: 12, margin: '8px 0' }}>
           {t('cmd.currentValue', { name: point.name, value: formatValue(point.value) })}
         </div>
       ) : (
-        <div style={{ opacity: 0.75, fontSize: 12, margin: '8px 0' }}>{t('cmd.pickHint')}</div>
+        <div style={{ color: 'var(--cds-text-secondary)', fontSize: 12, margin: '8px 0' }}>{t('cmd.pickHint')}</div>
       )}
 
       {disabled ? <Note kind="info" title={t('cmd.engineOff')} /> : null}
@@ -266,10 +266,10 @@ export function CarbonCommandPanel({ point, disabled = false }: Props) {
                 {t('cmd.yk.deactivate')}
               </Button>
             </div>
-            <div style={{ opacity: 0.75, fontSize: 12 }}>{t('cmd.yk.hint')}</div>
+            <div style={{ color: 'var(--cds-text-secondary)', fontSize: 12 }}>{t('cmd.yk.hint')}</div>
           </div>
           {clockOffsetResult && clockOffsetResult.ok && clockOffsetResult.avg_ms !== undefined ? (
-            <div style={{ marginTop: 8, fontSize: 12, opacity: 0.85 }}>
+            <div style={{ marginTop: 8, fontSize: 12, color: 'var(--cds-text-secondary)' }}>
               {t('cmd.clockOffset.done', {
                 avg: String(clockOffsetResult.avg_ms),
                 count: String(clockOffsetResult.count ?? 0),
@@ -542,7 +542,7 @@ export function CarbonCommandPanel({ point, disabled = false }: Props) {
                 {t('cmd.send')}
               </Button>
             </div>
-            <div style={{ opacity: 0.75, fontSize: 12 }}>{t('cmd.file.hint')}</div>
+            <div style={{ color: 'var(--cds-text-secondary)', fontSize: 12 }}>{t('cmd.file.hint')}</div>
           </div>
         </AccordionItem>
       </Accordion>

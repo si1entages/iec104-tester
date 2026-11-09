@@ -127,7 +127,7 @@ export function CarbonTrendChart({ watched, onRemove, onClear }: Props) {
         <span className="app-row">
           {t('trend.title')}
           {watched.length === 0 ? (
-            <span style={{ opacity: 0.7, fontSize: 12 }}>{t('trend.emptyHint')}</span>
+            <span style={{ color: 'var(--cds-text-secondary)', fontSize: 12 }}>{t('trend.emptyHint')}</span>
           ) : (
             watched.map((point) => {
               const key = pointKey(point)
@@ -152,11 +152,11 @@ export function CarbonTrendChart({ watched, onRemove, onClear }: Props) {
       }
     >
       {watched.length === 0 ? (
-        <div style={{ padding: 32, textAlign: 'center', opacity: 0.7 }}>{t('trend.sampling')}</div>
+        <div style={{ padding: 32, textAlign: 'center', color: 'var(--cds-text-secondary)' }}>{t('trend.sampling')}</div>
       ) : (
         <>
           <div ref={attachContainer} style={{ width: '100%', height: 320 }} />
-          <div style={{ opacity: 0.65, fontSize: 12, marginTop: 4 }}>{t('trend.footer')}</div>
+          <div style={{ color: 'var(--cds-text-secondary)', fontSize: 12, marginTop: 4 }}>{t('trend.footer')}</div>
         </>
       )}
     </Panel>

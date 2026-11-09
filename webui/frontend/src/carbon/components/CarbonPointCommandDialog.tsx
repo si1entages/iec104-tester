@@ -187,7 +187,7 @@ export function CarbonPointCommandDialog({ point, disabled = false, onClose }: P
 
           {point.sbo ? <Note kind="warning" title={t('pcd.sboTitle')} style={{ marginTop: 12 }}>{t('pcd.sboDesc')}</Note> : null}
 
-          <div style={{ marginTop: 12, fontSize: 12, opacity: 0.7 }}>{t('pcd.hint')}</div>
+          <div style={{ marginTop: 12, fontSize: 12, color: 'var(--cds-text-secondary)' }}>{t('pcd.hint')}</div>
         </>
       ) : null}
     </Modal>

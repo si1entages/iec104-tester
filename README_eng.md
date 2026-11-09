@@ -243,7 +243,9 @@ python tools/mutation_smoke.py
 ```
 
 - Baseline: **1655 passed, 4 deselected** (v1.8.0 release baseline 1654 + 1 version/doc
-  consistency guard) + frontend unit tests **133 passed** + Playwright e2e **46 passed**;
+  consistency guard) + frontend unit tests **133 passed** + Playwright e2e **50 passed**
+  (page-level gates — audit / contrast / non-text contrast — run on **both Carbon and
+  PatternFly**, tunable via `E2E_KITS=pf,carbon`);
   `core/` 92.0%, `webui/` 89.0%, combined **91.3%** (CI scope
   `--cov=core --cov=webui --cov-branch --cov-fail-under=91`; separate webui gate 85%)
 - 20-client concurrency: about **2.9k frames/s**; 2-hour soak: **7200s / 34,765 GI /

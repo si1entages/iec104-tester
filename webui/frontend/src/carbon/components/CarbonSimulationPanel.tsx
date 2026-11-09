@@ -107,7 +107,7 @@ export function CarbonSimulationPanel({ disabled = false, selected }: Props) {
     >
       {disabled ? <Note kind="info" title={t('simPanel.slaveOff')} /> : null}
       {last ? <Note kind={last.ok ? 'success' : 'error'} title={last.text} style={{ marginTop: 8 }} /> : null}
-      <div style={{ fontSize: 12, opacity: 0.7, margin: '8px 0' }}>{t('simPanel.hint')}</div>
+      <div style={{ fontSize: 12, color: 'var(--cds-text-secondary)', margin: '8px 0' }}>{t('simPanel.hint')}</div>
 
       <div className="app-row" style={{ alignItems: 'flex-start', gap: '2.5rem' }}>
         <div style={{ minWidth: 260, flex: 1 }}>
@@ -145,7 +145,7 @@ export function CarbonSimulationPanel({ disabled = false, selected }: Props) {
               ]}
             />
           </div>
-          <div style={{ fontSize: 12, opacity: 0.65 }}>{t('simPanel.rateTip')}</div>
+          <div style={{ fontSize: 12, color: 'var(--cds-text-secondary)' }}>{t('simPanel.rateTip')}</div>
         </div>
 
         <div style={{ minWidth: 260, flex: 1 }}>
@@ -182,7 +182,7 @@ export function CarbonSimulationPanel({ disabled = false, selected }: Props) {
               ]}
             />
           </div>
-          <div style={{ fontSize: 12, opacity: 0.65 }}>{t('simPanel.rangeTip')}</div>
+          <div style={{ fontSize: 12, color: 'var(--cds-text-secondary)' }}>{t('simPanel.rangeTip')}</div>
         </div>
       </div>
 

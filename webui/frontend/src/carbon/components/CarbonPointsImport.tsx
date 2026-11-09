@@ -134,7 +134,7 @@ export function CarbonPointsImport() {
         size="lg"
         onRequestClose={close}
       >
-        <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 12 }}>
+        <div style={{ fontSize: 12, color: 'var(--cds-text-secondary)', marginBottom: 12 }}>
           {t('pt.importScdHint')}
         </div>
         {error ? (
@@ -148,7 +148,7 @@ export function CarbonPointsImport() {
               {Object.entries(preview.stats)
                 .filter(([, n]) => n > 0)
                 .map(([k, n]) => (
-                  <span key={k} style={{ fontSize: 12, opacity: 0.8 }}>
+                  <span key={k} style={{ fontSize: 12, color: 'var(--cds-text-secondary)' }}>
                     {k}: <strong>{n}</strong>
                   </span>
                 ))}
@@ -162,7 +162,7 @@ export function CarbonPointsImport() {
                 </ul>
               </Note>
             ) : null}
-            <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 4 }}>
+            <div style={{ fontSize: 12, color: 'var(--cds-text-secondary)', marginBottom: 4 }}>
               {t('pt.importScdPreview')}
             </div>
             <TextArea

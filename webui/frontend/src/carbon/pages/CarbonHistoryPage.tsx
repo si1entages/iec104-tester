@@ -184,7 +184,7 @@ export function CarbonHistoryPage() {
           {t('history.tab.curve')}
         </Button>
         <div style={{ width: 210, minWidth: 210 }}>
-          <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 4 }}>{t('history.start')}</div>
+          <div style={{ fontSize: 12, color: 'var(--cds-text-secondary)', marginBottom: 4 }}>{t('history.start')}</div>
           <TextInput
             id="cb-h-start"
             type="datetime-local"
@@ -195,7 +195,7 @@ export function CarbonHistoryPage() {
           />
         </div>
         <div style={{ width: 210, minWidth: 210 }}>
-          <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 4 }}>{t('history.end')}</div>
+          <div style={{ fontSize: 12, color: 'var(--cds-text-secondary)', marginBottom: 4 }}>{t('history.end')}</div>
           <TextInput
             id="cb-h-end"
             type="datetime-local"
@@ -305,7 +305,7 @@ export function CarbonHistoryPage() {
             <tbody>
               {pageRows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', padding: 24, opacity: 0.7 }}>
+                  <td colSpan={6} style={{ textAlign: 'center', padding: 24, color: 'var(--cds-text-secondary)' }}>
                     {t('history.empty')}
                   </td>
                 </tr>

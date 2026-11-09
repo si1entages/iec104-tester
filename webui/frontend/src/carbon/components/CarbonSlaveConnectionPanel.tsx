@@ -51,7 +51,7 @@ export function CarbonSlaveConnectionPanel() {
             {running ? t('scp.listening') : t('scp.stopped')}
           </Tag>
           {status ? (
-            <span style={{ opacity: 0.75, fontSize: 12 }}>
+            <span style={{ color: 'var(--cds-text-secondary)', fontSize: 12 }}>
               {t('status.points')} {status.points ?? 0} · {t('status.tx')} {status.tx ?? 0} ·{' '}
               {t('status.rx')} {status.rx ?? 0} · {t('conn.dropped')} {status.dropped ?? 0} ·{' '}
               {t('status.clients')} {clients.length}
@@ -122,7 +122,7 @@ export function CarbonSlaveConnectionPanel() {
       <div style={{ marginTop: 8 }}>
         <div style={{ fontSize: 13, marginBottom: 4 }}>{t('scp.clientList')}</div>
         {clients.length === 0 ? (
-          <div style={{ opacity: 0.7, fontSize: 12 }}>{t('scp.noClients')}</div>
+          <div style={{ color: 'var(--cds-text-secondary)', fontSize: 12 }}>{t('scp.noClients')}</div>
         ) : (
           <ul style={{ margin: 0, paddingInlineStart: 18 }}>
             {clients.map((peer) => (

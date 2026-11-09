@@ -115,7 +115,7 @@ export function CarbonLogsPage() {
     >
       <div className="app-row" style={{ alignItems: 'flex-end' }}>
         <div style={{ width: 420, minWidth: 420 }}>
-          <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 4 }}>{t('logs.levels')}</div>
+          <div style={{ fontSize: 12, color: 'var(--cds-text-secondary)', marginBottom: 4 }}>{t('logs.levels')}</div>
           <div className="app-row">
             {ALL_LEVELS.map((level) => (
               <CheckField
@@ -198,7 +198,7 @@ export function CarbonLogsPage() {
             <tbody>
               {pageRows.length === 0 ? (
                 <tr>
-                  <td colSpan={5} style={{ textAlign: 'center', padding: 24, opacity: 0.7 }}>
+                  <td colSpan={5} style={{ textAlign: 'center', padding: 24, color: 'var(--cds-text-secondary)' }}>
                     {t('logs.empty')}
                   </td>
                 </tr>

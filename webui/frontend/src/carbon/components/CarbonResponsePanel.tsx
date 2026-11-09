@@ -93,7 +93,7 @@ export function CarbonResponsePanel({ disabled = false }: Props) {
     >
       {disabled ? <Note kind="info" title={t('rp.slaveOff')} /> : null}
       {last ? <Note kind={last.ok ? 'success' : 'error'} title={last.text} style={{ marginTop: 8 }} /> : null}
-      <div style={{ fontSize: 12, opacity: 0.7, margin: '8px 0' }}>{t('rp.hint')}</div>
+      <div style={{ fontSize: 12, color: 'var(--cds-text-secondary)', margin: '8px 0' }}>{t('rp.hint')}</div>
 
       <Accordion>
         <AccordionItem title={t('rp.group.errors')} {...section('errors')}>
@@ -134,7 +134,7 @@ export function CarbonResponsePanel({ disabled = false }: Props) {
               width={150}
             />
           </div>
-          <div style={{ fontSize: 12, opacity: 0.7 }}>{t('rp.dropRateHint')}</div>
+          <div style={{ fontSize: 12, color: 'var(--cds-text-secondary)' }}>{t('rp.dropRateHint')}</div>
         </AccordionItem>
 
         <AccordionItem title={t('rp.group.delays')} {...section('delays')}>

@@ -198,7 +198,7 @@ export function CarbonNetworkSimCard() {
         </div>
       ) : null}
 
-      <div style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
+      <div style={{ marginTop: 10, fontSize: 12, color: 'var(--cds-text-secondary)' }}>
         {status?.installed && status.stats
           ? `${statsLine('rx')} ｜ ${statsLine('tx')} ｜ ${t('sim.disconnects')} ${status.stats.disconnects ?? 0}`
           : t('sim.notInstalledHint')}

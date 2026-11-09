@@ -60,7 +60,7 @@ export function CarbonLoadTestCard() {
 
   return (
     <Panel title={t('loadtest.title')} style={{ marginTop: 12 }}>
-      <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 12 }}>
+      <div style={{ fontSize: 12, color: 'var(--cds-text-secondary)', marginBottom: 12 }}>
         {t('loadtest.hint')}
       </div>
       {err || apiErr ? (
@@ -93,7 +93,7 @@ export function CarbonLoadTestCard() {
           { term: t('loadtest.fps'), value: String(data?.fps ?? '—') },
         ]} />
         {Array.isArray(data?.per_connection) && (data!.per_connection as Array<{ connection: number; frames_received: number; errors: number }>).length > 1 ? (
-          <div style={{ marginTop: 4, fontSize: 12, opacity: 0.85 }}>
+          <div style={{ marginTop: 4, fontSize: 12, color: 'var(--cds-text-secondary)' }}>
             {(data!.per_connection as Array<{ connection: number; frames_received: number; errors: number }>).map((row) => (
               <div key={row.connection}>
                 {t('loadtest.conn', {
@@ -107,7 +107,7 @@ export function CarbonLoadTestCard() {
         ) : null}
       </div>
       {summary ? (
-        <div style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>
+        <div style={{ marginTop: 8, fontSize: 12, color: 'var(--cds-text-secondary)' }}>
           {t('loadtest.summary')}: {JSON.stringify(summary)}
         </div>
       ) : null}

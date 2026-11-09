@@ -21,7 +21,7 @@ const MAX_VISIBLE = 2
 export function CarbonQualityTags({ quality }: { quality?: string }) {
   const t = useT()
   const text = (quality ?? '').trim()
-  if (!text || text === 'GOOD') return <span style={{ opacity: 0.6 }}>-</span>
+  if (!text || text === 'GOOD') return <span style={{ color: 'var(--cds-text-secondary)' }}>-</span>
 
   const flags = text
     .split('|')
@@ -42,7 +42,7 @@ export function CarbonQualityTags({ quality }: { quality?: string }) {
           {t(FLAGS[f].key)}
         </Tag>
       ))}
-      {hidden > 0 ? <span style={{ opacity: 0.65, fontSize: 12 }}>+{hidden}</span> : null}
+      {hidden > 0 ? <span style={{ color: 'var(--cds-text-secondary)', fontSize: 12 }}>+{hidden}</span> : null}
     </span>
   )
 }

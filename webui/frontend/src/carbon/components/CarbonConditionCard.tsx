@@ -57,7 +57,7 @@ export function CarbonConditionCard() {
 
   return (
     <Panel title={t('bridge.conditionTitle')}>
-      <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 12 }}>
+      <div style={{ fontSize: 12, color: 'var(--cds-text-secondary)', marginBottom: 12 }}>
         {t('bridge.conditionHint')}
       </div>
       {apply.error ? (
@@ -101,7 +101,7 @@ export function CarbonConditionCard() {
       ) : null}
       {injection && injection.total > 0 ? (
         <div style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 4 }}>{t('bridge.injTitle')}</div>
+          <div style={{ fontSize: 12, color: 'var(--cds-text-secondary)', marginBottom: 4 }}>{t('bridge.injTitle')}</div>
           <KvList items={Object.entries(injection).map(([k, v]) => ({ term: k, value: v }))} />
         </div>
       ) : null}

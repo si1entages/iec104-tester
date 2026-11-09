@@ -100,7 +100,7 @@ export function CarbonTestCenterPage() {
             {t('test.stop')}
           </Button>
         </div>
-        <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 8 }}>{t('test.desc')}</div>
+        <div style={{ fontSize: 12, color: 'var(--cds-text-secondary)', marginBottom: 8 }}>{t('test.desc')}</div>
 
         <TableFrame>
           <table className="cds--data-table cds--data-table--md" style={{ width: '100%', tableLayout: 'fixed' }}>
@@ -136,7 +136,7 @@ export function CarbonTestCenterPage() {
             </tbody>
           </table>
         </TableFrame>
-        <div style={{ fontSize: 12, opacity: 0.7, marginTop: 8 }}>{t('test.startHint')}</div>
+        <div style={{ fontSize: 12, color: 'var(--cds-text-secondary)', marginTop: 8 }}>{t('test.startHint')}</div>
       </Panel>
 
 <CarbonLoadTestCard />
@@ -147,7 +147,7 @@ export function CarbonTestCenterPage() {
             {run.lines.join('\n')}
           </pre>
         ) : (
-          <div style={{ opacity: 0.7 }}>{t('test.noRun')}</div>
+          <div style={{ color: 'var(--cds-text-secondary)' }}>{t('test.noRun')}</div>
         )}
       </Panel>
 
@@ -180,7 +180,7 @@ export function CarbonTestCenterPage() {
             </table>
           </TableFrame>
         ) : (
-          <div style={{ opacity: 0.7 }}>{t('test.noReports')}</div>
+          <div style={{ color: 'var(--cds-text-secondary)' }}>{t('test.noReports')}</div>
         )}
       </Panel>
     </div>

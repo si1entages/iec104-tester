@@ -14,13 +14,17 @@
  *  - 渐变/背景图/Canvas 上的文字无法可靠取样，标记为 unknown 跳过（不误报）。
  *
  * 门禁策略：普通文本 < 3:1 直接失败（明显不可读）；3:1~4.5:1 作为
- * 「AA 建议项」打印在报告里，不阻断（antd 预置的成功/错误色属于设计选择）。
+ * 「AA 建议项」打印在报告里，不阻断（预置的成功/错误色属于设计选择）。
  * 需要只看报告不阻断时设 `CONTRAST_REPORT=1`。
+ *
+ * **套件维度（T89）**：按 `GATE_KITS`（默认 `pf,carbon`）各跑一遍——产品默认套件
+ * Carbon 必须有同样的对比度门禁，选择器差异见 `kitProfiles.ts`。
  */
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 
 import { COMBINED , appUrl } from './helpers'
+import { GATE_KITS, expectKitApplied, profileOf } from './kitProfiles'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -141,7 +145,7 @@ async function auditContrast(page: Page): Promise<ContrastReport> {
     const isDisabled = (el: Element): boolean =>
       Boolean(
         el.closest(
-          '[disabled], [aria-disabled="true"], .pf-m-disabled',
+          '[disabled], [aria-disabled="true"], .pf-m-disabled, .cds--btn--disabled',
         ),
       )
 
@@ -229,95 +233,104 @@ async function auditContrast(page: Page): Promise<ContrastReport> {
   })
 }
 
-test('配色对比度巡检：浅色/深色 × 8 个页面（WCAG AA 近似）', async ({ page }) => {
-  test.setTimeout(240_000)
-  const issues: (ContrastIssue & { page: string; mode: string })[] = []
-  let checked = 0
-  let unknown = 0
+for (const kit of GATE_KITS) {
+  const profile = profileOf(kit)
 
-  const pages = [
-    { menu: /主站工作台/, key: 'master' },
-    { menu: /子站工作台/, key: 'slave' },
-    { menu: /多站/, key: 'multi' },
-    { menu: /状态总览/, key: 'status' },
-    { menu: /日志/, key: 'logs' },
-    { menu: /历史/, key: 'history' },
-    { menu: /报文抓包/, key: 'capture' },
-    { menu: /自动化测试/, key: 'tests' },
-  ]
+  test(`配色对比度巡检 [${profile.label}]：浅色/深色 × 8 个页面（WCAG AA 近似）`, async ({ page }) => {
+    test.setTimeout(240_000)
+    const issues: (ContrastIssue & { page: string; mode: string })[] = []
+    let checked = 0
+    let unknown = 0
 
-  await page.goto(appUrl(COMBINED), { waitUntil: 'domcontentloaded' })
-  await expect(page.locator('.pf-v6-c-nav__link').filter({ hasText: /主站工作台/ })).toBeVisible({ timeout: 20_000 })
-  await page.setViewportSize({ width: 1366, height: 768 })
+    const pages = [
+      { menu: /主站工作台/, key: 'master' },
+      { menu: /子站工作台/, key: 'slave' },
+      { menu: /多站/, key: 'multi' },
+      { menu: /状态总览/, key: 'status' },
+      { menu: /日志/, key: 'logs' },
+      { menu: /历史/, key: 'history' },
+      { menu: /报文抓包/, key: 'capture' },
+      { menu: /自动化测试/, key: 'tests' },
+    ]
 
-  for (const mode of ['light', 'dark'] as const) {
-    const current = await page.evaluate(() => document.documentElement.dataset.theme)
-    if (current !== mode) {
-      await page.getByTestId('theme-toggle').click()
-      await expect
-        .poll(() => page.evaluate(() => document.documentElement.dataset.theme))
-        .toBe(mode)
-    }
-    for (const meta of pages) {
-      await page.locator('.pf-v6-c-nav__link').filter({ hasText: meta.menu }).first().click()
-      await page.waitForTimeout(700)
-      const report = await auditContrast(page)
-      checked += report.checked
-      unknown += report.unknown
-      for (const issue of report.issues) issues.push({ ...issue, page: meta.key, mode })
+    await page.goto(appUrl(COMBINED, '', kit), { waitUntil: 'domcontentloaded' })
+    await expectKitApplied(page, kit)
+    await expect(page.locator(profile.nav).filter({ hasText: /主站工作台/ })).toBeVisible({ timeout: 20_000 })
+    await page.setViewportSize({ width: 1366, height: 768 })
 
-      // 选中一行：选中标签、命令/置数面板、禁用→可用等状态下的文字也要查
-      if (meta.key === 'master' || meta.key === 'slave') {
-        const row = page.locator('[data-testid="point-row"]').first()
-        if ((await row.count()) > 0) {
-          await row.click()
-          await page.waitForTimeout(300)
-          const selected = await auditContrast(page)
-          checked += selected.checked
-          unknown += selected.unknown
-          for (const issue of selected.issues) {
-            issues.push({ ...issue, page: `${meta.key}-selected`, mode })
+    for (const mode of ['light', 'dark'] as const) {
+      const current = await page.evaluate(() => document.documentElement.dataset.theme)
+      if (current !== mode) {
+        await page.getByTestId(profile.themeToggle).click()
+        await expect
+          .poll(() => page.evaluate(() => document.documentElement.dataset.theme))
+          .toBe(mode)
+      }
+      for (const meta of pages) {
+        await page.locator(profile.nav).filter({ hasText: meta.menu }).first().click()
+        await page.waitForTimeout(700)
+        const report = await auditContrast(page)
+        checked += report.checked
+        unknown += report.unknown
+        for (const issue of report.issues) {
+          issues.push({ ...issue, page: `${kit}:${meta.key}`, mode })
+        }
+
+        // 选中一行：选中标签、命令/置数面板、禁用→可用等状态下的文字也要查
+        if (meta.key === 'master' || meta.key === 'slave') {
+          const row = page.locator('[data-testid="point-row"]').first()
+          if ((await row.count()) > 0) {
+            await row.click()
+            await page.waitForTimeout(300)
+            const selected = await auditContrast(page)
+            checked += selected.checked
+            unknown += selected.unknown
+            for (const issue of selected.issues) {
+              issues.push({ ...issue, page: `${kit}:${meta.key}-selected`, mode })
+            }
           }
         }
       }
     }
-  }
 
-  const hard = issues.filter((i) => i.kind !== 'disabled-text' && i.ratio < 3)
-  const advice = issues.filter((i) => i.kind !== 'disabled-text' && i.ratio >= 3)
-  const disabled = issues.filter((i) => i.kind === 'disabled-text')
+    const hard = issues.filter((i) => i.kind !== 'disabled-text' && i.ratio < 3)
+    const advice = issues.filter((i) => i.kind !== 'disabled-text' && i.ratio >= 3)
+    const disabled = issues.filter((i) => i.kind === 'disabled-text')
 
-  const fmt = (rows: typeof issues): string =>
-    rows
-      .sort((a, b) => a.ratio - b.ratio)
-      .map(
-        (i) =>
-          `  [${i.mode}/${i.page}] ${i.ratio}:1 (需 ${i.required}:1) ${i.kind} ` +
-          `${i.selector} ${i.fontSize} fg=${i.fg} bg=${i.bg} ×${i.count} 「${i.text}」`,
-      )
-      .join('\n')
+    const fmt = (rows: typeof issues): string =>
+      rows
+        .sort((a, b) => a.ratio - b.ratio)
+        .map(
+          (i) =>
+            `  [${i.mode}/${i.page}] ${i.ratio}:1 (需 ${i.required}:1) ${i.kind} ` +
+            `${i.selector} ${i.fontSize} fg=${i.fg} bg=${i.bg} ×${i.count} 「${i.text}」`,
+        )
+        .join('\n')
 
-  if (advice.length > 0) {
-    console.log(`\n对比度建议项（3:1~4.5:1，WCAG AA 小字未达标，不阻断）：\n${fmt(advice)}\n`)
-  }
-  if (disabled.length > 0) {
-    console.log(`\n禁用态低对比（WCAG 豁免，仅记录）：\n${fmt(disabled)}\n`)
-  }
-  if (hard.length > 0) {
-    console.log(`\n对比度硬失败（<3:1）：\n${fmt(hard)}\n`)
-  }
-  console.log(`对比度巡检：检查 ${checked} 处文本，跳过 ${unknown} 处（渐变/图片/未知背景）。`)
-
-  if (process.env.CONTRAST_REPORT === '1') {
+    if (advice.length > 0) {
+      console.log(`\n对比度建议项（3:1~4.5:1，WCAG AA 小字未达标，不阻断）：\n${fmt(advice)}\n`)
+    }
+    if (disabled.length > 0) {
+      console.log(`\n禁用态低对比（WCAG 豁免，仅记录）：\n${fmt(disabled)}\n`)
+    }
+    if (hard.length > 0) {
+      console.log(`\n对比度硬失败（<3:1）：\n${fmt(hard)}\n`)
+    }
     console.log(
-      hard.length > 0
-        ? `\n报告模式：${hard.length} 组文本 <3:1（不阻断）。`
-        : '\n报告模式：无 <3:1 文本。',
+      `对比度巡检 [${profile.label}]：检查 ${checked} 处文本，跳过 ${unknown} 处（渐变/图片/未知背景）。`,
     )
-  } else {
-    expect(
-      hard,
-      `以下文本对比度 <3:1（明显不可读）：\n${fmt(hard)}`,
-    ).toEqual([])
-  }
-})
+
+    if (process.env.CONTRAST_REPORT === '1') {
+      console.log(
+        hard.length > 0
+          ? `\n报告模式：${hard.length} 组文本 <3:1（不阻断）。`
+          : '\n报告模式：无 <3:1 文本。',
+      )
+    } else {
+      expect(
+        hard,
+        `以下文本对比度 <3:1（明显不可读）：\n${fmt(hard)}`,
+      ).toEqual([])
+    }
+  })
+}

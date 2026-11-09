@@ -91,7 +91,7 @@
 .app-stat-unit {
   margin-inline-start: 6px;
   font-size: 0.5em;
-  opacity: 0.7;
+  color: var(--cds-text-secondary);
 }
 
 .app-kv {
@@ -140,8 +140,31 @@
 
 .app-hint {
   font-size: 12px;
-  opacity: 0.75;
+  color: var(--cds-text-secondary);
   margin-bottom: 4px;
+}
+
+/*
+ * 键盘焦点（T89 非文本对比门禁抓到）：Carbon 的头部品牌链接 `.cds--header__name`
+ * 没有可见焦点环（实测 `outline-style: none` 且无 box-shadow）——补一个与其余控件
+ * 一致的主题焦点环（浅色 #0f62fe / 深色 #ffffff，对其相邻底色均 ≥3:1）。
+ */
+.cds--header__name:focus-visible {
+  outline: 2px solid var(--cds-focus);
+  outline-offset: 2px;
+}
+
+/*
+ * 占位符（T89 门禁抓到）：Carbon 默认 `--cds-text-placeholder` 在浅色下仅 2.6:1，
+ * 低于设计规范 §4.4 的「占位符 ≥3:1」且被 ui-contrast 判为硬失败——提升到次级文字
+ * token（浅色 7.8:1 / 深色 8.9:1）。
+ */
+.cds--text-input::placeholder,
+.cds--text-area::placeholder,
+.cds--search-input::placeholder,
+.cds--number input::placeholder {
+  color: var(--cds-text-secondary);
+  opacity: 1;
 }
 
 /* 自绘日志/脚本输出区（pre） */

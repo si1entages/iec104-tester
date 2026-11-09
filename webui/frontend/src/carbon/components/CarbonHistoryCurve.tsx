@@ -199,13 +199,13 @@ export function CarbonHistoryCurve({ start, end }: Props) {
             onClose={() => setSeries((prev) => prev.filter((x) => !(x.point_type === s.point_type && x.ioa === s.ioa)))}
           />
         ))}
-        {loading ? <span style={{ fontSize: 12, opacity: 0.7 }}>{t('common.loading')}</span> : null}
+        {loading ? <span style={{ fontSize: 12, color: 'var(--cds-text-secondary)' }}>{t('common.loading')}</span> : null}
       </div>
       <div style={{ marginTop: 8 }}>
         {series.length === 0 ? (
-          <div style={{ padding: 32, textAlign: 'center', opacity: 0.7 }}>{t('histcurve.empty')}</div>
+          <div style={{ padding: 32, textAlign: 'center', color: 'var(--cds-text-secondary)' }}>{t('histcurve.empty')}</div>
         ) : !anyRows && !loading ? (
-          <div style={{ padding: 32, textAlign: 'center', opacity: 0.7 }}>{t('histcurve.noData')}</div>
+          <div style={{ padding: 32, textAlign: 'center', color: 'var(--cds-text-secondary)' }}>{t('histcurve.noData')}</div>
         ) : (
           <div ref={attachContainer} style={{ width: '100%', height: 360 }} />
         )}
