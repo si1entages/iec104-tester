@@ -448,7 +448,29 @@ graph TD
 | **T86** | 应用层合规规则第二批（2026-11-09） | 合规监视器新增：公共地址不符（首帧建基线 / 显式 `expected_ca` 配置双模式）、连续重复自发帧（同类型+IOA+值在 10s 窗口内 COT=3 重复——设备抖动缺陷）、CP56 时标偏离（带时标对象 `InformationObject.time_tag` 与观察时刻差 > 300s；`ASDU.decode` 失败一律跳过，保守）。pytest 应用层 7 项（CA 3 / 重复 3 / 时标 1），合规监视器合计 28 项 |
 | **T87** | 报告嵌曲线快照（2026-11-09） | 跨页 plumbing：历史曲线组件渲染后 `ECharts.getDataURL`（底色从主题 token 解析，打印用不透明背景）→ `uiStore.chartSnapshots`（最多 4 张）；状态页导出改 **POST `/api/export/report.html`**（base64 放 GET query 会超长）——JSON `{title, notes, conclusion, conclusion_kind, chart_images}`，报告生成器嵌「8. 历史曲线快照」`<img>`；仅接受 `data:image/png;base64,` 前缀（防属性注入），最多 4 张；GET 端点保留（无快照场景）；前端 fetch → Blob 打开，失败降级 GET。pytest 2 项（生成器嵌图 + POST 端点过滤） |
 
-> **累计统计**：T01~T49、T51~T87 **全部完成**；**待办 1**（T50 真机复测，暂缓待窗口；T39 第三方实测已回填）。
+### 2026-11-09 候选方向比选（v1.8.0 发布后）
+
+> v1.8.0 于 2026-11-09 发布（`76cdb4f`），T72~T87 全部交付，待办只剩外部阻塞项
+> （T50 真机窗口、SCD 私有映射适配需厂商样本）。本批从**代码与门禁现状**核出 4 个候选缺口，
+> 用户选定 **A+B+D**（质量门禁收口）为 v1.9.0；C 保留为下一批候选。
+
+| 候选 | 缺口（证据） | 成本（人日） | 收益 / 验收阈值 | 结论 |
+|---|---|---|---|---|
+| **A** | **默认套件 Carbon 无自动化 UI 门禁**：`tests/e2e/specs/helpers.ts:27` `SPECS_KIT='pf'`，且 `ui-audit.spec.ts:364` / `ui-contrast.spec.ts:249` / `ui-nontext-contrast.spec.ts` 全部经 `appUrl()` 走 `?kit=pf`；Carbon（产品默认）只有 `ui-kit.spec.ts` 5 例 + `visual.spec.ts` 3 张基线 | 2~3 | Carbon 下 8 页×3 视口×中英/深浅裁切 0、3488 处文本 AA 对比 0 硬失败、702 处非文本对比 0 硬失败（当前 0 覆盖） | ✅ 采纳 → T89 |
+| **B** | **v1.8.0 新特性 UI 端到端为 0**：`tests/e2e/specs/` 中 `loadtest` / `compliance` / `clock_offset` / `report.html` / `conclusion` / `chart_images` 零命中（仅 `bridge.spec.ts` 1 例覆盖 T74 启停） | 3~4 | 压测卡 / 桥条件卡 / 违规列表 / 对时 / 报告结论+嵌图 各 1 条 e2e（0 → 5 条） | ✅ 采纳 → T90 |
+| **C** | 桥只到「瞬时手动干扰」（T85 运行中设条件），未到「注入时间线 + 期望症状自动判定」；合规监视 28 条规则只告警，不做「注入了丢包 → 应见 k 超窗/重传」的闭环判定 | 5~7 | 注入时间线（正常→丢包 50%→恢复）+ 判定入报告结论横幅；判定规则用确定性合成帧序列锁死（沿用 `compliance_monitor` 做法）防误报 | ⏸ 下一批候选 |
+| **D** | **点表陈旧态缺前提**：`webui/points.py:68-115` 快照只有 `value`/`quality`，无时标；`docs/design_guidelines.md:391` 明确标注「陈旧判定仍缺（点表快照不带时标）」 | 1.5~2 | 快照带 `ts` + 三套件陈旧标注（灰化 + 图标 + tooltip）；设计规范附录 A 该项 ⚠→✓ | ✅ 采纳 → T91 |
+
+### v1.9.0 任务（T88~T91）
+
+| 任务ID | 任务名称 | 交付物 / 验收证据 |
+|--------|---------|------------------|
+| **T88** | 文档与发布收口（P0，0.5~1 人日；✅ 已交付） | README 按已发布基线重写：徽章 `version-1.8.0` / `Tests-1655`、删除 `## 🚧 开发中（v1.7.0 之后，尚未发版）` 小节（T85/T86/T87 提为正式特性——桥接页补「网络条件注入」描述，并把两项搁置工作移入新设「已知限制（按用户要求暂缓）」节）、`--mode bridge` 与 39 参数表复核；**英文版 `README_eng.md` 同步收口**（此前停在 1545 例 / 88.82% 覆盖 / 「ISA-101 industrial style」，缺桥/SCD/三套 UI/压测/报告/对时，已补齐到 1.8.0 parity）；新 logo 三文件入库（`resources/logo.svg` 760×200 wordmark 与 README 的 608×160 同 3.8:1、`resources/icon.svg`、`docs/pr-assets/logo-preview.png`）；`app.py` 三处帮助文本纠偏（`--mode bridge` 曾写 headless，实为默认 Web 桥接页 8767；`--http-port` 默认补 8767；模块 docstring 同步）；`PROJECT.md` 计数 → **1655**。**新增守卫** `tests/test_version_consistency.py::test_release_docs_match_version`：断言双语 README 的 `version-` 徽章 == `core/version.py`、`Tests-` 徽章双语一致、CHANGELOG 首条 == `__version__`（实测把徽章改成 1.7.0 即失败，已验证能抓漂移）。**验收证据**：后端全套 `pytest tests/ -q` **1655 passed / 4 deselected**（1654 + 本守卫 1 例）、ruff 全仓 `All checks passed`、`git status` 无未跟踪 logo/README 残留 |
+| **T89** | 默认套件 Carbon 纳入 UI 门禁（P1，2~3 人日） | `helpers.ts` `appUrl(base, hash, kit)` 增套件维度，`SPECS_KIT` 由 `E2E_KITS`（默认 `pf,carbon`）驱动；功能用例保持 PF（DOM 断言按 PF 写，Carbon 有 `ui-kit.spec` + 视觉基线兜底），**页级门禁** `ui-audit` / `ui-contrast` / `ui-nontext-contrast` 参数化跑两套件；Carbon 选择器优先用已有 `data-testid`，必须用类名处按 `.cds--*`（沿用 `visual.spec.ts` 的 Carbon→PF 回退范式），主题断言读 `<html>` 的 `cds--g100/g10`；对比度取样沿用 PF 用例的 `::before` 全铺背景排除逻辑（Carbon styles.css 含全局 reset）。验收：Carbon 下 8 页×3 视口×中英/深浅 0 裁切 / 0 横向滚动 / 0 console error、对比度与非文本硬失败 0；Playwright 45 → ~85 例，记录全量墙钟增量 |
+| **T90** | v1.8.0 新特性 e2e 补齐（P1，3~4 人日） | 5 条：① 压测卡（both 部署，UI 启动 1 连接 × 1s@50eps → 分行统计帧数 > 0 → 停止后汇总冻结不归零，回归 T83「拆引擎后 status 算 0」）；② 桥条件卡（设丢帧 100% → 客户端无响应但页面帧视图仍显示干扰前原始帧，回归 T85）；③ 合规违规列表（`node:net` 探针造 I 帧序号跳变 → 桥接页违规行出现且计数 +1，覆盖 T79/T81/T86）；④ 时钟偏差测量（连接后点按钮 → 结果行出现 `avg_ms` 且 |avg| < 阈值，T80）；⑤ 报告结论 + 嵌曲线（选「有条件通过」+ 说明 → 导出 → 断言 HTML 含结论横幅且 `chart_images` 经 POST 嵌入，T82/T87）。用例范式复用 `bridge.spec.ts`（用例内 echo 上游 + OS 派空闲口，避开固定端口 10048）。验收：5 条在 PF 与 Carbon 下均绿、无 console error、无 4xx/5xx |
+| **T91** | 点表陈旧（stale）态（P2，1.5~2 人日） | 先修前提：`core/data/data_store.py` 五个数据类（YxData/YcData/YkData/YmData/StepData）现有 `timestamp` 是 **monotonic**（浏览器不可用），`last_change_time`（`time.time()`）仅 YcData 有且只在**值变化**时写——陈旧判定要的是**最后更新**时间，故新增统一 `last_update_time`（wall clock，毫秒）并在所有 `set_*` 路径写入；`webui/points.py:68-115` 快照每行带 `ts`（未更新为 0）。前端 Carbon/PF 点表按阈值（默认 60s）标灰 + 图标 + tooltip（满足「颜色只表达状态且必须有文字/图标」；经典版按冻结承诺不改界面，仅数据层透传）；`pointSchema` 增 `ts` 键（编译期键集比对同步）；i18n 词条。验收：注入停止后 60s 出现陈旧标记、恢复上送即消失；`/api/points` 契约用例 + 前端单测覆盖；`docs/design_guidelines.md` 附录 A 该项 ⚠→✓ |
+
+> **累计统计**：T01~T49、T51~T88 **全部完成**；**待办 4**——**v1.9.0 剩余 T89~T91**（Carbon UI 门禁 / 新特性 e2e / 点表陈旧态，2026-11-09 用户选定 A+B+D），**T50** 真机复测仍暂缓待装置窗口。
 
 ---
 

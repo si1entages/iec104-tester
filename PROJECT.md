@@ -81,7 +81,7 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 - 协议完整性: `TypeID` 枚举里**每个类型都必须同时有解码注册与 ASDUBuilder 构造器**（否则就是"能解不能发"的半实现）；新增类型时用 `tests/test_protocol_type_coverage.py` 的护栏用例兜底
 
 ### 测试
-- 单元测试: tests/test_*.py（**1545 例**；`tests/perf/` 由 `-m "not perf"` 默认排除）
+- 单元测试: tests/test_*.py（**1655 例**；`tests/perf/` 由 `-m "not perf"` 默认排除）
 - 协议 fuzz: tests/test_protocol_fuzz.py（Hypothesis；解码器只允许 `ValueError`）
 - 互操作回放: tests/test_frame_corpus_replay.py + tests/fixtures/frames/（golden + MasterEngine 回放）
 - 性能/长稳: `pytest tests/ -m perf`（解码吞吐 / 10 万点快照 / 环回 soak，时长由 `IEC104_SOAK_SECONDS` 控制）
@@ -92,6 +92,19 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
 
 ## 当前开发重点
 <!-- 每次开工前更新这里，AI 就知道上下文 -->
+
+### 下一迭代 v1.9.0（2026-11-09 用户选定：质量门禁收口 A+B+D）
+
+> 依据：v1.8.0 已发布（`76cdb4f`，2026-11-09），T72~T87 全部交付；剩余待办只有外部阻塞项
+> （T50 真机窗口、SCD 私有映射适配需厂商样本）。候选比选与成本/验收阈值见
+> [`docs/architecture_plan.md`](docs/architecture_plan.md)「2026-11-09 候选方向比选」。
+> 本批**不新增功能面**，只补门禁与端到端覆盖。
+
+- [x] **T88 文档与发布收口**（P0，0.5~1 人日）：README 按已发布基线重写——徽章 `version-1.8.0` / `Tests-1655`、删除「🚧 开发中（v1.7.0 之后，尚未发版）」小节并把 T85/T86/T87 提为正式特性（桥接页增「网络条件注入」描述）；**英文版 `README_eng.md` 同步收口**（此前停在 1545 例 / 88.82% 覆盖 / 「ISA-101 industrial style」，缺桥/SCD/三套 UI/压测/报告，已补齐）；新 logo 三文件入库（`resources/logo.svg` 760×200 wordmark、`resources/icon.svg` 改版、`docs/pr-assets/logo-preview.png`）；`app.py` 三处帮助文本纠偏（`--mode bridge` 曾写「headless」，实为默认 Web 桥接页 8767；`--http-port` 默认补 8767）；新增守卫用例 `tests/test_version_consistency.py::test_release_docs_match_version`（README 徽章 / CHANGELOG 首条 ↔ 版本源，已验证能抓漂移）。**验收**：全套 **1655 passed / 4 deselected**、ruff 全仓通过、双语徽章一致、`git status` 无残留
+- [ ] **T89 默认套件 Carbon 纳入 UI 门禁**（P1，2~3 人日）：`tests/e2e/specs/helpers.ts` 的 `appUrl` 增套件维度 + `E2E_KITS`（默认 `pf,carbon`），页级门禁（`ui-audit` / `ui-contrast` / `ui-nontext-contrast`）跑两套件，Carbon 选择器按 `.cds--*` 补齐。**验收**：Carbon 下 8 页 × 3 视口 × 中英/深浅 **0 裁切 / 0 横向滚动 / 0 console error**、对比度与非文本硬失败 0；Playwright 45 → ~85 例（记录墙钟增量）
+- [ ] **T90 v1.8.0 新特性 e2e 补齐**（P1，3~4 人日）：压测卡（1 连接 × 1s@50eps，含结束态冻结回归）/ 桥条件注入卡（丢帧 100% 仍见干扰前原始帧）/ 合规违规列表（序号跳变 → 违规行 +1）/ 时钟偏差测量 / 报告结论横幅 + 嵌曲线导出，共 5 条（复用 `bridge.spec.ts`「用例内 echo 上游 + OS 派空闲口」范式）。**验收**：5 条在 PF 与 Carbon 下均绿、无 console error、无 4xx/5xx
+- [ ] **T91 点表陈旧（stale）态**（P2，1.5~2 人日）：`core/data/data_store.py` 五个数据类补 `last_update_time`（wall clock，毫秒；**不能复用 `last_change_time`**——只在值变化时写，恒定值周期上送会被误判陈旧）→ `/api/points` 每行带 `ts` → 三套件点表按阈值（默认 60s）标灰 + 图标 + tooltip（契约 `pointSchema` 增键，满足编译期键集比对）。**验收**：停更 60s 出现陈旧标记、恢复上送即消失；同步 `docs/design_guidelines.md` 附录 A 该项 ⚠→✓
+
 - [x] 接入未使用的 GUI 面板：SimPanel、PointEditor、CapturePanel、TrendChart、MultiStationPanel
 - [x] 修复 SlaveView.get_point_editor 空引用、点表批量添加列表处理
 - [x] 引擎层 _spawn 安全任务调度（保留引用 + 异常日志）

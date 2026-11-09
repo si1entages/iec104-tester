@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 200" width="760" height="200" role="img" aria-label="IEC 104 Tester">
+  <defs>
+    <linearGradient id="wbg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b2039"/>
+      <stop offset="1" stop-color="#091729"/>
+    </linearGradient>
+    <linearGradient id="wlink" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#34d399"/>
+    </linearGradient>
+    <radialGradient id="wsheen" cx="0.18" cy="0.1" r="0.9">
+      <stop offset="0" stop-color="#5aa9ff" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#5aa9ff" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="wcard"><rect x="0" y="0" width="760" height="200" rx="30"/></clipPath>
+
+    <!-- 图标标记（与 resources/icon.svg 同源，等比缩放复用） -->
+    <g id="mark">
+      <rect x="0" y="0" width="256" height="256" rx="58" fill="url(#wbg)"/>
+      <rect x="0" y="0" width="256" height="256" rx="58" fill="url(#wsheen)"/>
+      <rect x="2.5" y="2.5" width="251" height="251" rx="55.5" fill="none"
+            stroke="#78b4ff" stroke-opacity="0.22" stroke-width="2"/>
+      <circle cx="128" cy="98" r="60" fill="none" stroke="#9ecbff"
+              stroke-opacity="0.18" stroke-width="1.5" stroke-dasharray="2 7"/>
+      <g stroke="#cfe6ff" stroke-opacity="0.42" stroke-width="2.5" stroke-linecap="round">
+        <line x1="104" y1="38" x2="104" y2="46"/>
+        <line x1="116" y1="34" x2="116" y2="46"/>
+        <line x1="128" y1="30" x2="128" y2="46"/>
+        <line x1="140" y1="34" x2="140" y2="46"/>
+        <line x1="152" y1="38" x2="152" y2="46"/>
+      </g>
+      <circle cx="128" cy="98" r="44" fill="#0a1f38" fill-opacity="0.55"/>
+      <circle cx="128" cy="98" r="44" fill="none" stroke="url(#wlink)" stroke-width="6"/>
+      <line x1="98" y1="98" x2="158" y2="98" stroke="#cfe6ff"
+            stroke-opacity="0.25" stroke-width="1.5" stroke-dasharray="3 5"/>
+      <path d="M98 98 H108 L114 82 L124 114 L134 86 L142 98 H158" fill="none"
+            stroke="#34d399" stroke-opacity="0.22" stroke-width="9"
+            stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M98 98 H108 L114 82 L124 114 L134 86 L142 98 H158" fill="none"
+            stroke="#5eead4" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="84" cy="98" r="11" fill="#0a1f38"/>
+      <circle cx="84" cy="98" r="10" fill="none" stroke="#eaf6ff" stroke-opacity="0.85" stroke-width="2"/>
+      <circle cx="84" cy="98" r="5.5" fill="#38bdf8"/>
+      <circle cx="172" cy="98" r="11" fill="#0a1f38"/>
+      <circle cx="172" cy="98" r="10" fill="none" stroke="#eaf6ff" stroke-opacity="0.85" stroke-width="2"/>
+      <circle cx="172" cy="98" r="5.5" fill="#34d399"/>
+      <g fill="none" stroke="#eaf6ff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M90 180 L98 172 L98 204"/>
+        <path d="M87 204 L108 204"/>
+        <rect x="118" y="172" width="20" height="32" rx="10"/>
+        <path d="M168 172 L148 192 L174 192"/>
+        <path d="M168 172 L168 204"/>
+      </g>
+      <rect x="104" y="216" width="48" height="3.5" rx="1.75" fill="url(#wlink)"/>
+    </g>
+  </defs>
+
+  <g clip-path="url(#wcard)">
+    <rect width="760" height="200" fill="url(#wbg)"/>
+    <rect width="760" height="200" fill="url(#wsheen)"/>
+  </g>
+  <rect x="1.5" y="1.5" width="757" height="197" rx="28.5" fill="none"
+        stroke="#78b4ff" stroke-opacity="0.18" stroke-width="2"/>
+
+  <!-- 标记：缩放 0.66 → 169px，垂直居中 -->
+  <use href="#mark" transform="translate(22, 16) scale(0.66)"/>
+
+  <!-- 文字区 -->
+  <g font-family="'Segoe UI','Helvetica Neue',Arial,'PingFang SC','Microsoft YaHei',sans-serif">
+    <text x="212" y="88" font-size="52" font-weight="700" fill="#eaf6ff" letter-spacing="1">IEC <tspan fill="url(#wlink)">104</tspan></text>
+    <text x="214" y="126" font-size="26" font-weight="600" fill="#8fb8e6" letter-spacing="6">TESTER</text>
+    <text x="214" y="164" font-size="15" fill="#6f97c4" letter-spacing="0.5">IEC 60870-5-104 协议测试工作台</text>
+  </g>
+
+  <!-- 右侧渐变收尾 -->
+  <rect x="214" y="140" width="120" height="3" rx="1.5" fill="url(#wlink)"/>
+  <rect x="214" y="150" width="70" height="2" rx="1" fill="#34d399" opacity="0.5"/>
+</svg>

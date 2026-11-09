@@ -3,7 +3,8 @@
 纯 Web 形态：浏览器作为唯一 UI，入口负责启动本地 Web 服务并按需打开浏览器。
 单文件发布入口：默认单进程双角色、一个 8765 端口，打开一个工作台（左侧菜单
 切换主站/子站）；也支持 `--mode master|slave` 只启动单角色。
-透明桥（T73）：`--mode bridge`（真实主站 ↔ 测试器 ↔ 真实子站旁路观察，headless）。
+透明桥（T73）：`--mode bridge`（真实主站 ↔ 测试器 ↔ 真实子站旁路观察）；默认 Web 桥接页
+（HTTP 8767，桥在 UI 上配置启停），`--no-gui` 时退为 headless 透传。
 提供三类运行方式：
   - Web UI（默认）：`python app.py`（both）/ `--mode master|slave`
   - headless 引擎 CLI：`python app.py --mode slave --no-gui`
@@ -411,7 +412,7 @@ def cli(default_role: str | None = None) -> int:
     parser.add_argument(
         "--mode", choices=["master", "slave", "both", "bridge"], default=default_role,
         help="运行模式: master(主站) / slave(子站) / both(默认；单页工作台) / "
-             "bridge(透明桥：主站↔测试器↔子站旁路观察，headless)"
+             "bridge(透明桥：主站↔测试器↔子站旁路观察；默认 Web 桥接页，--no-gui 为 headless)"
     )
     parser.add_argument(
         "--listen-host", type=str, default=None,
@@ -503,7 +504,7 @@ def cli(default_role: str | None = None) -> int:
     )
     parser.add_argument(
         "--http-port", type=int, default=None,
-        help="Web UI HTTP 端口 (默认主站 8765 / 子站 8766)"
+        help="Web UI HTTP 端口 (默认主站/两者 8765 / 子站 8766 / 桥 8767)"
     )
     parser.add_argument(
         "--http-host", type=str, default="127.0.0.1",

@@ -1,22 +1,78 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="IEC 104 Tester logo">
   <defs>
-    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#1e66f5"/>
-      <stop offset="100%" style="stop-color:#89b4fa"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b2039"/>
+      <stop offset="0.55" stop-color="#0d2b4d"/>
+      <stop offset="1" stop-color="#091729"/>
     </linearGradient>
+    <radialGradient id="sheen" cx="0.25" cy="0.16" r="0.95">
+      <stop offset="0" stop-color="#5aa9ff" stop-opacity="0.20"/>
+      <stop offset="1" stop-color="#5aa9ff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="link" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#34d399"/>
+    </linearGradient>
+    <clipPath id="card"><rect x="0" y="0" width="256" height="256" rx="58"/></clipPath>
   </defs>
-  <!-- Background -->
-  <rect width="256" height="256" rx="32" fill="url(#bg)"/>
-  <!-- IEC text -->
-  <text x="128" y="100" text-anchor="middle" font-family="Arial,sans-serif" font-weight="bold" font-size="48" fill="#ffffff">IEC</text>
-  <!-- 104 text -->
-  <text x="128" y="160" text-anchor="middle" font-family="Arial,sans-serif" font-weight="bold" font-size="64" fill="#ffffff">104</text>
-  <!-- Subtitle -->
-  <text x="128" y="200" text-anchor="middle" font-family="Arial,sans-serif" font-size="20" fill="#ccd0da">Tester</text>
-  <!-- Network icon hint -->
-  <circle cx="60" cy="220" r="8" fill="#a6e3a1" opacity="0.8"/>
-  <circle cx="128" cy="220" r="8" fill="#f9e2af" opacity="0.8"/>
-  <circle cx="196" cy="220" r="8" fill="#f38ba8" opacity="0.8"/>
-  <line x1="68" y1="220" x2="120" y2="220" stroke="#ffffff" stroke-width="2" opacity="0.6"/>
-  <line x1="136" y1="220" x2="188" y2="220" stroke="#ffffff" stroke-width="2" opacity="0.6"/>
+
+  <!-- 底板 + 高光 + 极低对比电路走线 -->
+  <g clip-path="url(#card)">
+    <rect width="256" height="256" fill="url(#bg)"/>
+    <rect width="256" height="256" fill="url(#sheen)"/>
+    <g stroke="#7fb6ff" stroke-opacity="0.07" stroke-width="2" fill="none">
+      <path d="M0 40 H64 L84 60 H160"/>
+      <path d="M256 216 H196 L176 196 H96"/>
+      <path d="M0 176 H40 L60 196"/>
+      <path d="M256 84 H212 L192 64"/>
+    </g>
+  </g>
+  <rect x="2.5" y="2.5" width="251" height="251" rx="55.5" fill="none"
+        stroke="#78b4ff" stroke-opacity="0.22" stroke-width="2"/>
+
+  <!-- 扫描虚环（旁路监视 / 合规审计） -->
+  <circle cx="128" cy="98" r="60" fill="none" stroke="#9ecbff"
+          stroke-opacity="0.18" stroke-width="1.5" stroke-dasharray="2 7"/>
+
+  <!-- 顶部仪表刻度（测量 / 测试） -->
+  <g stroke="#cfe6ff" stroke-opacity="0.42" stroke-width="2.5" stroke-linecap="round">
+    <line x1="104" y1="38" x2="104" y2="46"/>
+    <line x1="116" y1="34" x2="116" y2="46"/>
+    <line x1="128" y1="30" x2="128" y2="46"/>
+    <line x1="140" y1="34" x2="140" y2="46"/>
+    <line x1="152" y1="38" x2="152" y2="46"/>
+  </g>
+
+  <!-- 协议 / 链路圆环 -->
+  <circle cx="128" cy="98" r="44" fill="#0a1f38" fill-opacity="0.55"/>
+  <circle cx="128" cy="98" r="44" fill="none" stroke="url(#link)" stroke-width="6"/>
+
+  <!-- 环内基线 + 采样脉冲（遥信变位 / 遥测 / SOE） -->
+  <line x1="98" y1="98" x2="158" y2="98" stroke="#cfe6ff"
+        stroke-opacity="0.25" stroke-width="1.5" stroke-dasharray="3 5"/>
+  <path d="M98 98 H108 L114 82 L124 114 L134 86 L142 98 H158" fill="none"
+        stroke="#34d399" stroke-opacity="0.22" stroke-width="9"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M98 98 H108 L114 82 L124 114 L134 86 L142 98 H158" fill="none"
+        stroke="#5eead4" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- 两端节点：主站（青）/ 子站（绿），骑在链路环上 -->
+  <circle cx="84" cy="98" r="11" fill="#0a1f38"/>
+  <circle cx="84" cy="98" r="10" fill="none" stroke="#eaf6ff" stroke-opacity="0.85" stroke-width="2"/>
+  <circle cx="84" cy="98" r="5.5" fill="#38bdf8"/>
+  <circle cx="172" cy="98" r="11" fill="#0a1f38"/>
+  <circle cx="172" cy="98" r="10" fill="none" stroke="#eaf6ff" stroke-opacity="0.85" stroke-width="2"/>
+  <circle cx="172" cy="98" r="5.5" fill="#34d399"/>
+
+  <!-- 「104」几何字标（纯矢量，跨平台一致） -->
+  <g fill="none" stroke="#eaf6ff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M90 180 L98 172 L98 204"/>
+    <path d="M87 204 L108 204"/>
+    <rect x="118" y="172" width="20" height="32" rx="10"/>
+    <path d="M168 172 L148 192 L174 192"/>
+    <path d="M168 172 L168 204"/>
+  </g>
+
+  <!-- 底部渐变收尾线 -->
+  <rect x="104" y="216" width="48" height="3.5" rx="1.75" fill="url(#link)"/>
 </svg>
