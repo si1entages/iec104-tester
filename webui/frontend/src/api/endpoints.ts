@@ -17,6 +17,7 @@ import {
   captureLoadResponseSchema,
   capturePlaybackActionSchema,
   captureStatusSchema,
+  doctorResponseSchema,
   frameDecodeSchema,
   historyDataRecordSchema,
   historyFrameRecordSchema,
@@ -53,6 +54,7 @@ import type {
   HistoryFramesParams,
   ImportFormat,
   LogQueryParams,
+  DoctorRequest,
   MasterStartRequest,
   MultiStartRequest,
   ParamRequest,
@@ -141,6 +143,8 @@ export const api = {
     clock: () => apiPost('/api/master/clock', okSchema),
     clockOffset: (samples: number) =>
       apiPost('/api/master/clock_offset', looseOkSchema, { samples }),
+    /** 连接医生（T94）：分层自检（TCP → STARTDT → 数据流），结论随报告附存（契约 §2.14a） */
+    doctor: (body: DoctorRequest) => apiPost('/api/master/doctor', doctorResponseSchema, body),
     ci: () => apiPost('/api/master/ci', okSchema),
     reset: () => apiPost('/api/master/reset', okSchema),
     test: () => apiPost('/api/master/test', okSchema),

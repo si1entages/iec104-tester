@@ -479,7 +479,7 @@ graph TD
 |---|---|---|
 | 1 | 主站对真机：连接/STARTDT/GI/对时/读/设点全部走通 | 引擎日志 ACTCON/ACTTERM；`/api/status` Running rx 持续增长；对时 RTT≈50-108ms |
 | 2 | **我方缺陷（已修）**：I 帧 N(R) 隐式确认不停 t1（只认 S 帧） | `process_rx_i_frame_ack` 返回是否推进；主/子站会话推进即停 t1；回归 `test_i_frame_implicit_ack_stops_t1` |
-| 3 | **对端缺陷（取证）**：simulator4 从不确认我方 I 帧（0 个 S 帧、N(R) 恒 0、命令回显 COT=47 非标） | 真机帧缓冲 200 帧逐字节解码：rx I 帧 VR=0 恒定；我方按标准 t1(15s) 断链自动重连——每条命令后链路重建一次 |
+| 3 | **对端确认行为复核（晚间纠错）**：T92 首轮「对端不确认」系误判——simulator4 确认行为**合规**（处理 I 帧后 N(R)=1 推进；自发帧携带上次确认值）。T92 抓到的 N(R)=0 是 t1 缺陷断链后重连新连接上的帧 | 裸 socket 原始帧取证：GI 后对端响应 `VS=10 N(R)=1 cot=7`；修复后长连接 tx 持续增长无断链。遗留小瑕疵：命令回显用保留 COT=47 |
 | 4 | 趋势图工作正常（像素级验证） | 真机数据流下「遥测16385」趋势曲线区 956 曲线色像素 + 截图；「看不到」根因＝连接断 + 选中不变化的演示点（真机 IOA 16385+ vs 演示表 YC_0001=1001） |
 | 5 | 子站外部通信通过（独立客户端） | `tools/qa_independent_master.py`（裸 socket 按标准手写）：STARTDT/GI/80 点读取 PASS；UI 置数两帧（type36/COT=3）实时到达外部客户端；UI 客户端列表正确 |
 | 6 | 防回归 | `trend-live.spec.ts`（曲线区 >20 曲线色像素）+ `trend.waiting` 单采样提示（Carbon/PF）；后端 **1656 passed** / e2e **51 passed** |

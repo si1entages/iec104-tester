@@ -416,6 +416,33 @@ export interface BatchPointsRequest {
 export type ImportFormat = 'csv' | 'yaml' | 'json' | 'auto'
 
 /** SCD/CID/ICD（IEC 61850-6 SCL + 80-1 映射）预览响应（契约 §2.4a） */
+export interface DoctorStep {
+  key: string
+  ok: boolean
+  /** 后端生成的面向用户的人话结论（诊断输出，同引擎日志为中文） */
+  detail: string
+  evidence?: Record<string, unknown>
+}
+
+export interface DoctorReport {
+  ok: boolean
+  conclusion: string
+  duration_ms: number
+  steps: DoctorStep[]
+}
+
+export interface DoctorResponse {
+  ok: boolean
+  report: DoctorReport
+}
+
+export interface DoctorRequest {
+  host: string
+  port: number
+  addr?: number
+  observe_seconds?: number
+}
+
 export interface ScdPreviewResponse {
   ok: boolean
   /** 生成的点表 YAML 文本（可直接投给 /api/points/import?format=yaml） */

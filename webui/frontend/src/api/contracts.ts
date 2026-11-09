@@ -46,6 +46,9 @@ import type {
   CaptureStatus,
   EngineEvent,
   Frame,
+  DoctorResponse,
+  DoctorReport,
+  DoctorStep,
   FrameDecodeResponse,
   FrameSegment,
   FrameTranslation,
@@ -610,6 +613,25 @@ export const testRunActionSchema = obj({
   run: optional(testRunSchema),
 })
 
+export const doctorStepSchema = obj({
+  key: str(),
+  ok: bool(),
+  detail: str(),
+  evidence: optional(dict(unknown())),
+})
+
+export const doctorReportSchema = obj({
+  ok: bool(),
+  conclusion: str(),
+  duration_ms: num(),
+  steps: arr(doctorStepSchema),
+})
+
+export const doctorResponseSchema = obj({
+  ok: bool(),
+  report: doctorReportSchema,
+})
+
 // ── 编译期契约检查（导出以避免 noUnusedLocals；不参与运行时）───────────
 export type ContractKeyChecks = [
   Assert<Equal<SchemaKeys<typeof okSchema>, keyof OkResponse>>,
@@ -624,6 +646,9 @@ export type ContractKeyChecks = [
   Assert<Equal<SchemaKeys<typeof frameSegmentSchema>, keyof FrameSegment>>,
   Assert<Equal<SchemaKeys<typeof frameTranslationSchema>, keyof FrameTranslation>>,
   Assert<Equal<SchemaKeys<typeof frameDecodeSchema>, keyof FrameDecodeResponse>>,
+  Assert<Equal<SchemaKeys<typeof doctorStepSchema>, keyof DoctorStep>>,
+  Assert<Equal<SchemaKeys<typeof doctorReportSchema>, keyof DoctorReport>>,
+  Assert<Equal<SchemaKeys<typeof doctorResponseSchema>, keyof DoctorResponse>>,
   Assert<Equal<SchemaKeys<typeof schemaResponseSchema>, keyof SchemaResponse>>,
   Assert<Equal<SchemaKeys<typeof sessionExportSchema>, keyof SessionExport>>,
   Assert<Equal<SchemaKeys<typeof logRowSchema>, keyof LogRow>>,

@@ -21,8 +21,9 @@ import {
 
 import { api } from '../../api/endpoints'
 import { useCommand, useCommandNoArgs, usePointsQuery, useStatusQuery } from '../../api/queries'
+import type { DoctorRequest, DoctorResponse } from '../../api/types'
 import type { Point } from '../../api/types'
-import { useT } from '../../i18n'
+import { useT, type MessageKey } from '../../i18n'
 import { directCommandKind } from '../../lib/pointCommand'
 import { pointKey } from '../../lib/pointValue'
 import { trendBuffer } from '../../lib/trendBuffer'
@@ -60,6 +61,7 @@ export function PfMasterPage() {
   const [tab, setTab] = useState<string | number>('frames')
 
   const start = useCommand(api.master.start)
+  const doctorCmd = useCommand<DoctorRequest, DoctorResponse>(api.master.doctor)
   const stop = useCommandNoArgs(api.master.stop)
   const gi = useCommand(api.master.gi)
 
@@ -156,7 +158,40 @@ export function PfMasterPage() {
                 >
                   {t('cmd.gi.label')}
                 </Button>
+                <Button
+                  variant="secondary"
+                  isDisabled={doctorCmd.isPending}
+                  isLoading={doctorCmd.isPending}
+                  onClick={() => {
+                    doctorCmd.mutate({
+                      host,
+                      port: Number(port) || 2404,
+                      addr: Number(addr) || 1,
+                    })
+                  }}
+                >
+                  {doctorCmd.isPending ? t('doctor.running') : t('doctor.button')}
+                </Button>
               </ActionGroup>
+              {doctorCmd.data ? (
+                <Alert
+                  variant={doctorCmd.data.report.ok ? 'success' : 'warning'}
+                  title={t('doctor.conclusion')}
+                  style={{ marginTop: 12 }}
+                >
+                  <p style={{ marginBottom: 8 }}>{doctorCmd.data.report.conclusion}</p>
+                  {doctorCmd.data.report.steps.map((s) => (
+                    <div key={s.key} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
+                      <Label isCompact color={s.ok ? 'green' : 'red'}>
+                        {t(`doctor.step.${s.key}` as MessageKey)}
+                      </Label>
+                      <span style={{ fontSize: 12, color: 'var(--pf-t--global--text--color--subtle)' }}>
+                        {s.detail}
+                      </span>
+                    </div>
+                  ))}
+                </Alert>
+              ) : null}
             </Form>
           </CardBody>
         </Card>

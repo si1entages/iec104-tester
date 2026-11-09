@@ -406,6 +406,38 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
             bool(body.get("with_time", False)), deactivate,
         ))
 
+    async def api_master_doctor(request: web.Request) -> web.Response:
+        """连接医生（T94）：分层自检（TCP → STARTDT → 数据流），结论随报告附存."""
+        from core.engine.doctor import run_doctor
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        host = str(body.get("host") or "").strip()
+        try:
+            port = int(body.get("port") or 0)
+        except (TypeError, ValueError):
+            port = 0
+        if not host or not 0 < port < 65536:
+            return web.json_response({"ok": False, "error": "需要 host 与有效 port"}, status=400)
+        try:
+            addr = int(body.get("addr") or 1)
+        except (TypeError, ValueError):
+            addr = 1
+        try:
+            observe = float(body.get("observe_seconds") or 3.0)
+        except (TypeError, ValueError):
+            observe = 3.0
+        observe = max(1.0, min(observe, 10.0))
+        report = await run_doctor(host, port, addr, observe_seconds=observe)
+        payload = report.to_dict()
+        # 测试报告附「连接诊断」段（最近一次诊断的证据）
+        bridge.last_doctor = payload
+        return web.json_response({"ok": payload["ok"], "report": payload})
+
     async def api_clock(request: web.Request) -> web.Response:
         return web.json_response(await bridge.clock_sync())
 
@@ -607,7 +639,8 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
             loadtest_summary=lt_summary, compliance_violations=comp_violations,
             conclusion=conclusion, conclusion_kind=conclusion_kind,
             injection=injection, condition=condition,
-            chart_images=chart_images)
+            chart_images=chart_images,
+            doctor=getattr(bridge, "last_doctor", None))
         fname = time.strftime("iec104_report_%Y%m%d_%H%M%S.html")
         return web.Response(
             text=html_text, content_type="text/html",
@@ -1392,6 +1425,7 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
         app.router.add_get("/api/master/params", api_params)
         app.router.add_post("/api/master/file", api_file)
         app.router.add_post("/api/master/clock_offset", api_master_clock_offset)
+        app.router.add_post("/api/master/doctor", api_master_doctor)
         app.router.add_post("/api/points/yaml", api_points_yaml_put)
         app.router.add_post("/api/points/import", api_points_import)
         app.router.add_post("/api/points/batch", api_points_batch)

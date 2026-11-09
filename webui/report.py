@@ -85,6 +85,7 @@ def build_session_report_html(
     injection: dict | None = None,
     condition: str = "",
     chart_images: list[str] | None = None,
+    doctor: dict | None = None,
 ) -> str:
     """生成自包含 HTML 测试报告.
 
@@ -155,6 +156,21 @@ def build_session_report_html(
             f'alt="历史曲线 {i + 1}" /></div>'
             for i, img in enumerate(chart_images[:4]))
         chart_html = f"<h2>8. 历史曲线快照</h2>{imgs}"
+    doctor_html = ""
+    if doctor:
+        d_rows = "".join(
+            "<tr>"
+            f"<td>{_escape(str(s.get('key', '')))}</td>"
+            f"<td>{'通过' if s.get('ok') else '未通过'}</td>"
+            f"<td>{_escape(str(s.get('detail', '')))}</td>"
+            "</tr>"
+            for s in doctor.get("steps") or [])
+        doctor_html = (
+            "<h2>9. 连接诊断（T94）</h2>"
+            f"<p>{_escape(str(doctor.get('conclusion', '')))}</p>"
+            f'<table class=meta>{d_rows}</table>'
+            "<p class=foot>连接医生：TCP → STARTDT → 数据流分层自检；证据含对端 S 帧计数、"
+            "N(R) 推进与保留 COT 计数（对端不确认 I 帧属对端实现缺陷）。</p>")
     injection_html = ""
     if injection is not None and injection.get("total", 0) > 0:
         inj_rows = "".join(
@@ -242,5 +258,6 @@ def build_session_report_html(
 {compliance_html}
 {injection_html}
 {chart_html}
+{doctor_html}
 <p class=foot>由 iec104-tester 自动生成；本文件自包含（无外部引用），浏览器「打印 → 另存为 PDF」即可归档交付。</p>
 </body></html>"""

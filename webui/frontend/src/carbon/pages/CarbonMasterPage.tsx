@@ -4,8 +4,9 @@ import { Button, Tab, TabList, TabPanel, TabPanels, Tabs, Tag } from '@carbon/re
 
 import { api } from '../../api/endpoints'
 import { useCommand, useCommandNoArgs, usePointsQuery, useStatusQuery } from '../../api/queries'
+import type { DoctorRequest, DoctorResponse } from '../../api/types'
 import type { Point } from '../../api/types'
-import { useT } from '../../i18n'
+import { useT, type MessageKey } from '../../i18n'
 import { directCommandKind } from '../../lib/pointCommand'
 import { pointKey } from '../../lib/pointValue'
 import { trendBuffer } from '../../lib/trendBuffer'
@@ -44,6 +45,7 @@ export function CarbonMasterPage() {
   const [tab, setTab] = useState(0)
 
   const start = useCommand(api.master.start)
+  const doctorCmd = useCommand<DoctorRequest, DoctorResponse>(api.master.doctor)
   const stop = useCommandNoArgs(api.master.stop)
   const gi = useCommand(api.master.gi)
 
@@ -118,8 +120,40 @@ export function CarbonMasterPage() {
             >
               {t('cmd.gi.label')}
             </Button>
+            <Button
+              kind="secondary"
+              disabled={doctorCmd.isPending}
+              onClick={() => {
+                doctorCmd.mutate({
+                  host,
+                  port: Number(port) || 2404,
+                  addr: Number(addr) || 1,
+                })
+              }}
+            >
+              {doctorCmd.isPending ? t('doctor.running') : t('doctor.button')}
+            </Button>
           </div>
         </form>
+        {doctorCmd.data ? (
+          <div style={{ marginTop: 12 }}>
+            <Note
+              kind={doctorCmd.data.report.ok ? 'success' : 'warning'}
+              title={t('doctor.conclusion')}
+              style={{ marginBottom: 8 }}
+            >
+              {doctorCmd.data.report.conclusion}
+            </Note>
+            {doctorCmd.data.report.steps.map((s) => (
+              <div key={s.key} className="app-row" style={{ marginBottom: 4 }}>
+                <Tag size="sm" type={s.ok ? 'green' : 'red'}>
+                  {t(`doctor.step.${s.key}` as MessageKey)}
+                </Tag>
+                <span style={{ fontSize: 12, color: 'var(--cds-text-secondary)' }}>{s.detail}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </Panel>
 
       <Panel

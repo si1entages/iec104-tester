@@ -93,6 +93,7 @@
 | POST | `/api/master/gi` | `qoi: int=20`（1–16 组召唤 ｜ 20 站召唤） | `{ok, error?}` |
 | POST | `/api/master/clock` | — | `{ok, error?}` |
 | POST | `/api/master/clock_offset` | `{samples?: number}`（1~20，缺省 5） | `{ok, samples: number[], count, avg_ms, min_ms, max_ms}` 或 `{ok: false, error}`（T80：连发 N 次时钟同步，按子站确认时标测偏差） |
+| POST | `/api/master/doctor` | `{host, port, addr?, observe_seconds?}`（1~10，缺省 3） | `{ok, report: {ok, conclusion, duration_ms, steps: [{key: 'tcp'\|'startdt'\|'dataflow', ok, detail, evidence}]}}`（T94 连接医生：分层自检，结论随报告附存 §4.10a） |
 | POST | `/api/master/ci` | — | `{ok, error?}` |
 | POST | `/api/master/reset` | — | `{ok, error?}` |
 | POST | `/api/master/test` | — | `{ok, error?}` |
