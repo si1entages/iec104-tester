@@ -140,7 +140,7 @@ class SequenceManager:
         with self._lock:
             self._last_ack_rx = rx_seq & 0x7FFF
 
-    def process_rx_i_frame_ack(self, rx_seq: int) -> None:
+    def process_rx_i_frame_ack(self, rx_seq: int) -> bool:
         """处理I帧中携带的隐式确认.
 
         IEC 60870-5-104: I帧的rx_seq等效于S帧确认，
@@ -148,9 +148,17 @@ class SequenceManager:
 
         Args:
             rx_seq: I帧中的接收序列号（对端的V(R)）
+
+        Returns:
+            True 如果确认窗口**推进**了（对端确实新确认了我方 I 帧）——
+            调用方据此停 t1（与收到 S 帧确认等效）。
         """
         with self._lock:
-            self._last_ack_rx = rx_seq & 0x7FFF
+            new = rx_seq & 0x7FFF
+            if new == self._last_ack_rx:
+                return False
+            self._last_ack_rx = new
+            return True
 
     def process_rx_u_frame_startdt_con(self) -> None:
         """收到STARTDT CON时重置序列号."""

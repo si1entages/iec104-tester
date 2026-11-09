@@ -75,6 +75,99 @@ class _SilentSlave:
             await self.server.wait_closed()
 
 
+class _AckByIFrameSlave:
+    """假子站：应 STARTDT CON；收到 I 帧后**用 I 帧的 N(R) 隐式确认**（不发 S 帧）.
+
+    对应真机联调发现的缺陷（2026-11-10，simulator4）：主站只把 S 帧当确认，
+    I 帧 N(R) 的隐式确认不停 t1 —— 对「用 N(R) 确认、少发 S 帧」的设备，
+    每发一条命令都会 t1 超时断链。
+    """
+
+    def __init__(self) -> None:
+        self.server: asyncio.AbstractServer | None = None
+        self.startdt_count = 0
+        self.i_frame_count = 0
+
+    async def start(self) -> int:
+        async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+            try:
+                while True:
+                    data = await reader.read(256)
+                    if not data:
+                        break
+                    i = 0
+                    while i + 6 <= len(data):
+                        if data[i] == 0x68:
+                            length = data[i + 1]
+                            frame = data[i:i + 2 + length]
+                            if len(frame) == 6 and frame[2] & 1 and ((frame[2] >> 1) & 3) == 3:
+                                self.startdt_count += 1
+                                writer.write(bytes.fromhex("68040b000000"))  # STARTDT CON
+                                await writer.drain()
+                            elif len(frame) > 6 and (frame[2] & 1) == 0:
+                                # I 帧：以 N(R)=1 隐式确认（VS=0, VR=1），
+                                # ASDU = M_SP_NA_1(1) ×1, COT=3, CA=1, IOA=1, 值 ON
+                                asdu = bytes.fromhex("010103000100" + "010000" + "01")
+                                vs = self.i_frame_count
+                                vr = 1
+                                ctrl = bytes([
+                                    (vs << 1) & 0xFF, ((vs << 1) >> 8) & 0xFF,
+                                    (vr << 1) & 0xFF, ((vr << 1) >> 8) & 0xFF,
+                                ])
+                                body = ctrl + asdu
+                                writer.write(bytes([0x68, len(body)]) + body)
+                                await writer.drain()
+                                self.i_frame_count += 1
+                            i += 2 + length
+                        else:
+                            i += 1
+            except Exception:
+                pass
+            finally:
+                writer.close()
+
+        self.server = await asyncio.start_server(handle, "127.0.0.1", 0)
+        return self.server.sockets[0].getsockname()[1]
+
+    async def stop(self) -> None:
+        if self.server:
+            self.server.close()
+            await self.server.wait_closed()
+
+
+@pytest.mark.asyncio
+async def test_i_frame_implicit_ack_stops_t1():
+    """I 帧携带的 N(R) 必须和 S 帧一样停掉 t1.
+
+    假子站只回「VS=0, VR=1 的 I 帧」（隐式确认），从不发 S 帧：
+    主站发命令后 t1 不得超时 —— 连接保持、STARTDT 只发生一次。
+    """
+    fake = _AckByIFrameSlave()
+    port = await fake.start()
+    master = MasterEngine(
+        host="127.0.0.1", port=port, common_addr=1,
+        auto_start=True, auto_gi=False, reconnect=True, reconnect_interval=0.5,
+        t1=0.5,  # 若隐式确认未停 t1，命令后 0.5s 即超时断链
+    )
+    await master.start()
+    try:
+        assert await _wait_until(lambda: master.is_running, timeout=8), master.state
+
+        await master.clock_sync()  # I 帧：等确认
+        await asyncio.sleep(1.5)   # 远超 t1(0.5s)：确认应已通过 N(R) 到达
+
+        assert fake.startdt_count == 1, (
+            f"隐式确认未停 t1（STARTDT 次数={fake.startdt_count}，发生了重连）"
+        )
+        assert master.is_running, f"连接未保持（state={master.state}）"
+    finally:
+        try:
+            await asyncio.wait_for(master.stop(), timeout=6)
+        except Exception:
+            pass
+        await fake.stop()
+
+
 @pytest.mark.asyncio
 async def test_t1_timeout_reconnects_and_recovers_running():
     """t1 超时断开后，reconnect=True 的主站必须自动重连并恢复 Running（而非永久 Stopped）."""

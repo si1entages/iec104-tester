@@ -156,6 +156,13 @@ export function CarbonTrendChart({ watched, onRemove, onClear }: Props) {
       ) : (
         <>
           <div ref={attachContainer} style={{ width: '100%', height: 320 }} />
+          {/* 单采样态自解释（真机联调反馈「看不到曲线」的最常见原因：连接未建立/点值
+              未变化时只有加入瞬间的一个数据点标记，肉眼几乎不可见——明确告知在等数据） */}
+          {watched.every((p) => trendBuffer.get(pointKey(p)).length < 2) ? (
+            <div style={{ color: 'var(--cds-text-secondary)', fontSize: 12, marginTop: 4 }}>
+              {t('trend.waiting')}
+            </div>
+          ) : null}
           <div style={{ color: 'var(--cds-text-secondary)', fontSize: 12, marginTop: 4 }}>{t('trend.footer')}</div>
         </>
       )}

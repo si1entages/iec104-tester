@@ -162,10 +162,16 @@ class MasterSession:
             e._spawn(e._client.disconnect())
             return
         # I帧的rx_seq是隐式确认，等效于S帧
-        e._seq.process_rx_i_frame_ack(apci.rx_seq)
+        acked = e._seq.process_rx_i_frame_ack(apci.rx_seq)
         # 隐式确认可能释放了发送窗口
         if e._seq.send_window_available:
             e._window_available.set()
+        if acked:
+            # I 帧的 N(R) 推进 = 对端确认了我方 I 帧 —— 与 S 帧等效地停 t1
+            # （标准 §5.3.3：确认既可以是 S 帧，也可以是后续 I 帧的 N(R)）。
+            # 只认 S 帧会让「用 N(R) 隐式确认、少发 S 帧」的合规设备误判 t1 超时
+            # （simulator4 真机联调实测：对端以命令回显应答、t1 仍超时断链）。
+            e._state_machine.on_ack_received()
 
         # 切换窗口去重（T21）：序列号消费与确认在上面已照常完成，此处仅
         # 抑制应用层重复（同一 ASDU 在主备切换窗口内经两条链路重复送达时

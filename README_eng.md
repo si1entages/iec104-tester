@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/WebUI-aiohttp%20%2B%20React19-41CD52" alt="Web UI">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/IEC--104-72%20TypeIDs-brightgreen.svg" alt="IEC 104">
-  <img src="https://img.shields.io/badge/Tests-1655%20passed-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-1656%20passed-brightgreen.svg" alt="Tests">
 </p>
 
 ---
@@ -231,7 +231,7 @@ python run_multi_station.py --stations 3
 ## Tests
 
 ```bash
-python -m pytest tests/ -q              # unit + integration (1655; perf excluded)
+python -m pytest tests/ -q              # unit + integration (1656; perf excluded)
 python -m pytest tests/ -q --cov=core --cov-branch --cov-report=term-missing --cov-fail-under=91
 python -m pytest tests/ -m perf -q      # decode / 100k snapshot / 20 clients / soak
 IEC104_SOAK_SECONDS=7200 python -m pytest tests/perf/test_soak_loopback.py -m perf -q
@@ -242,8 +242,8 @@ python tests/e2e/qa_real_device.py
 python tools/mutation_smoke.py
 ```
 
-- Baseline: **1655 passed, 4 deselected** (v1.8.0 release baseline 1654 + 1 version/doc
-  consistency guard) + frontend unit tests **133 passed** + Playwright e2e **50 passed**
+- Baseline: **1656 passed, 4 deselected** (v1.8.0 release baseline 1654 + version/doc
+  guard and t1 implicit-ACK regression) + frontend unit tests **133 passed** + Playwright e2e **51 passed**
   (page-level gates — audit / contrast / non-text contrast — run on **both Carbon and
   PatternFly**, tunable via `E2E_KITS=pf,carbon`);
   `core/` 92.0%, `webui/` 89.0%, combined **91.3%** (CI scope

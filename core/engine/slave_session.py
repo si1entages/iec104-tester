@@ -176,10 +176,13 @@ class SlaveSession:
 
         # I帧的rx_seq是隐式确认，等效于S帧
         old_unconfirmed = state.seq.unconfirmed_count
-        state.seq.process_rx_i_frame_ack(apci.rx_seq)
+        acked = state.seq.process_rx_i_frame_ack(apci.rx_seq)
         # 如果隐式确认释放了窗口空间，通知等待的协程
         if state.seq.unconfirmed_count < old_unconfirmed:
             state.window_available.set()
+        # I 帧的 N(R) 推进同样确认了我方 I 帧 —— 与 S 帧等效地停 t1（同 master_session）
+        if acked:
+            state.state_machine.on_ack_received()
 
         # 只在数据传输启用时处理ASDU
         if not state.data_transfer_enabled:

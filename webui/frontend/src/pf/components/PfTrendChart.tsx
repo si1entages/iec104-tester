@@ -142,11 +142,21 @@ export function PfTrendChart({ watched, onRemove, onClear }: Props) {
       </CardTitle>
       <CardBody>
         {watched.length === 0 ? (
-          <div style={{ padding: 32, textAlign: 'center', opacity: 0.7 }}>{t('trend.sampling')}</div>
+          <div style={{ padding: 32, textAlign: 'center', color: 'var(--pf-t--global--text--color--subtle)' }}>
+            {t('trend.sampling')}
+          </div>
         ) : (
           <>
             <div ref={attachContainer} style={{ width: '100%', height: 320 }} />
-            <div style={{ opacity: 0.65, fontSize: 12, marginTop: 4 }}>{t('trend.footer')}</div>
+            {/* 单采样态自解释（同 Carbon 版：连接未建立/值未变化时只有一个数据点标记） */}
+            {watched.every((p) => trendBuffer.get(pointKey(p)).length < 2) ? (
+              <div style={{ color: 'var(--pf-t--global--text--color--subtle)', fontSize: 12, marginTop: 4 }}>
+                {t('trend.waiting')}
+              </div>
+            ) : null}
+            <div style={{ color: 'var(--pf-t--global--text--color--subtle)', fontSize: 12, marginTop: 4 }}>
+              {t('trend.footer')}
+            </div>
           </>
         )}
       </CardBody>
