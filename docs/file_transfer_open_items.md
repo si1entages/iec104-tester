@@ -134,11 +134,14 @@ SRQ 可按同源处理，真机再补一次否定节场景。
 
 ## 附：关联待核实项（同源，非用户清单 5 项）
 
-- **[2026-11-10 新增] 主站 F_DR 多条目只收第一条**：lib60870.NET 目录回帧为
-  SQ=1 连续多对象（num=2，IOA 30000/30001），`process_file_transfer` 只处理
-  `asdu.objects[0]` → 第二条目（30001）丢失。本仓从站逐条目分帧所以从未暴露；
-  独立实现合并发送即现形。修复方向：F_DR 分支遍历 `asdu.objects`；真机目录若
-  也是合并形态（otfabric 口径如此），此修复是真机复测的前置项。
+- **[2026-11-10 新增→已修复 `4bdb2c1`] 主站 F_DR 多条目只收第一条**：lib60870.NET
+  目录回帧为 SQ=1 连续多对象（num=2，IOA 30000/30001），`process_file_transfer`
+  只处理 `asdu.objects[0]` → 第二条目丢失。**已修复**：F_DR 分支遍历
+  `asdu.objects`，回归用例以 lib60870.NET 实测帧为 golden（双条目全部上报）；
+  同批修复：否定节就绪（F_SR SRQ=0x80）按标准中止（旧实现忽略 SRQ 继续请求
+  不存在的节）；新增子站注入钩子（`inject_lsq`/`inject_srq_negative`，默认关闭）
+  合成 §3 LSQ=2/4 与 §5 否定 F_SR 场景（两个 lib60870 实现均不产生这些路径），
+  见 `tests/test_file_transfer_inject.py`。
 
 - **CHS 校验和算法**：已按「本节所有段数据算术和 mod 256」实现（两个独立实现一致），
   真机验证方法见 `file_transfer_fls.md` §4.1；构造错误校验和观察对端是否回 AFQ=2/4。
