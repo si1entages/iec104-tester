@@ -507,17 +507,19 @@ graph TD
 | **T93** | 值守告警引擎（P1，3~4 人日；吸收 T91；✅ 已交付 `15a00be`） | 后端 `webui/alarms.py` 规则引擎（评估点值快照 + 连接状态）：① 限值越限（YC 超出点表 `min_value`/`max_value`）；② 死值/陈旧（最后更新超阈值，默认 60s 可配——数据层前提同 T91：`data_store` 各数据类补 `last_update_time` wall clock 毫秒，**不能复用只在值变化时写的 `last_change_time`**）；③ 突变（相邻更新变化幅度超阈）；④ 通信中断（state≠Running 或 rx 停止 N 秒，默认 10s）。生命周期 active→ack→clear + 去抖（连续 N 次评估才触发）+ 历史入库；`GET /api/alarms[/history]` + WS `alarm` 事件（契约 §2.x + 前端 schema 编译期键集比对）；UI（Carbon/PF）状态页告警卡（激活列表 + 确认 + 可选声音）+ 点表陈旧标记（`/api/points` 带 `ts`，三套件灰化 + 图标 + tooltip，阈值与告警一致，经典版按冻结承诺仅数据层透传）；告警历史段自动进测试报告；`docs/design_guidelines.md` 附录 A 陈旧项 ⚠→✓。验收：四类规则各有一条真机/注入触发证据（超限用置数越限、死值用停模拟、突变用大跨度置数、断链用手动断开）；契约 + 前端单测覆盖 |
 | **T94** | 连接医生（P1，0.5~1 人日；✅ 已交付 `d2082bc`） | `POST /api/master/doctor` 分层自检：① TCP connect（报「端口不通/防火墙」）；② STARTDT ACT→CON（t1 内）；③ 数据流观察（N 秒 rx>0 + 自动学习到了哪些 IOA/类型）；④ 结论 + 人话建议（端口错 / 对端不回确认 / 点表 IOA 分区不匹配）。复用 T92 取证逻辑（S 帧计数、N(R) 推进、COT 异常——对 simulator4 类对端直接给出「链路通但对端不回确认」结论，附证据计数）。UI（Carbon/PF）连接面板「诊断」按钮 → 逐层结果行（红绿 + 建议）；诊断结论可附进测试报告。验收：对 simulator4（N(R) 恒 0）给出明确对端不确认结论；对本仓子站四层全绿 |
 
-> **累计统计**：T01~T49、T51~T94 **全部完成**（T91 并入 T93）；**待办 1**——**T50** 真机复测仍暂缓待装置窗口。
+> **累计统计**：T01~T49、T51~T99 **全部完成**（T91 并入 T93；T95~T97=`18cc6a2`、T98/T99=`5a662c7`，2026-11-10）；
+> **待办 1**——**T50** 真机复测仍暂缓待装置窗口（SCD 私有映射适配需厂商样本）。
+> v1.10.0 基线：后端 pytest **1711 passed** / 覆盖率 **91.11%**（门禁 91 不变）、前端 133、e2e 61 例（三门禁补桥接页；PF 边框覆盖 0→780 处 0 硬失败）。
 
 ### v1.10.0 任务清单（2026-11-10 用户指定开工）
 
 | 任务ID | 任务名称 | 交付物 / 验收证据 |
 |--------|---------|------------------|
-| **T95** | Excel(xlsx) 点表导入 + 设计 vs 实测比对（P1，2~3 人日；A2 采纳） | `webui/points_xlsx.py`（openpyxl 新依赖）：导出/解析（中英列头兼容、行级错误收集）；`POST /api/points/xlsx/preview|import`（preview 无副作用）；导入即快照设计基准 + `POST /api/points/design {action:set|clear}`；`GET /api/points/design-diff` 缺/多/值域三类清单（值域取 data_store 观测极值 vs 设计声明域 + 类型不符）。UI（Carbon/PF）.xlsx 上传 + 主站页设计比对卡；契约三件套同步。验收：真实 xlsx 导入、三类差异各有触发证据、pytest 全覆盖 |
-| **T96** | 离线报文对比（升级前后 diff）（P1，3~4 人日；D 采纳） | `webui/frame_diff.py` 纯函数：规格化签名（方向+帧型+ASDU 头+信息体 IOA/值，剥 CP56Time2a）多重集 diff，忽略 N(S)/N(R)/时间戳/client_id 等会话易变字段；`POST /api/capture/diff {a,b}`；UI（Carbon/PF）抓包页对比卡。验收：同录制自 diff identical=true；改值/删帧/COT 变化可检出；路径安全 |
-| **T97** | 桥场景化注入时间线 + 自动判定（P1，5~7 人日；C 采纳） | `webui/timeline.py` TimelineService：步骤 `{label, duration_s, condition, expect}` 编排 + 逐窗采集（injection_stats 增量 + 合规新违规按 ts 归窗）+ 逐步判定（loss/k-exceed/t1/none/disconnect）；`GET/POST /api/bridge/timeline` + `run|stop`；结果入测试报告新段。UI（Carbon/PF）时间线卡：步骤编辑 + 运行 + 红绿结果行。验收：「注入丢包→k 超窗」闭环（合成帧单测防误报 + e2e 真桥） |
-| **T98** | 桥接页纳入 UI 巡检矩阵（P1，0.5 人日） | 三页级门禁（ui-audit/ui-contrast/ui-nontext-contrast）补 bridge 页（走 BRIDGE 8769 webServer，PF/Carbon × 3 视口 × 中英深浅）。验收：桥接页 0 硬失败/0 裁切/0 console error |
-| **T99** | 非文本门禁覆盖 PF 伪元素/box-shadow 边框（P1，1 人日） | 「边框」段补 `::before`/`::after` 逐边 border 读取 + 零偏移零模糊正扩散 box-shadow 环（readFocus 同筛选）；对比色取内外相邻色较优者。验收：PF 命中 > 0、Carbon 不劣化（原 10）、0 硬失败；真缺陷按标准修 |
+| **T95** | Excel(xlsx) 点表导入 + 设计 vs 实测比对（P1，2~3 人日；A2 采纳；✅ 已交付 `18cc6a2`） | `webui/points_xlsx.py`（openpyxl 新依赖）：导出/解析（中英列头兼容、行级错误收集）；`POST /api/points/xlsx/preview|import`（preview 无副作用）；导入即快照设计基准 + `POST /api/points/design {action:set|clear}`；`GET /api/points/design-diff` 缺/多/值域三类清单（值域取 data_store 观测极值 vs 设计声明域 + 类型不符）。UI（Carbon/PF）.xlsx 上传 + 主站页设计比对卡；契约三件套同步。验收：真实 xlsx 导入、三类差异各有触发证据、pytest 全覆盖 |
+| **T96** | 离线报文对比（升级前后 diff）（P1，3~4 人日；D 采纳；✅ 已交付 `18cc6a2`） | `webui/frame_diff.py` 纯函数：规格化签名（方向+帧型+ASDU 头+信息体 IOA/值，剥 CP56Time2a）多重集 diff，忽略 N(S)/N(R)/时间戳/client_id 等会话易变字段；`POST /api/capture/diff {a,b}`；UI（Carbon/PF）抓包页对比卡。验收：同录制自 diff identical=true；改值/删帧/COT 变化可检出；路径安全 |
+| **T97** | 桥场景化注入时间线 + 自动判定（P1，5~7 人日；C 采纳；✅ 已交付 `18cc6a2`） | `webui/timeline.py` TimelineService：步骤 `{label, duration_s, condition, expect}` 编排 + 逐窗采集（injection_stats 增量 + 合规新违规按 ts 归窗）+ 逐步判定（loss/k-exceed/t1/none/disconnect）；`GET/POST /api/bridge/timeline` + `run|stop`；结果入测试报告新段。UI（Carbon/PF）时间线卡：步骤编辑 + 运行 + 红绿结果行。验收：「注入丢包→k 超窗」闭环（合成帧单测防误报 + e2e 真桥） |
+| **T98** | 桥接页纳入 UI 巡检矩阵（P1，0.5 人日；✅ 已交付 `5a662c7`） | 三页级门禁（ui-audit/ui-contrast/ui-nontext-contrast）补 bridge 页（走 BRIDGE 8769 webServer，PF/Carbon × 3 视口 × 中英深浅）。验收：桥接页 0 硬失败/0 裁切/0 console error |
+| **T99** | 非文本门禁覆盖 PF 伪元素/box-shadow 边框（P1，1 人日；✅ 已交付 `5a662c7`） | 「边框」段补 `::before`/`::after` 逐边 border 读取 + 零偏移零模糊正扩散 box-shadow 环（readFocus 同筛选）；对比色取内外相邻色较优者。验收：PF 命中 > 0、Carbon 不劣化（原 10）、0 硬失败；真缺陷按标准修 |
 
 ---
 
