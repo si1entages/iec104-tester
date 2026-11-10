@@ -171,7 +171,6 @@ def test_master_processes_multi_entry_directory_sq1():
     2026-11-10 实测：目录回帧为单 ASDU 携带 2 条目（IOA 30000/30001 连续编址），
     旧实现只取 objects[0] 丢第二条目（T50/C4 §2 实测发现）。
     """
-    from core.protocol.file_transfer import FileTransferMaster
     from core.engine.master_protocol import MasterProtocolHandler as MasterCommands
     from core.protocol.asdu import ASDU
 
