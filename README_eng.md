@@ -9,12 +9,12 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.9.0-blue.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.10.0-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/WebUI-aiohttp%20%2B%20React19-41CD52" alt="Web UI">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/IEC--104-72%20TypeIDs-brightgreen.svg" alt="IEC 104">
-  <img src="https://img.shields.io/badge/Tests-1667%20passed-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-1711%20passed-brightgreen.svg" alt="Tests">
 </p>
 
 ---
@@ -26,9 +26,9 @@ import, a transparent bridge with bypass compliance monitoring and chaos injecti
 packet capture/replay, YAML scripted tests, load-test orchestration, test-report export,
 TLS encryption and a history DB.
 
-> Release baseline **v1.9.0** (2026-11-10) — duty alarm engine (limit / stale / jump /
-> comm-loss), the connection doctor (layered self-check), and the real-device fix for
-> I-frame implicit-ACK not stopping t1. Per-version details in
+> Release baseline **v1.10.0** (2026-11-10) — Excel point-table import with
+> design-vs-as-built diff, offline capture diff (before/after upgrade), and a bridge
+> injection timeline with automatic verdicts. Per-version details in
 > [`CHANGELOG.md`](CHANGELOG.md); delivered scope and the next iteration in
 > [`PROJECT.md`](PROJECT.md).
 
@@ -65,11 +65,14 @@ TLS encryption and a history DB.
 - **Master workbench**: 100k-row virtualized point table, command panel
   (system/control/setpoint/step/bitstring/delay/parameter/file), live frame viewer with
   per-segment HEX hover translation, per-point trend chart, **clock-offset measurement**
-  (ms offset derived from the slave clock in its ACK)
+  (ms offset derived from the slave clock in its ACK), **design-vs-as-built diff card**
+  (importing an xlsx point table snapshots a design baseline; missing / extra / range-or-type
+  mismatches are listed — device IOAs that do not match the demo table become obvious)
 - **Slave workbench**: point-table editing/manual values, response injection
   (delay/drop/corrupt/no-response/quality/wrong COT), manual/auto simulation with
   independent YX/YC switches, **SCD/CID/ICD import** (IEC 61850-80-1 exact mapping first,
-  CDC inference otherwise — preview before apply)
+  CDC inference otherwise — preview before apply), **Excel(xlsx) point-table import**
+  (English/Chinese headers, Chinese type aliases, row-level error collection, preview)
 - **Multi-station page**: station cards and aggregated status
 - **Bridge observation page** (`--mode bridge`, 8767): **transparent bridge / bypass
   monitoring** between a real master and a real slave; byte-level pass-through
@@ -81,10 +84,15 @@ TLS encryption and a history DB.
   test report; **network-condition injection (chaos)**: drop/duplicate/corrupt/delay/
   reorder/disconnect rates on the forwarding path while observation and compliance
   monitoring always see the **pre-injection** frames; injection stats included in the
-  report; **TLS bridge** with independent TLS per side (plaintext↔TLS mixed bridging,
+  report; **injection timeline + automatic verdict**: scripted steps (label/duration/
+  loss%/delay/expect) with per-window evidence collection and automatic verdicts
+  (e.g. "inject loss → k-window exceed"), results included in the test report;
+  **TLS bridge** with independent TLS per side (plaintext↔TLS mixed bridging,
   TLS terminated at the bridge so frames stay visible)
 - **Capture page**: start/pause/stop recording, file list/download, one-click pcap/pcapng
-  export (Wireshark-ready), offline playback (play/pause/step/speed)
+  export (Wireshark-ready), offline playback (play/pause/step/speed), **offline capture
+  diff** (two recordings compared on normalized frame signatures; sequence numbers,
+  timestamps and client IDs are ignored)
 - **Test center**: pick `tests/scripts/*.yaml`, run in isolated subprocesses with live logs,
   pass/fail summary and HTML/JSON/TXT report downloads; **load-test orchestration**
   (1–10000 events/s, configurable duration, **1–8 concurrent connections** with per-
@@ -242,12 +250,12 @@ python tests/e2e/qa_real_device.py
 python tools/mutation_smoke.py
 ```
 
-- Baseline: **1656 passed, 4 deselected** (v1.8.0 release baseline 1654 + version/doc
-  guard and t1 implicit-ACK regression) + frontend unit tests **133 passed** + Playwright e2e **51 passed**
-  (page-level gates — audit / contrast / non-text contrast — run on **both Carbon and
-  PatternFly**, tunable via `E2E_KITS=pf,carbon`);
-  `core/` 92.0%, `webui/` 89.0%, combined **91.3%** (CI scope
-  `--cov=core --cov=webui --cov-branch --cov-fail-under=91`; separate webui gate 85%)
+- Baseline: **1711 passed, 4 deselected** (v1.10.0) + frontend unit tests
+  **133 passed** + Playwright e2e **61 passed** (page-level gates — audit / contrast /
+  non-text contrast — run on **both Carbon and PatternFly**; the bridge page is swept via
+  the dedicated 8769 server; tunable via `E2E_KITS=pf,carbon`); combined branch coverage
+  **91.11%** (CI scope `--cov=core --cov=webui --cov-branch --cov-fail-under=91`;
+  separate webui gate 85%)
 - 20-client concurrency: about **2.9k frames/s**; 2-hour soak: **7200s / 34,765 GI /
   +0.64 MB memory**
 - Interop corpus: `tests/fixtures/frames/` (synthetic baseline + `real/` for user-provided

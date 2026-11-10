@@ -9,20 +9,20 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.9.0-blue.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.10.0-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/WebUI-aiohttp%20%2B%20React19-41CD52" alt="Web UI">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/IEC--104-72%20TypeIDs-brightgreen.svg" alt="IEC 104">
-  <img src="https://img.shields.io/badge/Tests-1667%20passed-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-1711%20passed-brightgreen.svg" alt="Tests">
 </p>
 
 ---
 
 工业级 IEC 60870-5-104 协议测试工具：主站/子站**单页浏览器工作台**（浏览器为唯一界面，同一进程、同一端口内切换主站/子站），协议引擎完整；附三套可即时切换的 UI、SCD 点表导入、透明桥与旁路合规监视、报文录制回放、YAML 自动化测试、压测编排、测试报告导出、TLS 传输加密与历史库。
 
-> 版本说明：当前发布基线 **v1.9.0**（2026-11-10）——值守告警引擎（限值/死值/突变/断链）、
-> 连接医生（分层自检诊断）、真机联调修复（I 帧 N(R) 隐式确认停 t1）。逐版特性见
+> 版本说明：当前发布基线 **v1.10.0**（2026-11-10）——Excel 点表导入与设计 vs
+> 实测比对、离线报文对比（升级前后 diff）、桥场景化注入时间线 + 自动判定。逐版特性见
 > [`CHANGELOG.md`](CHANGELOG.md)；已交付能力与后续计划见 [`PROJECT.md`](PROJECT.md)。
 
 ### 界面预览
@@ -51,11 +51,11 @@
 ### Web UI（三套界面共存，深色/浅色双主题）
 
 - **三套 UI 同地址即时切换**：`Carbon`（IBM Carbon Design System，默认）/ `PatternFly 6` / `经典版`（antd 6，v1.3.1 冻结快照）在 `/app/` 同一文档内切换——不刷新、不改 URL、不断 WS/连接，页面/深浅主题/语言保持；详见 [`docs/ui_kits.md`](docs/ui_kits.md)
-- **主站工作台**：十万行点表虚拟滚动（只渲染可视窗口）、命令面板（系统命令/遥控/设点/步/比特串/延时/参数/文件命令）、实时报文查看器（悬停 HEX 逐段翻译）、点位趋势图（只采样被订阅点位）、**测量时钟偏差**（按子站确认帧携带的子站时钟计算 ms 偏差）
-- **子站工作台**：点表编辑与手动置数、**应答行为配置**（延迟/丢帧/损坏/不响应/品质/错误 COT）、数据模拟（手动/自动、YX/YC 独立开关）、**SCD/CID/ICD 点表导入**（IEC 61850-80-1 精确映射优先 + 无映射按 CDC 推断，先预览再应用）
+- **主站工作台**：十万行点表虚拟滚动（只渲染可视窗口）、命令面板（系统命令/遥控/设点/步/比特串/延时/参数/文件命令）、实时报文查看器（悬停 HEX 逐段翻译）、点位趋势图（只采样被订阅点位）、**测量时钟偏差**（按子站确认帧携带的子站时钟计算 ms 偏差）、**设计 vs 实测比对卡**（导入 xlsx 自动建设计基准，输出缺/多/值域三类差异——真机 IOA 与演示表对不上一眼可见）
+- **子站工作台**：点表编辑与手动置数、**应答行为配置**（延迟/丢帧/损坏/不响应/品质/错误 COT）、数据模拟（手动/自动、YX/YC 独立开关）、**SCD/CID/ICD 点表导入**（IEC 61850-80-1 精确映射优先 + 无映射按 CDC 推断，先预览再应用）、**Excel(xlsx) 点表导入**（中英列头/中文类型别名兼容、行级错误收集、预览后应用）
 - **多站页**：多子站卡片管理与聚合状态
-- **桥接观察页**（`--mode bridge`，8767）：**透明桥 / 旁路监听**真实主站 ↔ 测试器 ↔ 真实子站；字节级透传（转发优先于观察）、双向帧/字节/客户端/重同步统计、实时报文；**协议合规监视**（传输层序号/确认/U 时序/k/t1/t2/t3 + 应用层方向错位/无请求响应/总召唤未终止/非召唤期数据/COT=0/公共地址不符/重复自发帧/时标偏离，合计 28 项规则），违规实时进页面与测试报告；**网络条件注入（混沌验收）**：丢帧/重复/损坏/延迟/乱序/断线率作用于转发路径，旁路观察与合规监视始终看**干扰前**的原始帧，注入统计进报告；**TLS 透传桥**双侧独立 TLS（明文↔TLS 混合桥接，TLS 终结在桥、帧内容解密可见）
-- **报文抓包页**：录制启停/暂停、文件列表与下载、一键导出 pcap/pcapng（Wireshark 可打开）、离线回放（播放/暂停/单步/倍速）
+- **桥接观察页**（`--mode bridge`，8767）：**透明桥 / 旁路监听**真实主站 ↔ 测试器 ↔ 真实子站；字节级透传（转发优先于观察）、双向帧/字节/客户端/重同步统计、实时报文；**协议合规监视**（传输层序号/确认/U 时序/k/t1/t2/t3 + 应用层方向错位/无请求响应/总召唤未终止/非召唤期数据/COT=0/公共地址不符/重复自发帧/时标偏离，合计 28 项规则），违规实时进页面与测试报告；**网络条件注入（混沌验收）**：丢帧/重复/损坏/延迟/乱序/断线率作用于转发路径，旁路观察与合规监视始终看**干扰前**的原始帧，注入统计进报告；**注入时间线 + 自动判定**：场景化步骤编排（丢帧/延迟/期望）→ 逐窗采集证据 → 自动判定「丢包→k 超窗」闭环并进测试报告；**TLS 透传桥**双侧独立 TLS（明文↔TLS 混合桥接，TLS 终结在桥、帧内容解密可见）
+- **报文抓包页**：录制启停/暂停、文件列表与下载、一键导出 pcap/pcapng（Wireshark 可打开）、离线回放（播放/暂停/单步/倍速）、**离线报文对比**（升级前后两段录制规格化 diff，忽略序号/时标等会话易变字段）
 - **自动化测试页**：选择 `tests/scripts/*.yaml`，子进程隔离运行，实时日志 + 通过/失败汇总 + HTML/JSON/TXT 报告下载；**压测编排**（目标速率 1~10000 事件/秒、时长可配、**1~8 条并发连接**分别统计帧数/字节/错误）
 - **状态总览页**：一键导出**测试报告**（自包含单文件 HTML，打印即 PDF；会话信息 + 帧统计 + 逐帧解码证据 + 事件表 + 压测汇总 + **结论横幅**合格/不合格/有条件通过 + 历史曲线快照）；一键诊断包、导出数据/报文记录
 - **历史页**：按时间/类型/IOA/方向查询数据与报文并导出 CSV；**「曲线」页签**按类型 + IOA 添加 1~8 个序列回放历史趋势（遥信/遥脉阶梯、遥测折线）
@@ -87,7 +87,7 @@
 - **报文导出**：`.i104` / `.json` / **pcap / pcapng**（Wireshark 可直接打开）
 - **一键诊断包**：状态/配置（私钥脱敏）/日志/报文/事件/点表/历史统计打包下载（状态页按钮或 `GET /api/diagnostics/export`）
 - **一键环回演示**：`python app.py --demo`（本机子站+主站自动监听/连接/总召）
-- 质量门禁：互操作语料库回放、Hypothesis fuzz、20 客户端并发、2h 环回 soak、分支覆盖合并 91.3%（门禁 91%，webui 独立门禁 85%）、协议层变异 12/12
+- 质量门禁：互操作语料库回放、Hypothesis fuzz、20 客户端并发、2h 环回 soak、分支覆盖合并 91.1%（门禁 91%，webui 独立门禁 85%）、协议层变异 12/12、UI 巡检/对比度/非文本对比三门禁覆盖桥接页（PF 伪元素边框 780 处检查）
 - 多站并发（`run_multi_station.py`）、网络异常模拟（**Web 状态页卡片** / `sim_tool.py`）、YAML 自动化测试（`run_tests.py`）
 
 ### 打包与发布
@@ -262,7 +262,7 @@ custom_types: []   # 非标厂商私有 TypeID 注册
 ## 🧪 测试
 
 ```bash
-python -m pytest tests/ -q              # 单元 + 集成（1667 例；性能基准默认排除）
+python -m pytest tests/ -q              # 单元 + 集成（1711 例；性能基准默认排除）
 python -m pytest tests/ -q --cov=core --cov-branch --cov-report=term-missing --cov-fail-under=91
 python -m pytest tests/ -m perf -q      # 性能基准（解码/10 万点/20 客户端并发/环回 soak）
 IEC104_SOAK_SECONDS=7200 python -m pytest tests/perf/test_soak_loopback.py -m perf -q
@@ -272,7 +272,7 @@ python tests/e2e/qa_full_flow.py        # 全流程验收（12 阶段；CI job e
 python tools/mutation_smoke.py          # 协议层变异冒烟（12/12 必须被杀死）
 ```
 
-- 当前基线：**1667 passed，4 deselected**（v1.9.0）+ 前端单测 **133 passed** + Playwright e2e **57 passed**（三套件页级门禁：巡检/对比度/非文本对比在 **Carbon 与 PatternFly 上各跑一遍**，`E2E_KITS=pf,carbon` 可裁剪）；`core/` 92.0%、`webui/` 89.0%，合并 **91.3%**（CI 口径 `--cov=core --cov=webui --cov-branch --cov-fail-under=91`，webui 独立门禁 85%）
+- 当前基线：**1711 passed，4 deselected**（v1.10.0）+ 前端单测 **133 passed** + Playwright e2e **61 passed**（页级门禁：巡检/对比度/非文本对比在 **Carbon 与 PatternFly 上各跑一遍**、桥接页走 8769 专项巡检，`E2E_KITS=pf,carbon` 可裁剪）；CI 口径 `--cov=core --cov=webui --cov-branch --cov-fail-under=91` 合并 **91.11%**（门禁 91%，webui 独立门禁 85%）
 - 20 客户端并发实测约 **2.9k 帧/秒**；2h soak 实测 **7200s / 34,765 次 GI / 内存 +0.64 MB**
 - 互操作语料库：`tests/fixtures/frames/`（合成基线 + `real/` 真机目录），
   `tests/test_frame_corpus_replay.py` 做 golden 解码与主站回放回归；
@@ -343,7 +343,7 @@ iec104-tester/
   各厂商对 104 的**私有映射扩展**需 ≥2 份真实 SCD 样本才能归纳规则，当前按 DOType `cdc` 推断兜底
   （见 [`docs/user_guide.md`](docs/user_guide.md) 第 11 节）。
 
-> 已交付能力与下一迭代计划（v1.9.0）见 [`PROJECT.md`](PROJECT.md)、[`docs/architecture_plan.md`](docs/architecture_plan.md)。
+> 已交付能力（v1.10.0）与后续计划见 [`PROJECT.md`](PROJECT.md)、[`docs/architecture_plan.md`](docs/architecture_plan.md)。
 
 ## 🤝 贡献 / 许可
 

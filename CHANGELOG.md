@@ -3,6 +3,62 @@
 本文件记录对外可见的功能/修复；版本号与 `pyproject.toml`、
 `core/version.py`、`webui/frontend/package.json` 保持一致。
 
+## [1.10.0] — 2026-11-10
+
+### Added
+
+- **Excel(xlsx) 点表导入 + 设计 vs 实测比对（T95 / A2）**：新增 `openpyxl` 运行时依赖；
+  xlsx 导出/解析（中英列头 + 中文类型别名兼容、行级错误收集不 fail-fast）、
+  `POST /api/points/xlsx/preview|import`（预览无副作用）、导入即快照设计基准 +
+  `POST /api/points/design {set|clear}`；`GET /api/points/design-diff` 输出
+  **缺（设计有/实测无）/ 多（实测有/设计无，即自动学习兜底进来的真实 IOA）/
+  值域（类型不符或实测观测极值越出设计声明域）** 三类清单（清单截断 200，
+  summary 为全量计数）。点表导入收 .xlsx（二进制 POST），主站页新增设计比对卡
+  （Carbon/PF）——对应真机联调缺口：真机 IOA 16385+ 与演示表 1001 对不上。
+- **离线报文对比（T96 / D）**：`webui/frame_diff.py` 纯函数——两段录制
+  （`.i104`/`.json`）按规格化签名（方向 + 帧型 + ASDU 头 + 信息体 IOA/值/品质，
+  剥 CP56Time2a 时标）做多重集 diff；**忽略会话易变字段**（N(S)/N(R)、时间戳、
+  metadata.client_id、S 帧 rx_seq）；`POST /api/capture/diff {a,b}`（路径安全复用
+  CaptureService 校验）；抓包页「报文对比」卡（Carbon/PF）。现场标准动作「装置
+  升级前后各录一段人工逐帧对比」自动化：自 diff 为空、改值/删帧/COT 变化可检出。
+- **桥场景化注入时间线 + 自动判定（T97 / C）**：桥接页新增「注入时间线」卡
+  （Carbon/PF）——结构化步骤编排（标签/时长/丢帧%/延迟/期望）→ 逐步施加
+  NetworkCondition → 逐窗采集注入统计增量与合规违规（按 ts 归窗）→ 自动判定
+  （`none`/`loss`/`k-exceed`/`t1`/`disconnect`）；`GET/POST /api/bridge/timeline`
+  + `run|stop`；判定防误报（运行起点吃掉历史违规游标、超时类证据不作「无扰动」
+  反证、t3 一律排除），结果自动进测试报告新段「11. 注入时间线」。闭环验收：
+  「注入丢包 → 应见 k 超窗」合成帧单测 + e2e 真桥双证据。
+
+### Fixed
+
+- **桥角色状态页 404 轮询**：T98 把桥接页纳入 UI 巡检矩阵后即刻发现——状态页
+  无条件挂载告警卡与网络模拟卡，bridge 部署（端点未注册）下轮询
+  `/api/alarms`、`/api/simulation` 得 404；改为角色已知且非 bridge 才渲染
+  （含 status 未加载首帧闪现防护）。
+- **录制同秒撞名**：默认捕获文件名按秒生成，两段录制在同一秒内完成会互相
+  覆盖（T96 e2e 实测）——e2e 显式命名规避；`GET /api/capture/diff` 文件名
+  校验沿用 CaptureService._path，防路径穿越。
+
+### Quality gates
+
+- **T98 桥接页纳入 UI 巡检矩阵**：ui-audit / ui-contrast / ui-nontext-contrast
+  三门禁补桥接页（走 BRIDGE 8769 webServer；PF/Carbon × 3 视口 × 中英深浅），
+  ui-audit 新增独立用例断言 bridge 部署角色隔离。
+- **T99 非文本门禁覆盖 PF 伪元素/box-shadow 边框**（T89 遗留收口）：「边框」段
+  补 `::before`/`::after` 逐边 border 读取与零偏移/零模糊/正扩散 box-shadow 环
+  （readFocus 同筛选），可感知性取内外相邻色较优者。实测 PF 检查数 **0 → 780 处**、
+  Carbon 308 处不劣化，PF/Carbon × 中英深浅 × 含桥页 **0 硬失败**。
+- 视觉基线随 T95 主站页设计比对卡重录（页高 2063→2199px，预期产品变化）。
+
+### Verified
+
+- 后端 pytest **1711 passed / 4 deselected**；CI 口径 `--cov=core --cov=webui
+  --cov-branch --cov-fail-under=91` 合并分支覆盖 **91.11%**（门禁 91 不变）；
+  前端单测 **133 passed**、i18n 清单 0、tsc/build 全绿；Playwright e2e **61 例**
+  （新增 v110-features 3 例 + 三门禁桥接页）；契约三道门禁（§2.4/§2.14/§2.4a
+  与 §4.14/§4.15、contract_check、frontend_routes）双向一致；GitHub Actions
+  10/10 job 全绿（含 Windows 视觉基线、双平台打包冒烟、3 Python 版本）。
+
 ## [1.9.0] — 2026-11-10
 
 ### Added
