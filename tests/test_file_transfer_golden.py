@@ -163,3 +163,43 @@ def test_golden_decode_f_dr_13_octets():
     assert (obj.file_name, obj.file_length, obj.status) == (5, 1024, 0x40)
     assert (obj.time_tag.millisecond, obj.time_tag.minute, obj.time_tag.hour) == (12345, 7, 8)
     assert (obj.time_tag.day, obj.time_tag.month, obj.time_tag.year) == (9, 10, 26)
+
+
+def test_master_processes_multi_entry_directory_sq1():
+    """F_DR 多条目（SQ=1 连续编址）必须逐对象处理——lib60870.NET 实测帧回归.
+
+    2026-11-10 实测：目录回帧为单 ASDU 携带 2 条目（IOA 30000/30001 连续编址），
+    旧实现只取 objects[0] 丢第二条目（T50/C4 §2 实测发现）。
+    """
+    from core.protocol.file_transfer import FileTransferMaster
+    from core.engine.master_protocol import MasterProtocolHandler as MasterCommands
+    from core.protocol.asdu import ASDU
+
+    # lib60870.NET 实测完整帧（去掉 68 27 起始/长度字节，保留 APCI 控制域 + ASDU）
+    frame = bytes.fromhex(
+        "00000400"
+        "7E8205000100307500010001040000B8A419170A0B1A"
+        "0100580200 20BAA419170A0B1A".replace(" ", ""))
+    asdu = ASDU.decode(frame[4:])
+    assert asdu.sq is True and len(asdu.objects) == 2
+    assert asdu.objects[0].ioa == 30000
+    assert asdu.objects[0].data.file_name == 1
+    assert asdu.objects[0].data.file_length == 1025
+    assert asdu.objects[1].ioa == 30001          # SQ=1 连续编址自动 +1
+    assert asdu.objects[1].data.file_name == 1   # NOF 同为 TRANSPARENT_FILE
+    assert asdu.objects[1].data.file_length == 600
+
+    seen: list[tuple[int, int]] = []
+
+    class _FT:
+        state = "IDLE"
+
+        def handle_directory_entry(self, data):
+            seen.append((data.file_name, data.file_length))
+
+    class _Engine:
+        _file_transfer = _FT()
+        _spawn = staticmethod(lambda coro: None)
+
+    MasterCommands(_Engine()).process_file_transfer(asdu)
+    assert seen == [(1, 1025), (1, 600)], f"两条目都必须被处理: {seen}"

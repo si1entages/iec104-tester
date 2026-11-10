@@ -203,8 +203,27 @@ class FileTransferManager:
         self._context.state = FileTransferState.FILE_READY
 
     def handle_section_ready(self, data: SectionReady) -> None:
-        """处理节准备就绪 (F_SR_NA_1)."""
-        logger.info(f"Section Ready: name={data.file_name} section={data.section_name} length={data.section_length}")
+        """处理节准备就绪 (F_SR_NA_1).
+
+        SRQ 最高位（0x80）= 否定：子站拒绝/无法提供该节（lib60870.NET 口径：
+        ``SectionReady`` 的 negative 标志）——主站必须中止而非请求该节。
+        2026-11-10 按标准修复（T50/C4 §5）：旧实现忽略 SRQ，把否定节就绪
+        当正常处理并继续请求不存在的节。
+        """
+        srq_negative = bool(getattr(data, "status", 0) & 0x80)
+        logger.info(
+            f"Section Ready: name={data.file_name} section={data.section_name} "
+            f"length={data.section_length} srq=0x{getattr(data, 'status', 0):02x}"
+            f"{' (NEGATIVE)' if srq_negative else ''}"
+        )
+        if srq_negative:
+            self._context.state = FileTransferState.ERROR
+            if self._on_error:
+                self._on_error(
+                    f"否定节就绪 (SRQ=0x80)：子站拒绝提供节 {data.section_name}"
+                    f"（文件 {data.file_name}），传输中止"
+                )
+            return
         self._context.section_name = data.section_name
         self._context.section_length = data.section_length
         self._section_data.clear()
@@ -366,11 +385,23 @@ class FileTransferSlave(FileTransferManager):
     8. 等待确认 (F_AF_NA_1)
     """
 
-    def __init__(self, common_addr: int = 1):
+    def __init__(self, common_addr: int = 1, *,
+                 inject_lsq: int | None = None,
+                 inject_srq_negative: bool = False):
+        """子站文件传输管理器.
+
+        Args:
+            common_addr: 公共地址
+            inject_lsq: F_LS 的 LSQ 覆盖值（T50/C4 §3 场景注入：2=文件带去激活、
+                4=节带去激活；None=默认 1，行为不变）
+            inject_srq_negative: F_SR 的 SRQ 置 0x80（§5 否定节就绪场景注入）
+        """
         super().__init__(common_addr)
         self._context.direction = FileTransferDirection.DOWNLOAD
         self._file_data: dict[int, bytes] = {}  # 文件数据缓存
         self._segment_size: int = 200  # 每段最大字节数
+        self._inject_lsq = inject_lsq
+        self._inject_srq_negative = inject_srq_negative
 
     def set_file_data(self, file_name: int, data: bytes) -> None:
         """设置文件数据."""
@@ -467,14 +498,16 @@ class FileTransferSlave(FileTransferManager):
         self._context.section_name = 1  # 默认节1
         self._context.section_length = self._context.file_length
 
+        srq = 0x80 if self._inject_srq_negative else 0  # §5 否定节就绪注入
         asdu_data = ASDUBuilder.build_section_ready(
             self._common_addr, ioa, self._context.file_name,
-            self._context.section_name, self._context.section_length, status=0
+            self._context.section_name, self._context.section_length, status=srq
         )
         if self._on_send_asdu:
             self._on_send_asdu(asdu_data)
         self._context.state = FileTransferState.SECTION_READY
-        logger.info(f"Section Ready sent: section={self._context.section_name} length={self._context.section_length}")
+        logger.info(f"Section Ready sent: section={self._context.section_name} "
+                    f"length={self._context.section_length} srq=0x{srq:02x}")
 
     def handle_section_ready_ack(self, ioa: int, data: SectionReadyAck) -> None:
         """处理节准备就绪确认."""
@@ -518,16 +551,17 @@ class FileTransferSlave(FileTransferManager):
         CHS 八位组；CHS = 本节所有段数据的算术和 mod 256（见 ``section_checksum``）。
         """
         from .asdu import ASDUBuilder
+        lsq = self._inject_lsq if self._inject_lsq is not None             else LSQ_FILE_TRANSFER_WITHOUT_DEACT
         asdu_data = ASDUBuilder.build_last_section(
             self._common_addr, ioa, self._context.file_name,
             self._context.section_name,
-            LSQ_FILE_TRANSFER_WITHOUT_DEACT,                  # LSQ 八位组
+            lsq,                                              # LSQ 八位组（可注入 2/4）
             section_checksum(bytes(self._context.data)),      # CHS 八位组
         )
         if self._on_send_asdu:
             self._on_send_asdu(asdu_data)
         self._context.state = FileTransferState.LAST_SECTION
-        logger.info(f"Last Section sent: lsq={LSQ_FILE_TRANSFER_WITHOUT_DEACT} segments={self._context.segment_number}")
+        logger.info(f"Last Section sent: lsq={lsq} segments={self._context.segment_number}")
 
     def handle_ack(self, ioa: int, data: AckFileSection) -> None:
         """处理确认."""

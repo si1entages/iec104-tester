@@ -590,7 +590,11 @@ class MasterProtocolHandler:
                 # 仅本节结束：肯定节确认，从站继续下一节
                 e._file_transfer.send_ack(obj.ioa, qualifier=AFQ_POS_ACK_SECTION)
         elif type_id == TypeID.F_DR_TA_1:
-            e._file_transfer.handle_directory_entry(obj.data)
+            # 目录（F_DR_TA_1）天然多对象：独立实现（lib60870.NET 实测）按 SQ=1
+            # 连续编址把多个条目合并进一个 ASDU——必须逐对象处理，只取
+            # objects[0] 会丢掉其余条目（T50/C4 §2 实测发现）。
+            for entry in asdu.objects:
+                e._file_transfer.handle_directory_entry(entry.data)
         elif type_id == TypeID.F_FR_NB_1:
             logger.info(f"File Ready ACK: file_name={obj.data.file_name if hasattr(obj.data, 'file_name') else 'N/A'}")
         elif type_id == TypeID.F_SR_NB_1:
