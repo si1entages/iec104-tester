@@ -23,7 +23,7 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 
-import { COMBINED , appUrl } from './helpers'
+import { BRIDGE, COMBINED , appUrl } from './helpers'
 import { GATE_KITS, expectKitApplied, profileOf } from './kitProfiles'
 
 test.describe.configure({ mode: 'serial' })
@@ -291,6 +291,22 @@ for (const kit of GATE_KITS) {
           }
         }
       }
+
+      // 桥接页（T98）：合并部署按角色过滤没有桥菜单，走 BRIDGE 8769 专项巡检
+      await page.goto(appUrl(BRIDGE, '#/bridge', kit), { waitUntil: 'domcontentloaded' })
+      await expectKitApplied(page, kit)
+      await page.setViewportSize({ width: 1366, height: 768 })
+      await page.waitForTimeout(700)
+      const bridgeReport = await auditContrast(page)
+      checked += bridgeReport.checked
+      unknown += bridgeReport.unknown
+      for (const issue of bridgeReport.issues) {
+        issues.push({ ...issue, page: `${kit}:bridge`, mode })
+      }
+      // 回到合并部署：下一模式循环还要点主题按钮与菜单
+      await page.goto(appUrl(COMBINED, '', kit), { waitUntil: 'domcontentloaded' })
+      await expectKitApplied(page, kit)
+      await expect(page.locator(profile.nav).filter({ hasText: /主站工作台/ })).toBeVisible({ timeout: 20_000 })
     }
 
     const hard = issues.filter((i) => i.kind !== 'disabled-text' && i.ratio < 3)

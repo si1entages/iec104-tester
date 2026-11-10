@@ -276,3 +276,46 @@ def test_report_timeline_section():
     html3 = build_session_report_html("master", {"role": "master"}, [], [])
     assert "注入时间线" not in html3
 
+
+
+@pytest.mark.asyncio
+async def test_configure_extra_validation_branches():
+    """非对象步骤 / duration 非法类型 / 未编排 run / 桩异常分支."""
+    svc = TimelineService(SimpleNamespace())
+    assert svc.configure([["不是对象"]])["ok"] is False
+    assert svc.configure([{"duration_s": "abc"}])["ok"] is False
+    # run：桥在但未编排
+    bridge, _, _ = _make_bridge(ComplianceMonitor())
+    svc2 = TimelineService(bridge)
+    assert (await svc2.run())["ok"] is False and "未编排" in (await svc2.run())["error"]
+    # 运行起点游标：compliance.violation_list 抛异常 → 0.0
+    bad = SimpleNamespace(violation_list=lambda n: (_ for _ in ()).throw(RuntimeError("x")))
+    assert TimelineService(SimpleNamespace(compliance=bad))._latest_violation_ts() == 0.0
+    # _window_violations：无 compliance → ([], cursor)
+    fresh, cursor = TimelineService(SimpleNamespace())._window_violations(5.0)
+    assert fresh == [] and cursor == 5.0
+    # 运行中 stop 的 break 路径：假 sleep 第 3 次触发停止
+    bridge2, published, tcp = _make_bridge(ComplianceMonitor())
+    svc3 = TimelineService(bridge2)
+    svc3.tick_s = 0.01
+    svc3.configure([{"label": "长", "duration_s": 2, "condition": {}, "expect": "none"}])
+    calls = 0
+
+    async def fake_sleep(_t):
+        nonlocal calls
+        calls += 1
+        if calls == 3:
+            svc3._stop_requested = True
+        await asyncio.sleep(0)
+
+    svc3._sleep = fake_sleep
+    await svc3.run()
+    for _ in range(300):
+        if not svc3.running:
+            break
+        await asyncio.sleep(0.02)
+    assert svc3.last_result["stopped"] is True
+    # bus.publish 抛异常被吞 + 无 bus → 直接返回
+    boom = SimpleNamespace(publish=lambda k, d: (_ for _ in ()).throw(RuntimeError("boom")))
+    TimelineService(SimpleNamespace(tcp_bridge=None, compliance=None, bus=boom))._publish(None, {})
+    TimelineService(SimpleNamespace(tcp_bridge=None, compliance=None))._publish(None, {})

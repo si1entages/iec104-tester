@@ -326,3 +326,23 @@ def test_points_service_error_branches():
     assert '"a,""b"""' in svc2.export_csv()
     # 设计基准：bad action / import xlsx with engine
     assert svc.set_design("nope")["ok"] is False
+
+
+def test_sig_details_pn_test_and_empty_asdu():
+    # COT 字节带 P/N(0x40) 与 T(0x80) 位 → 签名含 PN/T
+    asdu_pn = bytes([13, 1, 0x40 | 3, 0, 1, 0]) + b"\x00" * 8
+    asdu_t = bytes([13, 1, 0x80 | 3, 0, 1, 0]) + b"\x00" * 8
+    sig_pn = frame_signature(_entry(_i(0, 0, asdu_pn)))
+    sig_t = frame_signature(_entry(_i(0, 0, asdu_t)))
+    assert "PN" in sig_pn and "T" not in sig_pn
+    assert "T" in sig_t and "PN" not in sig_t
+    # 空 ASDU 的 I 帧（仅 APCI）
+    assert "empty_asdu" in frame_signature(_entry(_i(0, 0, b"")))
+    # 脏 ASDU 回退 undecoded
+    assert "undecoded" in frame_signature(_entry(_i(0, 0, bytes([0xff] * 6))))
+    # signature_summary 截断 + now_ts 纯函数
+    long_sig = "x" * 200
+    from webui.frame_diff import now_ts, signature_summary  # noqa: PLC0415
+    assert signature_summary(long_sig).endswith("…") and len(signature_summary(long_sig)) == 158
+    assert signature_summary("short") == "short"
+    assert now_ts() > 0

@@ -21,7 +21,7 @@ import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 
-import { COMBINED, MASTER, SLAVE, appUrl } from './helpers'
+import { BRIDGE, COMBINED, MASTER, SLAVE, appUrl } from './helpers'
 import {
   BOX_SELECTORS,
   CLIPPED_TEXT_SELECTORS,
@@ -471,6 +471,60 @@ for (const kit of GATE_KITS) {
 
     await request.post(`${COMBINED}/api/master/stop`, { data: {} })
     await request.post(`${COMBINED}/slave/api/slave/stop`, { data: {} })
+
+    assertClean(state)
+  })
+
+  test(`桥接页巡检 [${profile.label}]：bridge 部署（8769）桥接观察页`, async ({ page }) => {
+    test.setTimeout(180_000)
+    const state: AuditState = {
+      label: 'init',
+      viewport: '1680x950',
+      lang: 'zh',
+      runtime: [],
+      issues: [],
+    }
+    attachWatchers(page, state)
+    await page.setViewportSize({ width: 1680, height: 950 })
+    await page.goto(appUrl(BRIDGE, '#/bridge', kit), { waitUntil: 'domcontentloaded' })
+    await expectKitApplied(page, kit)
+    // dataset.kit 置位与启动屏卸载不同帧：先等导航真的渲染出来再读菜单
+    await expect(page.locator(profile.nav).filter({ hasText: /桥接观察/ })).toBeVisible({ timeout: 20_000 })
+    // bridge 部署只应有桥接观察工作台（无主站/子站工作台菜单——角色隔离）
+    const labels = await page.locator(profile.nav).allTextContents()
+    expect(labels.some((l) => l.includes('主站工作台'))).toBe(false)
+    expect(labels.some((l) => l.includes('子站工作台'))).toBe(false)
+    expect(labels.some((l) => l.includes('桥接观察'))).toBe(true)
+
+    for (const viewport of VIEWPORTS) {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height })
+      state.viewport = `${viewport.width}x${viewport.height}`
+      state.label = 'bridge'
+      await page.waitForTimeout(700)
+      await recordIssues(page, state)
+    }
+
+    // 英文轮（文案更长，专抓裁切）
+    state.lang = 'en'
+    await page.getByRole('button', { name: 'EN', exact: true }).click()
+    for (const viewport of VIEWPORTS) {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height })
+      state.viewport = `${viewport.width}x${viewport.height}`
+      state.label = 'bridge-en'
+      await page.waitForTimeout(700)
+      await recordIssues(page, state)
+    }
+
+    // 深色轮
+    await page.setViewportSize({ width: 1366, height: 768 })
+    state.viewport = '1366x768'
+    await page.getByTestId(profile.themeToggle).click()
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.dataset.theme))
+      .toBe('dark')
+    state.label = 'bridge-dark'
+    await page.waitForTimeout(700)
+    await recordIssues(page, state)
 
     assertClean(state)
   })

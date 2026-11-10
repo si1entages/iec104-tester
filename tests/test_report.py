@@ -168,3 +168,22 @@ async def test_report_post_endpoint_with_chart_images():
     finally:
         await bridge.shutdown()
         await client.close()
+
+
+def test_report_frame_summary_fallback_and_event_rows():
+    """脏 I 帧（ASDU 解析失败）回退占位；S 帧摘要 rx=；事件表行渲染（T97 补覆盖）."""
+    dirty_i = APCICodec.encode_i(tx_seq=0, rx_seq=0,
+                                 asdu_data=bytes([250, 250, 250, 0, 1, 0, 9]))  # 未知类型
+    frames = [
+        {"kind": "frame", "ts": 1000.0,
+         "data": {"direction": "tx", "len": len(dirty_i), "hex": dirty_i.hex(), "client": ""}},
+        {"kind": "frame", "ts": 1001.0,
+         "data": {"direction": "rx", "len": 6, "hex": "680401000100", "client": ""}},
+    ]
+    events = [
+        {"kind": "event", "ts": 1002.0, "data": {"type": "MASTER_EVENT", "data": "状态文本"}},
+        {"kind": "event", "ts": 1003.0, "data": {"type": "OTHER", "data": 123}},
+    ]
+    html = build_session_report_html("master", _fake_status(), frames, events)
+    assert "4. 事件" in html and "状态文本" in html and "123" in html
+    assert "帧证据" in html

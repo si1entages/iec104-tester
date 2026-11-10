@@ -146,11 +146,14 @@ export function PfStatusPage() {
         </Flex>
       </PageSection>
 
-      <PageSection>
-        <PfAlarmCard />
+      {/* T98：告警评估与网络模拟依赖引擎，bridge 角色不渲染（端点未注册，避免轮询 404） */}
+      {status?.role !== 'bridge' ? (
+        <PageSection>
+          <PfAlarmCard />
 
-        <PfNetworkSimCard />
-      </PageSection>
+          <PfNetworkSimCard />
+        </PageSection>
+      ) : null}
 
       <PageSection>
         <Card>

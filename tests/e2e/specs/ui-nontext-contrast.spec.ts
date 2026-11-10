@@ -16,7 +16,7 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 
-import { COMBINED , appUrl } from './helpers'
+import { BRIDGE, COMBINED , appUrl } from './helpers'
 import {
   BORDER_SELECTORS,
   GATE_KITS,
@@ -165,6 +165,56 @@ async function auditNonText(page: Page): Promise<{
           found = true
           checked += 1
           add('border', el, blend(c, outside), outside, selector)
+        }
+        // T99：PF6 把控件边框画在 ::before/::after（inset:0 伪元素）与
+        // 零偏移/零模糊/正扩散 box-shadow 环上——元素自身无边框时补读
+        // （T89 遗留：边框段此前对 PF 0 命中）。
+        // 可感知性 = 与任一相邻侧 ≥3:1（WCAG 1.4.11）：内外两侧取较优者计数。
+        if (!found) {
+          const inside = effectiveBg(el)
+          const addDerivedBorder = (c: Rgba, origin: string): void => {
+            checked += 1
+            const fgOut = blend(c, outside)
+            const rOut = ratio(fgOut, outside)
+            const rIn = inside ? ratio(blend(c, inside), inside) : rOut
+            if (Math.max(rOut, rIn) >= 3) return
+            if (rOut <= rIn) {
+              add('border', el, fgOut, outside, `${selector}(${origin}·外侧)`)
+            } else {
+              add('border', el, blend(c, inside as Rgba), inside as Rgba,
+                `${selector}(${origin}·内侧)`)
+            }
+          }
+          for (const pseudo of ['::before', '::after'] as const) {
+            const ps = getComputedStyle(el, pseudo)
+            if (ps.display === 'none' || ps.content === 'none') continue
+            for (const [, width, color] of [
+              ['Top', ps.borderTopWidth, ps.borderTopColor],
+              ['Right', ps.borderRightWidth, ps.borderRightColor],
+              ['Bottom', ps.borderBottomWidth, ps.borderBottomColor],
+              ['Left', ps.borderLeftWidth, ps.borderLeftColor],
+            ] as const) {
+              if (Number.parseFloat(width) <= 0) continue
+              const c = parse(color)
+              if (!c || c.a <= 0) continue
+              addDerivedBorder(c, pseudo)
+            }
+          }
+          // box-shadow 边框环：与 readFocus 同一筛选（偏移 0/模糊 0/扩散 >0），
+          // 不把投影/焦点指示误判成静态边框。
+          if (s.boxShadow && s.boxShadow !== 'none') {
+            const ringRe = /(rgba?\([^)]*\))([^,]*)/g
+            let m: RegExpExecArray | null
+            while ((m = ringRe.exec(s.boxShadow)) !== null) {
+              const c = parse(m[1])
+              if (!c || c.a <= 0) continue
+              const geo = (m[2].match(/-?[\d.]+px/g) ?? []).map((v) => Number.parseFloat(v))
+              const [ox = 0, oy = 0, blur = 0, spread = 0] = geo
+              if (ox !== 0 || oy !== 0 || blur !== 0 || spread <= 0) continue
+              if (m[2].includes('inset')) continue  // 内嵌环属焦点指示，readFocus 已覆盖
+              addDerivedBorder(c, 'box-shadow')
+            }
+          }
         }
         if (!found) skipped += 1
       }
@@ -519,6 +569,54 @@ for (const kit of GATE_KITS) {
           }
         }
       }
+
+      // 桥接页（T98）：合并部署按角色过滤没有桥菜单，走 BRIDGE 8769 专项巡检
+      await page.goto(appUrl(BRIDGE, '#/bridge', kit), { waitUntil: 'domcontentloaded' })
+      await expectKitApplied(page, kit)
+      await page.addStyleTag({
+        content: '*,*::before,*::after{transition:none !important;animation:none !important;}',
+      })
+      await page.waitForTimeout(600)
+      const bridgeReport = await auditNonText(page)
+      checked += bridgeReport.checked
+      skipped += bridgeReport.skipped
+      for (const issue of bridgeReport.issues) {
+        issues.push({ ...issue, page: `${kit}:bridge`, mode })
+      }
+      const seenBridge = new Set<string>()
+      for (let i = 0; i < 12; i += 1) {
+        await page.keyboard.press('Tab')
+        await page.waitForTimeout(120)
+        const focus = await readFocus(page)
+        if (!focus) continue
+        const key = `${focus.kind}|${focus.selector}`
+        if (seenBridge.has(key)) continue
+        seenBridge.add(key)
+        checked += 1
+        if (focus.kind === 'focus-auto') autoCount += 1
+        if (focus.kind === 'focus-mouse') mouseCount += 1
+        const skippedKind = focus.kind === 'focus-auto' || focus.kind === 'focus-mouse'
+        if (focus.kind === 'focus-missing' || (!skippedKind && focus.ratio < 3)) {
+          issues.push({
+            kind: focus.kind,
+            selector: focus.selector,
+            fg: focus.fg,
+            bg: focus.bg,
+            ratio: focus.ratio,
+            count: 1,
+            page: `${kit}:bridge`,
+            mode,
+            detail:
+              focus.kind === 'focus-missing'
+                ? `无 focus-visible 轮廓/阴影（${focus.indicator}）`
+                : focus.indicator,
+          })
+        }
+      }
+      // 回到合并部署：下一模式循环还要点主题按钮与菜单
+      await page.goto(appUrl(COMBINED, '', kit), { waitUntil: 'domcontentloaded' })
+      await expectKitApplied(page, kit)
+      await expect(page.locator(profile.nav).filter({ hasText: /主站工作台/ })).toBeVisible({ timeout: 20_000 })
     }
 
     const hard = issues.filter((i) => i.ratio < 3 || i.kind === 'focus-missing')
