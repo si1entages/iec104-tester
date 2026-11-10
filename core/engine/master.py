@@ -616,9 +616,10 @@ class MasterEngine(EngineBase):
 
     # ── 文件传输命令 ──────────────────────────────────────────────
 
-    async def file_call_directory(self, ioa: int = 0) -> None:
-        """发送召唤目录命令 (F_SC_NA_1)."""
-        await self._protocol.file_call_directory(ioa)
+    async def file_call_directory(self, ioa: int = 0, cot: int | None = None,
+                                  qualifier: int | None = None) -> None:
+        """发送召唤目录命令 (F_SC_NA_1)；cot/qualifier 可选覆盖（T50/C4 §2 矩阵）."""
+        await self._protocol.file_call_directory(ioa, cot=cot, qualifier=qualifier)
 
     async def file_select(self, ioa: int, file_name: int) -> None:
         """发送文件选择命令 (F_SC_NB_1)."""

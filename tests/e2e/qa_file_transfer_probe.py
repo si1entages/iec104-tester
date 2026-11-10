@@ -152,9 +152,14 @@ def main() -> int:
     ap.add_argument("--request", type=int, default=None, metavar="NOF",
                     help="可选：对 NOF 发起文件请求（默认不做）")
     ap.add_argument("--wait", type=float, default=3.0, help="每次动作后等待回帧秒数")
+    ap.add_argument("--dir-cot", type=int, default=13, choices=[5, 6, 13],
+                    help="目录召唤 COT：13=FILE（项目约定默认）/ 5=REQ（Ed.2 第三方口径）/ 6=ACT")
+    ap.add_argument("--dir-scq", type=int, default=5, choices=range(0, 8), metavar="0-7",
+                    help="目录召唤 SCQ：5=项目约定默认 / 0=otfabric 实测口径")
     args = ap.parse_args()
 
-    print(f"文件传输探针 | 主站 {args.base} | IOA={args.ioa} | 等待 {args.wait}s")
+    print(f"文件传输探针 | 主站 {args.base} | IOA={args.ioa} | 等待 {args.wait}s "
+          f"| 目录 COT={args.dir_cot} SCQ={args.dir_scq}")
     try:
         status = get(args.base, "/api/status")
     except Exception as e:  # noqa: BLE001
@@ -162,8 +167,9 @@ def main() -> int:
         return 2
 
     lines = _observe(
-        "① 目录召唤（F_SC SCQ=5，项目约定值）", args.base,
-        {"action": "directory", "ioa": args.ioa}, args.wait)
+        f"① 目录召唤（F_SC COT={args.dir_cot} SCQ={args.dir_scq}）", args.base,
+        {"action": "directory", "ioa": args.ioa,
+         "cot": args.dir_cot, "qualifier": args.dir_scq}, args.wait)
 
     if args.select is not None:
         lines += _observe(

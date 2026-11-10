@@ -71,6 +71,24 @@ def test_golden_f_sc_na1_122_body_4():
         "7a 01 0d 00 01 00 64 00 00 05 00 01 01".replace(" ", ""))
 
 
+def test_golden_f_sc_na1_directory_cot_overrides():
+    """目录召唤 COT 覆盖（T50/C4 §2 组合矩阵）：第 3 字节（COT|T|P/N）随 cot 变化.
+
+    lib60870.NET 实测口径：服务端只认 COT=REQUEST(5) 回 F_DR_TA_1（SCQ 不参与判断）；
+    项目约定默认 COT=FILE(13)+SCQ=5 对独立实现无回帧——此用例锁死两条编码路径。
+    """
+    # 帧形：type/vsq/cot/oa/ca(2) + IOA(3) + NOF(2) + NOS(1) + SCQ(1)
+    # 默认：COT=13(FILE) + SCQ=5（项目约定，行为不变）
+    assert ASDUBuilder.build_call_directory(1, 0) == bytes.fromhex(
+        "7a 01 0d 00 01 00 00 00 00 00 00 00 05".replace(" ", ""))
+    # Ed.2/第三方口径：COT=5(REQ) + SCQ=0
+    assert ASDUBuilder.build_call_directory(1, 0, cot=5, qualifier=0) == bytes.fromhex(
+        "7a 01 05 00 01 00 00 00 00 00 00 00 00".replace(" ", ""))
+    # COT=5 + SCQ=5（验证 SCQ 与 COT 解耦）
+    assert ASDUBuilder.build_call_directory(1, 0, cot=5, qualifier=5) == bytes.fromhex(
+        "7a 01 05 00 01 00 00 00 00 00 00 00 05".replace(" ", ""))
+
+
 def test_golden_f_ls_na1_123_body_5():
     """F_LS_NA_1：NOF(2)+NOS(1)+LSQ(1)+CHS(1)，信息体 5 字节、末两字节 = LSQ|CHS."""
     assert ASDUBuilder.build_last_section(1, 100, 5, 1, 1, 0xAB) == bytes.fromhex(

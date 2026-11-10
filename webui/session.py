@@ -632,11 +632,17 @@ class EngineSession:
             return {"ok": False, "error": "bad kind"}
         return {"ok": True}
 
-    async def file_action(self, action: str, ioa: int = 0, file_name: int = 0) -> dict:
+    async def file_action(self, action: str, ioa: int = 0, file_name: int = 0,
+                          cot: int | None = None, qualifier: int | None = None) -> dict:
         eng = self.require_master()
         action = (action or "").lower()
         if action in ("directory", "dir"):
-            await eng.file_call_directory(int(ioa))
+            # cot/qualifier 为可选覆盖（T50/C4 §2 组合矩阵探测用）；默认值 = 项目约定
+            if cot is not None and int(cot) not in (5, 6, 13):
+                return {"ok": False, "error": "cot 须为 5(REQ)/6(ACT)/13(FILE)"}
+            if qualifier is not None and not (0 <= int(qualifier) <= 7):
+                return {"ok": False, "error": "qualifier(SCQ) 须为 0~7"}
+            await eng.file_call_directory(int(ioa), cot=cot, qualifier=qualifier)
         elif action == "select":
             await eng.file_select(int(ioa), int(file_name))
         elif action in ("request", "call"):

@@ -406,8 +406,10 @@ class EngineBridge:
     async def parameter_command(self, kind: str, ioa: int, value: float, qualifier: int = 1) -> dict:
         return await self._cmd(self.session.parameter_command(kind, ioa, value, qualifier))
 
-    async def file_action(self, action: str, ioa: int = 0, file_name: int = 0) -> dict:
-        return await self._cmd(self.session.file_action(action, ioa, file_name))
+    async def file_action(self, action: str, ioa: int = 0, file_name: int = 0,
+                          cot: int | None = None, qualifier: int | None = None) -> dict:
+        return await self._cmd(self.session.file_action(action, ioa, file_name,
+                                                        cot=cot, qualifier=qualifier))
 
     async def set_response(self, cfg: dict) -> dict:
         return await self._cmd(self.session.set_response(cfg))

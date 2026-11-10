@@ -539,7 +539,15 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
         file_name = body.get("file_name", 0)
         if not isinstance(file_name, int) or file_name < 0:
             return web.json_response({"ok": False, "error": "invalid file_name"}, status=400)
-        return web.json_response(await bridge.file_action(action, ioa, file_name))
+        # 可选 cot/qualifier（目录召唤组合矩阵探测，T50/C4 §2）：None=项目约定默认
+        cot = body.get("cot")
+        qualifier = body.get("qualifier")
+        if cot is not None and (not isinstance(cot, int) or cot < 0):
+            return web.json_response({"ok": False, "error": "invalid cot"}, status=400)
+        if qualifier is not None and (not isinstance(qualifier, int) or not 0 <= qualifier <= 255):
+            return web.json_response({"ok": False, "error": "invalid qualifier"}, status=400)
+        return web.json_response(await bridge.file_action(action, ioa, file_name,
+                                                          cot=cot, qualifier=qualifier))
 
     async def api_points_yaml_get(request: web.Request) -> web.Response:
         try:

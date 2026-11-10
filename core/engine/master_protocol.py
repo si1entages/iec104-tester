@@ -103,15 +103,21 @@ class MasterProtocolHandler:
 
     # ── 文件传输命令 ──────────────────────────────────────────────
 
-    async def file_call_directory(self, ioa: int = 0) -> None:
+    async def file_call_directory(self, ioa: int = 0, cot: int | None = None,
+                                  qualifier: int | None = None) -> None:
         """发送召唤目录命令 (F_SC_NA_1).
 
         Args:
             ioa: 信息对象地址
+            cot: 传送原因覆盖（None=默认 FILE(13) 项目约定）；传 COT.REQ(5)
+                为 Ed.2/第三方口径（lib60870.NET 实测只认 REQUEST 回目录）
+            qualifier: SCQ 覆盖（None=默认 5 项目约定值）
         """
         e = self._engine
         asdu_data = ASDUBuilder.build_call_directory(
-            e._common_addr, ioa, qualifier=SCQ_REQUEST_DIRECTORY
+            e._common_addr, ioa,
+            qualifier=SCQ_REQUEST_DIRECTORY if qualifier is None else int(qualifier),
+            cot=COT.FILE if cot is None else int(cot),
         )
         # SCQ_REQUEST_DIRECTORY=5 是**项目约定值**（标准表中 5=SELECT_SECTION）：
         # 主站发 5 → 子站 handle_file_request 按约定回目录，本仓库内闭环；

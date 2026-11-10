@@ -25,6 +25,19 @@
 > 用同一 lib60870 从站重跑探针，回帧与首次一致（10 条 / 2 节×400B /
 > LSQ 3,3,1 / CHS 184,72,0）；主站日志 `File received: name=1 size=800`，
 > 无 CHS mismatch 告警。**真机仍未到位，本清单 5 项的真机结论保持“待复测”。**
+>
+> **2026-11-10 第二实现实测（lib60870.NET，非真机）**：改用 MZ Automation 官方
+> C# 实现（`examples/cs104-server-file`，net8.0 + .NET SDK 8）补齐 lib60870-C
+> 缺失的**目录状态机**，重点核实 §2 目录组合（本轮核心增量）+ §4 双节交叉验证；
+> 完整记录见
+> [`file_transfer_third_party_probe_2026-11-10_lib60870_net.md`](file_transfer_third_party_probe_2026-11-10_lib60870_net.md)。
+> 要点：**目录口径 = `F_SC COT=REQUEST(5)` → `F_DR_TA_1 COT=5`（SQ=1 连续多对象 +
+> SOF 携带 LFD），SCQ 值无关**；项目约定 `COT=13+SCQ=5` 对两个独立实现均无回帧；
+> 未知 NOF 的否定形态为否定 F_SC + COT=47（≠C 轮的否定 F_FR 0x80）；双节
+> 600+425 全链路 LSQ=3,3,1、CHS 76/157/233，节间不等 DEACT 主动推下一节
+> （与 C 轮一致）。**新发现我方限制：主站 F_DR 多条目（SQ=1）只收第一条**
+> （`process_file_transfer` 取 `objects[0]`），见文末关联待核实项。
+> **真机仍未到位，本清单 5 项的真机结论保持“待复测”。**
 
 ## 0. 通用准备
 
@@ -65,6 +78,13 @@
 （无 F_DR/F_LS/F_AF）；该实现的 file service 只处理 SCQ=1/2/3/6，**没有目录处理器**。
 **结论**：SCQ=5 不是可移植的目录约定；第三方无法验证目录上送。select=1 / request=2 正常。
 目录方式（SCQ/NOF/COT 组合）仍需真机确认，不能据第三方推断。
+
+**观察记录 2（lib60870.NET，2026-11-10）**：目录触发的充分必要条件是
+**`COT=REQUEST(5)`**（`FileServices.cs:1699`，SCQ 值不参与判断）；实测
+COT=13/SCQ=5 无回帧（与 C 轮一致）、COT=5/SCQ=0 与 COT=5/SCQ=5 均回
+`F_DR_TA_1 COT=5`（SQ=1 连续多对象、末条目 SOF 携带 LFD、条目带 CP56Time2a）。
+**判定**：本实现已支持标准口径——探针 `--dir-cot 5`（`/api/master/file` body
+`cot: 5`）即可触发；默认 `SCQ=5+COT=13` 保持不变（真机核实后再决定是否切默认值）。
 
 ## 3. WITH_DEACT 后续动作（LSQ=2/4 之后）
 
@@ -113,6 +133,12 @@ LSQ 序列：节1=3(CHS=184) → 节2=3(CHS=72) → 文件结束节3 LSQ=1(CHS=0
 SRQ 可按同源处理，真机再补一次否定节场景。
 
 ## 附：关联待核实项（同源，非用户清单 5 项）
+
+- **[2026-11-10 新增] 主站 F_DR 多条目只收第一条**：lib60870.NET 目录回帧为
+  SQ=1 连续多对象（num=2，IOA 30000/30001），`process_file_transfer` 只处理
+  `asdu.objects[0]` → 第二条目（30001）丢失。本仓从站逐条目分帧所以从未暴露；
+  独立实现合并发送即现形。修复方向：F_DR 分支遍历 `asdu.objects`；真机目录若
+  也是合并形态（otfabric 口径如此），此修复是真机复测的前置项。
 
 - **CHS 校验和算法**：已按「本节所有段数据算术和 mod 256」实现（两个独立实现一致），
   真机验证方法见 `file_transfer_fls.md` §4.1；构造错误校验和观察对端是否回 AFQ=2/4。

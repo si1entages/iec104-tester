@@ -1518,7 +1518,8 @@ class ASDUBuilder:
 
     @staticmethod
     def build_call_directory(common_addr: int, ioa: int, file_name: int = 0,
-                              section_name: int = 0, qualifier: int = 5) -> bytes:
+                              section_name: int = 0, qualifier: int = 5,
+                              cot: int = COT.FILE) -> bytes:
         """构造召唤目录/选择文件/召唤文件 (F_SC_NA_1).
 
         信息体 = NOF(2) + NOS(1) + SCQ(1)。
@@ -1530,8 +1531,11 @@ class ASDUBuilder:
             section_name: 节名 (8-bit, NOS)
             qualifier: SCQ — 1=选择文件, 2=请求文件, 3=去激活文件, 4=删除文件,
                 5=选择节, 6=请求节, 7=去激活节（见 ``types.SCQ_NAMES``）
+            cot: 传送原因 — 默认 FILE(13)（项目文件传输约定）；目录召唤可按
+                Ed.2 口径用 REQ(5)（lib60870.NET / otfabric 实测：服务端只在
+                COT=REQUEST 时回 F_DR_TA_1，SCQ 值不参与判断）。
         """
-        asdu = ASDU(type_id=TypeID.F_SC_NA_1, sq=False, num=1, cot=COT.FILE, common_addr=common_addr)
+        asdu = ASDU(type_id=TypeID.F_SC_NA_1, sq=False, num=1, cot=cot, common_addr=common_addr)
         cd = CallDirectory(ioa=ioa, file_name=file_name, section_name=section_name, qualifier=qualifier)
         asdu.objects.append(InformationObject(ioa=ioa, data=cd))
         return asdu.encode()
