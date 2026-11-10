@@ -69,8 +69,12 @@ def _file_frames(base: str, since: float) -> list[tuple[str, int, object]]:
         tid = int(asdu.type_id)
         if tid not in FILE_TYPES:
             continue
-        obj = asdu.objects[0].data if asdu.objects else None
-        out.append((FILE_TYPES[tid], int(asdu.cot), obj))
+        if tid == 126:  # F_DR_TA_1：目录条目天然多对象（SQ=1 连续编址），逐条目输出
+            for entry in asdu.objects:
+                out.append((FILE_TYPES[tid], int(asdu.cot), entry.data))
+        else:
+            obj = asdu.objects[0].data if asdu.objects else None
+            out.append((FILE_TYPES[tid], int(asdu.cot), obj))
     return out
 
 
