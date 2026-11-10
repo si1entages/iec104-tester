@@ -29,6 +29,7 @@ import { pointKey } from '../../lib/pointValue'
 import { trendBuffer } from '../../lib/trendBuffer'
 import { useUiStore } from '../../store/uiStore'
 import { PfCommandPanel } from '../components/PfCommandPanel'
+import { PfDesignDiffCard } from '../components/PfDesignDiffCard'
 import { PfFrameViewer } from '../components/PfFrameViewer'
 import { PfPointCommandDialog } from '../components/PfPointCommandDialog'
 import { PfPointsTable } from '../components/PfPointsTable'
@@ -229,6 +230,10 @@ export function PfMasterPage() {
 
       <PageSection>
         <PfCommandPanel point={selected} disabled={!status?.running} />
+      </PageSection>
+
+      <PageSection>
+        <PfDesignDiffCard />
       </PageSection>
 
       <PageSection>

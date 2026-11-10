@@ -18,6 +18,7 @@ from .events import EventBus
 from .points import PointService
 from .session import EngineSession
 from .testcenter import TestCenterService
+from .timeline import TimelineService
 
 logger = logging.getLogger("iec104.webui")
 
@@ -119,6 +120,9 @@ class EngineBridge:
         self.testcenter = TestCenterService(reports_dir=report_dir)
         self.testcenter.set_publisher(
             lambda kind, data: self.bus.publish(kind, data))
+
+        # 注入时间线（T97）：步骤编排 + 逐窗自动判定（仅 bridge 角色可运行）
+        self.timeline = TimelineService(self)
 
     def _on_log_entry(self, entry) -> None:
         self.bus.publish("log", {
@@ -495,6 +499,37 @@ class EngineBridge:
 
     def import_points_csv(self, text: str) -> dict:
         return self.points.import_csv(text, engine=self.engine)
+
+    # ── T95：Excel(xlsx) 点表 + 设计基准比对 ──────────────────────────
+
+    def export_points_xlsx(self) -> bytes:
+        return self.points.export_xlsx_bytes()
+
+    def preview_points_xlsx(self, data: bytes) -> dict:
+        return self.points.preview_xlsx_bytes(data)
+
+    def import_points_xlsx(self, data: bytes) -> dict:
+        return self.points.import_xlsx_bytes(data, engine=self.engine)
+
+    def set_design_baseline(self, action: str) -> dict:
+        return self.points.set_design(action)
+
+    def design_points_diff(self) -> dict:
+        return self.points.design_diff(self.engine)
+
+    # ── T97：注入时间线 ──────────────────────────────────────────────
+
+    def timeline_get(self) -> dict:
+        return self.timeline.to_dict()
+
+    def timeline_configure(self, steps: Any) -> dict:
+        return self.timeline.configure(steps)
+
+    async def timeline_run(self) -> dict:
+        return await self.timeline.run()
+
+    def timeline_stop(self) -> dict:
+        return self.timeline.stop()
 
     def export_session_json(self) -> dict:
         return self.bus.export_session(self.role, self.status())

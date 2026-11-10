@@ -185,6 +185,21 @@ class CaptureService:
         path = self._path(name)
         return path if path is not None and path.is_file() else None
 
+    def diff_files(self, name_a: str, name_b: str, *, max_entries: int = 200) -> dict:
+        """两段录制对比（T96，D 采纳）：路径安全复用 _path，逐帧签名 diff."""
+        from webui.frame_diff import diff_capture_files
+
+        path_a = self._path(name_a)
+        path_b = self._path(name_b)
+        if path_a is None or not path_a.is_file():
+            return {"ok": False, "error": f"file not found: {name_a}"}
+        if path_b is None or not path_b.is_file():
+            return {"ok": False, "error": f"file not found: {name_b}"}
+        out = diff_capture_files(path_a, path_b, max_entries=max_entries)
+        out["file_a"] = name_a
+        out["file_b"] = name_b
+        return out
+
     # ── 回放 ─────────────────────────────────────────────────────
 
     def load(self, name: str) -> dict:

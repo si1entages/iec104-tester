@@ -6,6 +6,7 @@ import { api } from '../../api/endpoints'
 import { useCommand, useCommandNoArgs, useStatusQuery } from '../../api/queries'
 import { useT } from '../../i18n'
 import { CarbonConditionCard } from '../components/CarbonConditionCard'
+import { CarbonTimelineCard } from '../components/CarbonTimelineCard'
 import { CarbonFrameViewer } from '../components/CarbonFrameViewer'
 import { Note, NumField, Panel, KvList, TextField } from '../components/ui'
 
@@ -119,6 +120,8 @@ export function CarbonBridgePage() {
       </Panel>
 
       <CarbonConditionCard />
+
+      <CarbonTimelineCard />
 
       {status?.compliance ? (
         <Panel title={t('compliance.title')}>

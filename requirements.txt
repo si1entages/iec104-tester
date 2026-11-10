@@ -1,6 +1,7 @@
 # 运行时依赖
 PyYAML>=6.0
 aiohttp>=3.9
+openpyxl>=3.1
 
 # 开发/测试（可选）
 # pytest>=7.0

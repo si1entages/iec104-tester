@@ -489,6 +489,122 @@ export interface ScdPreviewResponse {
   warnings: string[]
 }
 
+// ── Excel 点表 + 设计基准比对（T95，契约 §2.4 / §4.14）─────────────────
+
+export interface XlsxPreviewResponse {
+  ok: boolean
+  /** 各类型解析计数（仅 >0 的键） */
+  stats: Record<string, number>
+  /** 行级解析错误（坏行跳过不阻断） */
+  errors: string[]
+  /** 前 100 行摘要 */
+  rows: XlsxPreviewRow[]
+  total: number
+  error?: string
+}
+
+export interface XlsxPreviewRow {
+  ioa: number
+  name: string
+}
+
+export interface XlsxImportResponse {
+  ok: boolean
+  points: number
+  errors: string[]
+  stats: Record<string, number>
+  design: boolean
+  error?: string
+}
+
+export interface DesignBaselineResponse {
+  ok: boolean
+  has_design: boolean
+  points?: number
+  error?: string
+}
+
+export interface DesignDiffPointLite {
+  ioa: number
+  type: string
+  name: string
+}
+
+// ── 桥注入时间线（T97，契约 §2.4a / §4.15）────────────────────────────
+
+export type TimelineExpect = 'none' | 'loss' | 'k-exceed' | 't1' | 'disconnect'
+
+export interface TimelineStep {
+  label: string
+  duration_s: number
+  condition: Record<string, number | string>
+  expect: TimelineExpect
+}
+
+export interface TimelineViolation {
+  ts: number
+  kind: string
+  side: string
+  detail: string
+}
+
+export interface TimelineStepResult {
+  label: string
+  expect?: string
+  ok?: boolean
+  skipped?: boolean
+  condition?: string
+  detail: string
+  observed?: {
+    dropped: number
+    disconnects: number
+    clients: number
+    violations: TimelineViolation[]
+  }
+  window_s?: number
+}
+
+export interface TimelineResult {
+  ok: boolean
+  steps: TimelineStepResult[]
+  started_at: number
+  duration_s: number
+  stopped?: boolean
+}
+
+export interface TimelineState {
+  ok: boolean
+  running: boolean
+  steps: TimelineStep[]
+  last_result: TimelineResult | null
+}
+
+export interface TimelineAction {
+  ok: boolean
+  error?: string
+  running?: boolean
+  steps?: number
+  stopping?: boolean
+}
+
+export interface DesignMismatch {
+  ioa: number
+  design: { type: string; min_value?: number; max_value?: number }
+  actual: { type: string; min_obs?: number; max_obs?: number }
+  reason: string
+}
+
+export interface DesignDiffResponse {
+  ok: boolean
+  has_design: boolean
+  summary: { missing: number; extra: number; mismatch: number }
+  missing: DesignDiffPointLite[]
+  extra: DesignDiffPointLite[]
+  mismatch: DesignMismatch[]
+  truncated: boolean
+  error?: string
+}
+
 // ── 主站参数状态（T08，契约 §2.6 / §4.6）───────────────────────────────
 
 export type ParameterResult =
@@ -769,6 +885,29 @@ export interface CapturePlayback {
   progress?: number
   duration?: number
   current?: CaptureFrame | null
+}
+
+export interface CaptureDiffEntry {
+  signature: string
+  count_a: number
+  count_b: number
+  delta: number
+}
+
+/** 两段录制对比（T96，契约 §2.14） */
+export interface CaptureDiffResponse {
+  ok: boolean
+  identical: boolean
+  total_a: number
+  total_b: number
+  unique_a: number
+  unique_b: number
+  diff_total: number
+  entries: CaptureDiffEntry[]
+  truncated: boolean
+  file_a?: string
+  file_b?: string
+  error?: string
 }
 
 export interface CaptureActionResult extends OkResponse {

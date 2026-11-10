@@ -6,6 +6,7 @@ import {
   CardBody,
   CardTitle,
   Flex,
+  FormGroup,
   Label,
   Pagination,
   Progress,
@@ -14,7 +15,7 @@ import {
 
 import { api, captureDownloadUrl } from '../../api/endpoints'
 import { useCaptureFramesQuery, useCaptureStatusQuery } from '../../api/queries'
-import type { CaptureFileInfo } from '../../api/types'
+import type { CaptureDiffResponse, CaptureFileInfo } from '../../api/types'
 import { useLocale, useT } from '../../i18n'
 import { formatDateTime, localeTag } from '../../lib/format'
 
@@ -36,6 +37,11 @@ export function PfCapturePage() {
   const [speed, setSpeed] = useState(1)
   const [page, setPage] = useState(1)
   const [last, setLast] = useState<{ ok: boolean; text: string } | null>(null)
+  // T96 报文对比
+  const [diffA, setDiffA] = useState('')
+  const [diffB, setDiffB] = useState('')
+  const [diff, setDiff] = useState<CaptureDiffResponse | null>(null)
+  const [diffErr, setDiffErr] = useState('')
 
   const framesQuery = useCaptureFramesQuery((page - 1) * PAGE_SIZE, PAGE_SIZE, Boolean(playback?.loaded))
   const total = framesQuery.data?.total ?? 0
@@ -51,6 +57,24 @@ export function PfCapturePage() {
 
   const recording = Boolean(status?.recording)
   const paused = Boolean(status?.paused)
+
+  const fileOptions = (status?.files ?? []).map((f: CaptureFileInfo) => f.name)
+
+  const runDiff = async (): Promise<void> => {
+    setDiffErr('')
+    try {
+      const r = await api.capture.diff(diffA, diffB)
+      if (r.ok) {
+        setDiff(r)
+      } else {
+        setDiff(null)
+        setDiffErr(r.error ?? t('cmd.unknown'))
+      }
+    } catch (e) {
+      setDiff(null)
+      setDiffErr((e as Error).message)
+    }
+  }
 
   const fileRow = (file: CaptureFileInfo) => (
     <tr key={file.name} className="pf-v6-c-table__tr" data-testid="capture-file">
@@ -270,6 +294,99 @@ export function PfCapturePage() {
                   />
                 </div>
               </>
+            ) : null}
+          </CardBody>
+        </Card>
+      </div>
+
+      <div style={{ marginTop: 16 }}>
+        <Card>
+          <CardTitle>{t('cap.diffTitle')}</CardTitle>
+          <CardBody>
+            <Flex gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsFlexEnd' }} flexWrap={{ default: 'wrap' }}>
+              <FormGroup label={t('cap.diffA')} fieldId="pf-cap-diff-a">
+                <select
+                  id="pf-cap-diff-a"
+                  className="pf-v6-c-form-control"
+                  value={diffA}
+                  onChange={(e) => {
+                    setDiffA(e.target.value)
+                    setDiff(null)
+                  }}
+                  data-testid="pf-cap-diff-a"
+                >
+                  <option value="">—</option>
+                  {fileOptions.map((name) => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+              </FormGroup>
+              <FormGroup label={t('cap.diffB')} fieldId="pf-cap-diff-b">
+                <select
+                  id="pf-cap-diff-b"
+                  className="pf-v6-c-form-control"
+                  value={diffB}
+                  onChange={(e) => {
+                    setDiffB(e.target.value)
+                    setDiff(null)
+                  }}
+                  data-testid="pf-cap-diff-b"
+                >
+                  <option value="">—</option>
+                  {fileOptions.map((name) => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+              </FormGroup>
+              <Button
+                variant="primary"
+                isDisabled={!diffA || !diffB}
+                onClick={() => void runDiff()}
+                data-testid="capture-diff-run"
+              >
+                {t('cap.diffRun')}
+              </Button>
+            </Flex>
+            {diffErr ? (
+              <div style={{ marginTop: 8, color: 'var(--pf-t--global--text--color--status--danger--default)', fontSize: 13 }}>
+                {diffErr}
+              </div>
+            ) : null}
+            {diff ? (
+              <div style={{ marginTop: 10 }}>
+                <Label isCompact color={diff.identical ? 'green' : 'red'} data-testid="capture-diff-verdict">
+                  {diff.identical
+                    ? t('cap.diffIdentical')
+                    : t('cap.diffNotIdentical', { n: diff.diff_total })}
+                </Label>
+                <span style={{ fontSize: 12, opacity: 0.75, marginLeft: 8 }}>
+                  {diff.total_a} / {diff.total_b}
+                </span>
+                {!diff.identical ? (
+                  <div style={{ marginTop: 10, overflowX: 'auto' }} data-testid="capture-diff-table">
+                    <table className="pf-v6-c-table pf-m-compact" style={{ width: '100%', tableLayout: 'fixed' }}>
+                      <thead className="pf-v6-c-table__thead">
+                        <tr className="pf-v6-c-table__tr">
+                          <th className="pf-v6-c-table__th">{t('cap.diffColSig')}</th>
+                          <th className="pf-v6-c-table__th" style={{ width: 90, minWidth: 90, textAlign: 'right' }}>{t('cap.diffColA')}</th>
+                          <th className="pf-v6-c-table__th" style={{ width: 90, minWidth: 90, textAlign: 'right' }}>{t('cap.diffColB')}</th>
+                          <th className="pf-v6-c-table__th" style={{ width: 70, minWidth: 70, textAlign: 'right' }}>{t('cap.diffDiff')}</th>
+                        </tr>
+                      </thead>
+                      <tbody className="pf-v6-c-table__tbody">
+                        {diff.entries.slice(0, 50).map((e) => (
+                          <tr key={e.signature} className="pf-v6-c-table__tr">
+                            <td className="pf-v6-c-table__td mono" style={{ wordBreak: 'break-all' }}>{e.signature}</td>
+                            <td className="pf-v6-c-table__td" style={{ textAlign: 'right' }}>{e.count_a}</td>
+                            <td className="pf-v6-c-table__td" style={{ textAlign: 'right' }}>{e.count_b}</td>
+                            <td className="pf-v6-c-table__td" style={{ textAlign: 'right' }}>{e.delta > 0 ? `+${e.delta}` : e.delta}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
+              </div>
             ) : null}
           </CardBody>
         </Card>

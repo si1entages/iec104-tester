@@ -7,6 +7,7 @@ import type { PointPatch } from '../lib/pointValue'
 import { useUiStore } from '../store/uiStore'
 import type {
   AlarmsSnapshot,
+  DesignDiffResponse,
   EngineEvent,
   Frame,
   HistoryDataParams,
@@ -25,6 +26,7 @@ import type {
   SchemaResponse,
   SimulationStatusResponse,
   Status,
+  TimelineState,
   CaptureFramesResponse,
   CaptureStatus,
   TestScriptInfo,
@@ -66,6 +68,8 @@ export const queryKeys = {
   testScripts: () => ['tests', activeRole(), 'scripts'] as const,
   testStatus: () => ['tests', activeRole(), 'status'] as const,
   alarms: () => ['alarms', activeRole()] as const,
+  designDiff: () => ['design-diff', activeRole()] as const,
+  timeline: () => ['timeline', activeRole()] as const,
 }
 
 // ── 查询 ───────────────────────────────────────────────────────────────
@@ -314,6 +318,24 @@ export function useAlarmsQuery() {
     queryKey: queryKeys.alarms(),
     queryFn: api.alarms,
     refetchInterval: 2000,
+  })
+}
+
+/** 注入时间线（T97）：运行中 1s 轮询，空闲 3s。 */
+export function useTimelineQuery() {
+  return useQuery<TimelineState>({
+    queryKey: queryKeys.timeline(),
+    queryFn: api.timeline,
+    refetchInterval: (query) => (query.state.data?.running ? 1000 : 3000),
+  })
+}
+
+/** 设计 vs 实测比对（T95）：5s 轮询——实测侧随自动学习/上送持续变化。 */
+export function useDesignDiffQuery() {
+  return useQuery<DesignDiffResponse>({
+    queryKey: queryKeys.designDiff(),
+    queryFn: api.designDiff,
+    refetchInterval: 5000,
   })
 }
 

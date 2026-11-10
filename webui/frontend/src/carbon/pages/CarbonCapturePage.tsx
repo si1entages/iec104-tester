@@ -4,10 +4,10 @@ import { Button, Link, ProgressBar, Tag } from '@carbon/react'
 
 import { api, captureDownloadUrl } from '../../api/endpoints'
 import { useCaptureFramesQuery, useCaptureStatusQuery } from '../../api/queries'
-import type { CaptureFileInfo } from '../../api/types'
+import type { CaptureDiffResponse, CaptureFileInfo } from '../../api/types'
 import { useLocale, useT } from '../../i18n'
 import { formatDateTime, localeTag } from '../../lib/format'
-import { Pager, Panel, TableFrame, TextField } from '../components/ui'
+import { Pager, Panel, SelectField, TableFrame, TextField } from '../components/ui'
 
 const PAGE_SIZE = 100
 
@@ -27,6 +27,11 @@ export function CarbonCapturePage() {
   const [speed, setSpeed] = useState(1)
   const [page, setPage] = useState(1)
   const [last, setLast] = useState<{ ok: boolean; text: string } | null>(null)
+  // T96 报文对比
+  const [diffA, setDiffA] = useState('')
+  const [diffB, setDiffB] = useState('')
+  const [diff, setDiff] = useState<CaptureDiffResponse | null>(null)
+  const [diffErr, setDiffErr] = useState('')
 
   const framesQuery = useCaptureFramesQuery((page - 1) * PAGE_SIZE, PAGE_SIZE, Boolean(playback?.loaded))
   const total = framesQuery.data?.total ?? 0
@@ -42,6 +47,27 @@ export function CarbonCapturePage() {
 
   const recording = Boolean(status?.recording)
   const paused = Boolean(status?.paused)
+
+  const fileOptions = (status?.files ?? []).map((f: CaptureFileInfo) => ({
+    value: f.name,
+    label: f.name,
+  }))
+
+  const runDiff = async (): Promise<void> => {
+    setDiffErr('')
+    try {
+      const r = await api.capture.diff(diffA, diffB)
+      if (r.ok) {
+        setDiff(r)
+      } else {
+        setDiff(null)
+        setDiffErr(r.error ?? t('cmd.unknown'))
+      }
+    } catch (e) {
+      setDiff(null)
+      setDiffErr((e as Error).message)
+    }
+  }
 
   return (
     <div className="app-gap">
@@ -246,6 +272,81 @@ export function CarbonCapturePage() {
               <Pager page={page} pageSize={PAGE_SIZE} totalItems={total} onChange={setPage} />
             </div>
           </>
+        ) : null}
+      </Panel>
+
+      <Panel title={t('cap.diffTitle')}>
+        <div className="app-row" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <SelectField
+            id="cap-diff-a"
+            label={t('cap.diffA')}
+            width={280}
+            value={diffA}
+            options={fileOptions}
+            onChange={(v) => {
+              setDiffA(v)
+              setDiff(null)
+            }}
+          />
+          <SelectField
+            id="cap-diff-b"
+            label={t('cap.diffB')}
+            width={280}
+            value={diffB}
+            options={fileOptions}
+            onChange={(v) => {
+              setDiffB(v)
+              setDiff(null)
+            }}
+          />
+          <Button
+            kind="primary"
+            size="sm"
+            disabled={!diffA || !diffB}
+            onClick={() => void runDiff()}
+            data-testid="capture-diff-run"
+          >
+            {t('cap.diffRun')}
+          </Button>
+        </div>
+        {diffErr ? (
+          <div style={{ marginTop: 8, color: 'var(--cds-text-error)', fontSize: 13 }}>{diffErr}</div>
+        ) : null}
+        {diff ? (
+          <div style={{ marginTop: 10 }}>
+            <Tag size="sm" type={diff.identical ? 'green' : 'red'} data-testid="capture-diff-verdict">
+              {diff.identical
+                ? t('cap.diffIdentical')
+                : t('cap.diffNotIdentical', { n: diff.diff_total })}
+            </Tag>
+            <span style={{ fontSize: 12, color: 'var(--cds-text-secondary)', marginLeft: 8 }}>
+              {diff.total_a} / {diff.total_b}
+            </span>
+            {!diff.identical ? (
+              <TableFrame testid="capture-diff-table">
+                <table className="cds--data-table cds--data-table--md" style={{ width: '100%', tableLayout: 'fixed' }}>
+                  <thead>
+                    <tr>
+                      <th><span className="cds--table-header-label">{t('cap.diffColSig')}</span></th>
+                      <th style={{ width: 90, minWidth: 90, textAlign: 'right' }}><span className="cds--table-header-label">{t('cap.diffColA')}</span></th>
+                      <th style={{ width: 90, minWidth: 90, textAlign: 'right' }}><span className="cds--table-header-label">{t('cap.diffColB')}</span></th>
+                      <th style={{ width: 70, minWidth: 70, textAlign: 'right' }}><span className="cds--table-header-label">{t('cap.diffDiff')}</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {diff.entries.slice(0, 50).map((e) => (
+                      <tr key={e.signature}>
+                        <td className="mono" style={{ wordBreak: 'break-all' }}>{e.signature}</td>
+                        <td style={{ textAlign: 'right' }}>{e.count_a}</td>
+                        <td style={{ textAlign: 'right' }}>{e.count_b}</td>
+                        <td style={{ textAlign: 'right' }}>{e.delta > 0 ? `+${e.delta}` : e.delta}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </TableFrame>
+            ) : null}
+          </div>
         ) : null}
       </Panel>
     </div>

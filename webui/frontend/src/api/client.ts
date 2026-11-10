@@ -160,6 +160,19 @@ export async function apiPostText<T>(
   return asContract(path, schema, await send('POST', path, { text }))
 }
 
+/** POST 原始字节（xlsx 点表导入，T95），响应仍是 JSON。 */
+export async function apiPostBytes<T>(
+  path: string,
+  schema: Schema<T>,
+  data: ArrayBuffer,
+): Promise<T> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/octet-stream' }
+  const token = getToken()
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  const init: RequestInit = { method: 'POST', headers, body: data }
+  return asContract(path, schema, await fetch(buildUrl(path), init))
+}
+
 /** 取文本响应（YAML / CSV）。 */
 export async function apiGetText(
   path: string,

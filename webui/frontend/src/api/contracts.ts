@@ -39,6 +39,7 @@ import {
 import type {
   AuthProbeResponse,
   CaptureActionResult,
+  CaptureDiffResponse,
   CaptureFileInfo,
   CaptureFrame,
   CaptureFramesResponse,
@@ -52,12 +53,20 @@ import type {
   DoctorResponse,
   DoctorReport,
   DoctorStep,
+  DesignBaselineResponse,
+  DesignDiffResponse,
+  TimelineAction,
+  TimelineState,
+  TimelineStep,
   FrameDecodeResponse,
   FrameSegment,
   FrameTranslation,
   HistoryDataRecord,
   HistoryFrameRecord,
   HistoryRowsResponse,
+  ScdPreviewResponse,
+  XlsxImportResponse,
+  XlsxPreviewResponse,
   HistoryStats,
   HistoryStatsResponse,
   LogRow,
@@ -74,7 +83,6 @@ import type {
   PointsResponse,
   RecentResponse,
   RedundancyStatus,
-  ScdPreviewResponse,
   SchemaResponse,
   SessionExport,
   SimulationStatusResponse,
@@ -191,6 +199,99 @@ export const scdPreviewSchema = obj({
   common_addr: num(),
   stats: dict(num()),
   warnings: arr(str()),
+})
+
+// ── Excel 点表 + 设计基准比对（T95，契约 §2.4 / §4.14）─────────────────
+
+export const xlsxPreviewSchema = obj({
+  ok: bool(),
+  stats: dict(num()),
+  errors: arr(str()),
+  rows: arr(obj({ ioa: num(), name: str() })),
+  total: num(),
+  error: optional(str()),
+})
+
+export const xlsxImportSchema = obj({
+  ok: bool(),
+  points: num(),
+  errors: arr(str()),
+  stats: dict(num()),
+  design: bool(),
+  error: optional(str()),
+})
+
+export const designBaselineSchema = obj({
+  ok: bool(),
+  has_design: bool(),
+  points: optional(num()),
+  error: optional(str()),
+})
+
+export const designMismatchSchema = obj({
+  ioa: num(),
+  design: obj({ type: str(), min_value: optional(num()), max_value: optional(num()) }),
+  actual: obj({ type: str(), min_obs: optional(num()), max_obs: optional(num()) }),
+  reason: str(),
+})
+
+// ── 桥注入时间线（T97，契约 §2.4a / §4.15）────────────────────────────
+
+export const timelineStepSchema = obj({
+  label: str(),
+  duration_s: num(),
+  condition: dict(unionOf(num(), str())),
+  expect: enumOf('none', 'loss', 'k-exceed', 't1', 'disconnect'),
+})
+
+export const timelineStepResultSchema = obj({
+  label: str(),
+  expect: optional(str()),
+  ok: optional(bool()),
+  skipped: optional(bool()),
+  condition: optional(str()),
+  detail: str(),
+  observed: optional(obj({
+    dropped: num(),
+    disconnects: num(),
+    clients: num(),
+    violations: arr(obj({ ts: num(), kind: str(), side: str(), detail: str() })),
+  })),
+  window_s: optional(num()),
+})
+
+export const timelineResultSchema = obj({
+  ok: bool(),
+  steps: arr(timelineStepResultSchema),
+  started_at: num(),
+  duration_s: num(),
+  stopped: optional(bool()),
+})
+
+export const timelineStateSchema = obj({
+  ok: bool(),
+  running: bool(),
+  steps: arr(timelineStepSchema),
+  last_result: nullable(timelineResultSchema),
+})
+
+export const timelineActionSchema = obj({
+  ok: bool(),
+  error: optional(str()),
+  running: optional(bool()),
+  steps: optional(num()),
+  stopping: optional(bool()),
+})
+
+export const designDiffSchema = obj({
+  ok: bool(),
+  has_design: bool(),
+  summary: obj({ missing: num(), extra: num(), mismatch: num() }),
+  missing: arr(obj({ ioa: num(), type: str(), name: str() })),
+  extra: arr(obj({ ioa: num(), type: str(), name: str() })),
+  mismatch: arr(designMismatchSchema),
+  truncated: bool(),
+  error: optional(str()),
 })
 
 export const frameSchema = obj({
@@ -517,6 +618,27 @@ export const captureActionResultSchema = obj({
   file: optional(nullable(str())),
 })
 
+/** 两段录制对比（T96，契约 §2.14）：规格化签名多重集 diff */
+export const captureDiffSchema = obj({
+  ok: bool(),
+  identical: bool(),
+  total_a: num(),
+  total_b: num(),
+  unique_a: num(),
+  unique_b: num(),
+  diff_total: num(),
+  entries: arr(obj({
+    signature: str(),
+    count_a: num(),
+    count_b: num(),
+    delta: num(),
+  })),
+  truncated: bool(),
+  file_a: optional(str()),
+  file_b: optional(str()),
+  error: optional(str()),
+})
+
 export const captureStatusSchema = obj({
   ok: bool(),
   recording: bool(),
@@ -678,6 +800,13 @@ export type ContractKeyChecks = [
   Assert<Equal<SchemaKeys<typeof pointSchema>, keyof Point>>,
   Assert<Equal<SchemaKeys<typeof pointsResponseSchema>, keyof PointsResponse>>,
   Assert<Equal<SchemaKeys<typeof scdPreviewSchema>, keyof ScdPreviewResponse>>,
+  Assert<Equal<SchemaKeys<typeof xlsxPreviewSchema>, keyof XlsxPreviewResponse>>,
+  Assert<Equal<SchemaKeys<typeof xlsxImportSchema>, keyof XlsxImportResponse>>,
+  Assert<Equal<SchemaKeys<typeof designBaselineSchema>, keyof DesignBaselineResponse>>,
+  Assert<Equal<SchemaKeys<typeof designDiffSchema>, keyof DesignDiffResponse>>,
+  Assert<Equal<SchemaKeys<typeof timelineStepSchema>, keyof TimelineStep>>,
+  Assert<Equal<SchemaKeys<typeof timelineStateSchema>, keyof TimelineState>>,
+  Assert<Equal<SchemaKeys<typeof timelineActionSchema>, keyof TimelineAction>>,
   Assert<Equal<SchemaKeys<typeof frameSchema>, keyof Frame>>,
   Assert<Equal<SchemaKeys<typeof engineEventSchema>, keyof EngineEvent>>,
   Assert<Equal<SchemaKeys<typeof recentResponseSchema>, keyof RecentResponse>>,
@@ -714,6 +843,7 @@ export type ContractKeyChecks = [
   Assert<Equal<SchemaKeys<typeof captureFrameSchema>, keyof CaptureFrame>>,
   Assert<Equal<SchemaKeys<typeof capturePlaybackSchema>, keyof CapturePlayback>>,
   Assert<Equal<SchemaKeys<typeof captureActionResultSchema>, keyof CaptureActionResult>>,
+  Assert<Equal<SchemaKeys<typeof captureDiffSchema>, keyof CaptureDiffResponse>>,
   Assert<Equal<SchemaKeys<typeof captureStatusSchema>, keyof CaptureStatus>>,
   Assert<Equal<SchemaKeys<typeof captureFramesResponseSchema>, keyof CaptureFramesResponse>>,
   Assert<Equal<SchemaKeys<typeof testScriptInfoSchema>, keyof TestScriptInfo>>,

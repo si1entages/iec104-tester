@@ -161,6 +161,11 @@
 | GET | `/api/points/yaml` | — | `text/yaml` 文本 |
 | POST | `/api/points/yaml` | 原始 YAML 文本（非 JSON） | `{ok, error?, ...}` |
 | POST | `/api/points/import` | 原始文本；`?format=csv\|yaml\|json\|auto`（默认 `auto` 按内容嗅探） | `{ok, error?, ...}` |
+| POST | `/api/points/xlsx/preview` | xlsx 原始字节（T95，无副作用解析） | `{ok, stats: Record<string,number>, errors: string[], rows: {ioa,name}[] (≤100), total}`；致命问题 `{ok:false, error}` |
+| POST | `/api/points/xlsx/import` | xlsx 原始字节（T95，整表替换 + 快照为设计基准） | `{ok, points, errors: string[], stats, design: true}` |
+| POST | `/api/points/design` | `{action: "set"\|"clear"}`（T95：set 把当前点表快照为设计基准） | `{ok, has_design, points?}` |
+| GET | `/api/points/design-diff` | — | `{ok, has_design, summary: {missing, extra, mismatch}, missing/extra: {ioa,type,name}[], mismatch: DesignMismatch[], truncated}`（T95，未建基准时 has_design=false 且清单为空） |
+| GET | `/api/points/xlsx` | — | xlsx 二进制（attachment） |
 | POST | `/api/scd/preview` | SCD/CID/ICD 原始 XML 文本（IEC 61850-6 SCL）；`?common_addr=` 可选显式指定公共地址（缺省取出现最多的 casdu）、`?station=` 可选覆盖站名 | `{ok, yaml, station_name, common_addr, stats: Record<string,number>, warnings: string[]}` |
 | GET | `/api/export/points.csv` | — | `text/csv` 文本 |
 | GET | `/api/export/report.html` | `?title=&notes=&limit=`（limit=帧证据最大行数 1~5000） | `text/html` 自包含报告（attachment；浏览器打印即 PDF） |
@@ -177,6 +182,10 @@
 | POST | `/api/bridge/start` | `{listen_host?, listen_port?, upstream_host?, upstream_port?}`（缺省回填 `0.0.0.0:2404` 与 status 的 host/port） | `{ok, error?}` |
 | POST | `/api/bridge/stop` | — | `{ok, error?}` |
 | POST | `/api/bridge/condition` | `NetworkCondition` 字段（loss_rate/delay_ms/duplicate_rate/corrupt_rate/reorder_rate/disconnect_rate/direction/active；空 body=清空条件） | `{ok, condition, active}`（仅 bridge 角色，未运行时业务拒绝） |
+| GET | `/api/bridge/timeline` | — | `{ok, running, steps: TimelineStep[], last_result: TimelineResult\|null}`（T97） |
+| POST | `/api/bridge/timeline` | `{steps: TimelineStep[]}`（T97 编排，覆盖旧序列；校验失败 `{ok:false, error}`） | `{ok, steps}` |
+| POST | `/api/bridge/timeline/run` | — | `{ok, running: true, steps}`（异步启动；运行中重复调用/桥未启动 → `{ok:false, error}`）（T97） |
+| POST | `/api/bridge/timeline/stop` | — | `{ok, stopping}`（T97） |
 
 > 桥角色（T74）的 `GET /api/status` 额外携带 `bridge_stats`（frames/bytes/
 > clients/resyncs/upstream_errors 计数，running 时存在）与 `bridge_cfg`
@@ -309,6 +318,12 @@
 | GET | `/api/auth` | 可带令牌（上述三种形态之一） | `{ok, required: bool, valid: bool}` |
 
 ### 2.14 报文录制/回放（E2）
+
+> T96 增补：`POST /api/capture/diff`——两段录制的规格化多重集对比。
+
+| 方法 | 路径 | 请求 | 响应 |
+|------|------|------|------|
+| POST | `/api/capture/diff` | `{a: string, b: string, max_entries?: number (1~500，默认 200)}`（a/b 为录制文件名） | `{ok, identical, total_a, total_b, unique_a, unique_b, diff_total, entries: {signature, count_a, count_b, delta}[], truncated, file_a, file_b}`；文件不存在/加载失败 `{ok:false, error}` |
 
 | 方法 | 路径 | 请求 | 响应 |
 |------|------|------|------|
@@ -567,6 +582,48 @@ TestRun = {
   reports: { name: string, format: "html"|"json"|"txt", size: number }[]
 }
 ```
+
+### 4.14 `DesignMismatch`（T95 设计 vs 实测比对）
+
+```ts
+DesignMismatch = {
+  ioa: number,
+  design: { type: string, min_value?: number, max_value?: number },
+  actual: { type: string, min_obs?: number, max_obs?: number },
+  reason: string,   // "类型不符（设计 YC → 实测 YX）" | "实测值域越界（设计 [..], 实测 [..]）"
+}
+```
+
+> 清单各段最多 200 条（`truncated=true` 表示有截断，`summary` 计数为全量）。
+> 「值域」取 `data_store` 的 YC **观测极值**（`min_val`/`max_val`，未观测不参与比对），
+> 与设计声明的 `min_value`/`max_value` 比较；类型不符按 IOA 归并（同 IOA 类型集不一致）。
+
+### 4.15 `TimelineStep` / `TimelineResult`（T97 桥注入时间线）
+
+```ts
+TimelineStep = {
+  label: string,                      // ≤80 字符
+  duration_s: number,                 // 0.5~600
+  condition: Partial<NetworkCondition>, // 仅数值字段 + direction；空对象 = 干净链路
+  expect: "none"|"loss"|"k-exceed"|"t1"|"disconnect",
+}
+TimelineResult = {
+  ok: boolean,                        // 全部非跳过步骤符合预期
+  steps: {
+    label: string, expect?: string, ok?: boolean, skipped?: boolean,
+    condition?: string,               // describe() 文本
+    detail: string,                   // 判定依据（人话）
+    observed?: { dropped: number, disconnects: number, clients: number,
+                 violations: {ts,kind,side,detail}[] },
+    window_s?: number,
+  }[],
+  started_at: number, duration_s: number, stopped?: boolean,
+}
+```
+
+> 判定口径（防误报，`webui/timeline.py::judge` 单测锁死）：证据按步骤时间窗归集——
+> 丢包/断链看 `injection_stats` 窗口增量，合规违规按 `ts > 游标` 归窗；
+> `none` 要求窗口内零丢帧/零断链/零违规。运行结束自动复位干净链路。
 
 ---
 

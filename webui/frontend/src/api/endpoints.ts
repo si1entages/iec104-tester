@@ -7,7 +7,7 @@
  * 真实响应，返回类型也由 schema 推断——新增端点漏挂 schema 会直接 `tsc` 报错。
  */
 
-import { apiGet, apiGetText, apiPost, apiPostText, apiUrl } from './client'
+import { apiGet, apiGetText, apiPost, apiPostBytes, apiPostText, apiUrl } from './client'
 import {
   authProbeResponseSchema,
   captureActionResultSchema,
@@ -16,9 +16,12 @@ import {
   captureFramesResponseSchema,
   captureLoadResponseSchema,
   capturePlaybackActionSchema,
+  captureDiffSchema,
   captureStatusSchema,
   alarmsHistorySchema,
   alarmsSnapshotSchema,
+  designBaselineSchema,
+  designDiffSchema,
   doctorResponseSchema,
   frameDecodeSchema,
   historyDataRecordSchema,
@@ -44,6 +47,10 @@ import {
   testRunActionSchema,
   testScriptsResponseSchema,
   testStatusResponseSchema,
+  timelineActionSchema,
+  timelineStateSchema,
+  xlsxImportSchema,
+  xlsxPreviewSchema,
 } from './contracts'
 import type {
   BatchPointsRequest,
@@ -77,6 +84,8 @@ import type {
 
 export const LOGS_EXPORT_URL = '/api/logs/export'
 export const POINTS_CSV_URL = '/api/export/points.csv'
+/** xlsx 点表导出（T95）：浏览器直下 <a href download> */
+export const POINTS_XLSX_URL = '/api/points/xlsx'
 export const DIAGNOSTICS_EXPORT_URL = '/api/diagnostics/export'
 export const HISTORY_EXPORT_URL = '/api/history/export'
 export const CAPTURE_FILES_URL = '/api/capture/files'
@@ -210,6 +219,25 @@ export const api = {
       looseOkSchema,
       text,
     ),
+  /** Excel 点表预览（T95，无副作用解析） */
+  pointsXlsxPreview: (data: ArrayBuffer) =>
+    apiPostBytes('/api/points/xlsx/preview', xlsxPreviewSchema, data),
+  /** Excel 点表导入（T95，整表替换 + 自动建立设计基准） */
+  pointsXlsxImport: (data: ArrayBuffer) =>
+    apiPostBytes('/api/points/xlsx/import', xlsxImportSchema, data),
+  /** 设计基准管理（T95）：set=把当前点表快照为基准，clear=清除 */
+  pointsDesign: (action: 'set' | 'clear') =>
+    apiPost('/api/points/design', designBaselineSchema, { action }),
+  /** 设计 vs 实测差异清单（T95，缺/多/值域） */
+  designDiff: () => apiGet('/api/points/design-diff', designDiffSchema),
+  /** 注入时间线状态（T97） */
+  timeline: () => apiGet('/api/bridge/timeline', timelineStateSchema),
+  /** 保存时间线编排（T97，覆盖旧序列） */
+  timelineSet: (steps: import('./types').TimelineStep[]) =>
+    apiPost('/api/bridge/timeline', timelineActionSchema, { steps }),
+  /** 运行时间线（T97，异步启动；结果轮询 timeline()） */
+  timelineRun: () => apiPost('/api/bridge/timeline/run', timelineActionSchema),
+  timelineStop: () => apiPost('/api/bridge/timeline/stop', timelineActionSchema),
   /** SCD/CID/ICD → 104 点表预览（无副作用；返回的 YAML 可直接投 importPoints('yaml')） */
   scdPreview: (text: string, commonAddr?: number) =>
     apiPostText(
@@ -280,6 +308,10 @@ export const api = {
       apiPost('/api/capture/load', captureLoadResponseSchema, { name }),
     frames: (offset = 0, limit = 200) =>
       apiGet('/api/capture/frames', captureFramesResponseSchema, { offset, limit }),
+    /** 两段录制对比（T96）：规格化签名多重集 diff */
+    diff: (a: string, b: string, maxEntries?: number) =>
+      apiPost('/api/capture/diff', captureDiffSchema,
+        maxEntries ? { a, b, max_entries: maxEntries } : { a, b }),
     play: (speed: number) =>
       apiPost('/api/capture/play', capturePlaybackActionSchema, { speed }),
     stopPlayback: () =>

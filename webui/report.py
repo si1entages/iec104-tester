@@ -87,6 +87,7 @@ def build_session_report_html(
     chart_images: list[str] | None = None,
     doctor: dict | None = None,
     alarms: list[dict] | None = None,
+    timeline: dict | None = None,
 ) -> str:
     """生成自包含 HTML 测试报告.
 
@@ -172,6 +173,30 @@ def build_session_report_html(
             f'<table class=meta>{d_rows}</table>'
             "<p class=foot>连接医生：TCP → STARTDT → 数据流分层自检；证据含对端 S 帧计数、"
             "N(R) 推进与保留 COT 计数（对端不确认 I 帧属对端实现缺陷）。</p>")
+    timeline_html = ""
+    if timeline:
+        t_steps = timeline.get("steps") or []
+        t_rows = "".join(
+            "<tr>"
+            f"<td>{_escape(str(s.get('label', '')))}</td>"
+            f"<td>{_escape(str(s.get('condition', '')))}</td>"
+            f"<td>{_escape(str(s.get('expect', '')))}</td>"
+            f"<td>{'符合预期' if s.get('ok') else ('跳过' if s.get('skipped') else '未达预期')}</td>"
+            f"<td>{_escape(str(s.get('detail', '')))}</td>"
+            "</tr>"
+            for s in t_steps)
+        passed = sum(1 for s in t_steps if s.get("ok"))
+        total = sum(1 for s in t_steps if not s.get("skipped"))
+        verdict = f"{total} 步全部符合预期" if passed == total else f"{passed}/{total} 步符合预期"
+        timeline_html = (
+            "<h2>11. 注入时间线（T97 自动判定）</h2>"
+            f"<p><b>{_escape(verdict)}</b>"
+            f"（窗口 {timeline.get('duration_s', 0)}s"
+            f"{'，手动停止' if timeline.get('stopped') else ''}）</p>"
+            '<table class=meta><tr><th>步骤</th><th>注入条件</th><th>预期</th>'
+            "<th>判定</th><th>证据</th></tr>" + t_rows + "</table>"
+            "<p class=foot>判定口径：证据按步骤时间窗归集（丢包/断链看增量，"
+            "违规按 ts 归窗）；「未达预期」即现场需人工复核的窗口。</p>")
     alarms_html = ""
     if alarms:
         a_rows = "".join(
@@ -278,5 +303,6 @@ def build_session_report_html(
 {chart_html}
 {doctor_html}
 {alarms_html}
+{timeline_html}
 <p class=foot>由 iec104-tester 自动生成；本文件自包含（无外部引用），浏览器「打印 → 另存为 PDF」即可归档交付。</p>
 </body></html>"""

@@ -12,6 +12,7 @@ import { pointKey } from '../../lib/pointValue'
 import { trendBuffer } from '../../lib/trendBuffer'
 import { useUiStore } from '../../store/uiStore'
 import { CarbonCommandPanel } from '../components/CarbonCommandPanel'
+import { CarbonDesignDiffCard } from '../components/CarbonDesignDiffCard'
 import { CarbonFrameViewer } from '../components/CarbonFrameViewer'
 import { CarbonPointCommandDialog } from '../components/CarbonPointCommandDialog'
 import { CarbonPointsTable } from '../components/CarbonPointsTable'
@@ -184,6 +185,8 @@ export function CarbonMasterPage() {
       </Panel>
 
       <CarbonCommandPanel point={selected} disabled={!status?.running} />
+
+      <CarbonDesignDiffCard />
 
       <Tabs selectedIndex={tab} onChange={({ selectedIndex }) => setTab(selectedIndex)}>
         <TabList aria-label={t('frameViewer.title')}>

@@ -600,6 +600,53 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
                     f'attachment; filename="iec104_{bridge.role}_points.csv"',
             })
 
+    # ── T95：Excel(xlsx) 点表 + 设计基准 vs 实测比对 ───────────────────
+
+    async def api_points_xlsx_get(request: web.Request) -> web.Response:
+        try:
+            data = bridge.export_points_xlsx()
+        except Exception as e:
+            return web.json_response({"ok": False, "error": str(e)})
+        return web.Response(
+            body=data, content_type="application/octet-stream",
+            headers={
+                "Content-Disposition":
+                    f'attachment; filename="iec104_{bridge.role}_points.xlsx"',
+            })
+
+    async def _read_xlsx_body(request: web.Request) -> bytes | None:
+        try:
+            data = await request.read()
+        except Exception:
+            return None
+        return data if data else None
+
+    async def api_points_xlsx_preview(request: web.Request) -> web.Response:
+        """解析 xlsx（无副作用）：返回类型计数/行级错误/前 100 行摘要."""
+        data = await _read_xlsx_body(request)
+        if data is None:
+            return web.json_response({"ok": False, "error": "invalid body"}, status=400)
+        return web.json_response(bridge.preview_points_xlsx(data))
+
+    async def api_points_xlsx_import(request: web.Request) -> web.Response:
+        """导入 xlsx（整表替换）并把导入结果快照为设计基准."""
+        data = await _read_xlsx_body(request)
+        if data is None:
+            return web.json_response({"ok": False, "error": "invalid body"}, status=400)
+        return web.json_response(bridge.import_points_xlsx(data))
+
+    async def api_points_design(request: web.Request) -> web.Response:
+        """设计基准管理：{action: "set"|"clear"}——set 把当前点表快照为基准."""
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        action = str(body.get("action") or "")
+        return web.json_response(bridge.set_design_baseline(action))
+
+    async def api_points_design_diff(request: web.Request) -> web.Response:
+        return web.json_response(bridge.design_points_diff())
+
     async def api_master_clock_offset(request: web.Request) -> web.Response:
         """时钟偏差测量（T80）：连发 N 次时钟同步，按子站确认时标计算偏差（ms）."""
         try:
@@ -664,6 +711,9 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
             condition = cond.describe() if cond is not None else ""
         comp = getattr(bridge, "compliance", None)
         comp_violations = comp.violation_list(50) if comp is not None else None
+        timeline = (getattr(bridge, "timeline", None).last_result
+                    if bridge.role == "bridge"
+                    and getattr(bridge, "timeline", None) is not None else None)
         html_text = build_session_report_html(
             bridge.role, bridge.status(),
             bridge.recent("frame", 5000), bridge.recent("event", 2000),
@@ -674,7 +724,8 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
             chart_images=chart_images,
             doctor=getattr(bridge, "last_doctor", None),
             alarms=(bridge.alarms.history_records(100)
-                    if getattr(bridge, "alarms", None) is not None else None))
+                    if getattr(bridge, "alarms", None) is not None else None),
+            timeline=timeline)
         fname = time.strftime("iec104_report_%Y%m%d_%H%M%S.html")
         return web.Response(
             text=html_text, content_type="text/html",
@@ -757,6 +808,31 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
             return web.json_response(
                 {"ok": False, "error": "仅 bridge 角色支持该操作"})
         return web.json_response(await bridge.stop_bridge())
+
+    # ── T97：桥注入时间线 + 自动判定（仅 bridge 角色业务可用） ─────────
+
+    async def api_bridge_timeline_get(request: web.Request) -> web.Response:
+        return web.json_response(bridge.timeline_get())
+
+    async def api_bridge_timeline_set(request: web.Request) -> web.Response:
+        if bridge.role != "bridge":
+            return web.json_response({"ok": False, "error": "仅 bridge 角色支持该操作"})
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        steps = body.get("steps") if isinstance(body, dict) else None
+        return web.json_response(bridge.timeline_configure(steps))
+
+    async def api_bridge_timeline_run(request: web.Request) -> web.Response:
+        if bridge.role != "bridge":
+            return web.json_response({"ok": False, "error": "仅 bridge 角色支持该操作"})
+        return web.json_response(await bridge.timeline_run())
+
+    async def api_bridge_timeline_stop(request: web.Request) -> web.Response:
+        if bridge.role != "bridge":
+            return web.json_response({"ok": False, "error": "仅 bridge 角色支持该操作"})
+        return web.json_response(bridge.timeline_stop())
 
     async def api_bridge_condition_set(request: web.Request) -> web.Response:
         """设置桥网络条件（T85，仅 bridge 角色）：body 为 NetworkCondition 字段."""
@@ -1307,6 +1383,24 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
         result = bridge.captures.frames(offset, limit)
         return web.json_response(result, status=200 if result.get("ok") else 400)
 
+    async def api_capture_diff(request: web.Request) -> web.Response:
+        """两段录制对比（T96）：body {a, b, max_entries?}——签名级多重集 diff."""
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        name_a = body.get("a") if isinstance(body, dict) else None
+        name_b = body.get("b") if isinstance(body, dict) else None
+        if not isinstance(name_a, str) or not isinstance(name_b, str) or not name_a or not name_b:
+            return web.json_response({"ok": False, "error": "invalid a/b"}, status=400)
+        try:
+            max_entries = int(body.get("max_entries") or 200)
+        except (TypeError, ValueError):
+            return web.json_response({"ok": False, "error": "invalid max_entries"}, status=400)
+        result = bridge.captures.diff_files(
+            name_a, name_b, max_entries=min(500, max(1, max_entries)))
+        return web.json_response(result, status=200 if result.get("ok") else 400)
+
     async def api_capture_play(request: web.Request) -> web.Response:
         body = {}
         if request.can_read_body:
@@ -1440,6 +1534,10 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
     app.router.add_post("/api/bridge/start", api_bridge_start)
     app.router.add_post("/api/bridge/stop", api_bridge_stop)
     app.router.add_post("/api/bridge/condition", api_bridge_condition_set)
+    app.router.add_get("/api/bridge/timeline", api_bridge_timeline_get)
+    app.router.add_post("/api/bridge/timeline", api_bridge_timeline_set)
+    app.router.add_post("/api/bridge/timeline/run", api_bridge_timeline_run)
+    app.router.add_post("/api/bridge/timeline/stop", api_bridge_timeline_stop)
     if bridge.role != "bridge":
         app.router.add_post("/api/master/start", api_master_start)
         app.router.add_post("/api/master/stop", api_master_stop)
@@ -1467,6 +1565,10 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
         app.router.add_post("/api/alarms/config", api_alarms_config)
         app.router.add_post("/api/points/yaml", api_points_yaml_put)
         app.router.add_post("/api/points/import", api_points_import)
+        app.router.add_post("/api/points/xlsx/preview", api_points_xlsx_preview)
+        app.router.add_post("/api/points/xlsx/import", api_points_xlsx_import)
+        app.router.add_post("/api/points/design", api_points_design)
+        app.router.add_get("/api/points/design-diff", api_points_design_diff)
         app.router.add_post("/api/points/batch", api_points_batch)
         app.router.add_post("/api/slave/start", api_slave_start)
         app.router.add_post("/api/slave/stop", api_slave_stop)
@@ -1482,6 +1584,7 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
         app.router.add_post("/api/multi/start", api_multi_start)
         app.router.add_post("/api/multi/stop", api_multi_stop)
     app.router.add_get("/api/points/yaml", api_points_yaml_get)
+    app.router.add_get("/api/points/xlsx", api_points_xlsx_get)
     app.router.add_post("/api/scd/preview", api_scd_preview)
     app.router.add_get("/api/export/points.csv", api_export_csv)
     app.router.add_get("/api/export/session.json", api_export_session)
@@ -1509,6 +1612,7 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
     app.router.add_post("/api/capture/export", api_capture_export)
     app.router.add_post("/api/capture/load", api_capture_load)
     app.router.add_get("/api/capture/frames", api_capture_frames)
+    app.router.add_post("/api/capture/diff", api_capture_diff)
     app.router.add_post("/api/capture/play", api_capture_play)
     app.router.add_post("/api/capture/playback/stop", api_capture_playback_stop)
     app.router.add_post("/api/capture/playback/pause", api_capture_playback_pause)

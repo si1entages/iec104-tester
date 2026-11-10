@@ -17,10 +17,15 @@ from core.data.point_table import (
 
 
 class PointService:
-    """PointTable 的应用层封装；变更后调用 sync_to_engine."""
+    """PointTable 的应用层封装；变更后调用 sync_to_engine.
+
+    ``design`` 为设计基准快照（T95）：导入 xlsx 时自动建立，也可手动
+    set/clear；``design_diff`` 用它与实测（含自动学习的点 + 观测值域）比对。
+    """
 
     def __init__(self, table: PointTable | None = None):
         self.table = table or PointTable()
+        self.design: PointTable | None = None
         self._count = 0
         self.refresh_count()
 
@@ -285,3 +290,66 @@ class PointService:
         if engine is not None:
             self.rebuild_store(engine)
         return {"ok": True, "points": self._count}
+
+    # ── T95：Excel(xlsx) 导入导出 + 设计基准 vs 实测比对 ────────────────
+
+    def export_xlsx_bytes(self) -> bytes:
+        from webui.points_xlsx import export_xlsx_bytes
+
+        return export_xlsx_bytes(self.table)
+
+    def preview_xlsx_bytes(self, data: bytes) -> dict:
+        """解析 xlsx（无副作用）：返回各类型计数、行级错误与前 100 行摘要."""
+        from webui.points_xlsx import parse_xlsx_table
+
+        try:
+            new_table, errors, stats = parse_xlsx_table(data, self.table)
+        except ValueError as e:
+            return {"ok": False, "error": str(e), "stats": {}, "errors": [],
+                    "rows": [], "total": 0}
+        rows = [{"ioa": p.ioa, "name": p.name}
+                for p in (new_table.get_all_yx() + new_table.get_all_yc()
+                          + new_table.get_all_yk() + new_table.get_all_ym()
+                          + new_table.get_all_step())[:100]]
+        total = sum(stats.values())
+        return {"ok": True, "stats": {k: v for k, v in stats.items() if v},
+                "errors": errors, "rows": rows, "total": total}
+
+    def import_xlsx_bytes(self, data: bytes, engine: Any = None) -> dict:
+        """导入 xlsx（整表替换）并把导入结果快照为设计基准."""
+        from webui.points_xlsx import parse_xlsx_table
+
+        try:
+            new_table, errors, stats = parse_xlsx_table(data, self.table)
+        except ValueError as e:
+            return {"ok": False, "error": str(e), "points": 0, "errors": [],
+                    "stats": {}, "design": False}
+        self.table = new_table
+        self.design = new_table.clone()
+        self.refresh_count()
+        if engine is not None:
+            self.rebuild_store(engine)
+        return {"ok": True, "points": self._count, "errors": errors,
+                "stats": {k: v for k, v in stats.items() if v}, "design": True}
+
+    def set_design(self, action: str) -> dict:
+        """设计基准管理：set=把当前点表快照为基准，clear=清除."""
+        if action == "set":
+            self.design = self.table.clone()
+            return {"ok": True, "has_design": True, "points": self._count}
+        if action == "clear":
+            self.design = None
+            return {"ok": True, "has_design": False, "points": self._count}
+        return {"ok": False, "error": "action 须为 set/clear", "has_design": self.design is not None}
+
+    def design_diff(self, engine: Any = None) -> dict:
+        """设计基准 vs 实测差异清单（缺/多/值域）；未建立基准返回 has_design=False."""
+        from webui.points_xlsx import design_diff
+
+        if self.design is None:
+            return {"ok": True, "has_design": False,
+                    "summary": {"missing": 0, "extra": 0, "mismatch": 0},
+                    "missing": [], "extra": [], "mismatch": [], "truncated": False}
+        out = design_diff(self.design, self.table, engine)
+        out["has_design"] = True
+        return out

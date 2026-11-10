@@ -39,7 +39,7 @@ jobs:
           cache-dependency-path: requirements.txt
       - name: Install dependencies
         run: |
-          pip install PyYAML aiohttp
+          pip install PyYAML aiohttp openpyxl
           pip install pytest pytest-asyncio pytest-cov hypothesis psutil
       - name: Run tests
         # --basetemp：把 pytest 临时根固定为仓库内目录（每次会话开始即被 pytest
@@ -69,7 +69,7 @@ jobs:
           python-version: "3.13"
       - name: Install dependencies
         run: |
-          pip install PyYAML aiohttp
+          pip install PyYAML aiohttp openpyxl
           pip install pytest pytest-asyncio
       - name: Mutation smoke
         run: python tools/mutation_smoke.py
