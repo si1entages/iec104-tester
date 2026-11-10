@@ -112,10 +112,11 @@ export function CarbonStatusPage() {
         <Stat label={t('status.dropped')} value={String(status?.dropped ?? 0)} unit={t('status.unit.frames')} />
       </div>
 
-      {/* T98：告警评估与网络模拟依赖引擎，bridge 角色不渲染（端点未注册，避免轮询 404） */}
-      {status?.role !== 'bridge' ? <CarbonAlarmCard /> : null}
+      {/* T98：告警评估与网络模拟依赖引擎，bridge 角色不渲染（端点未注册）；
+          角色未知（status 未加载）时也不渲染——否则首帧闪现会轮询 404 */}
+      {status && status.role !== 'bridge' ? <CarbonAlarmCard /> : null}
 
-      {status?.role !== 'bridge' ? <CarbonNetworkSimCard /> : null}
+      {status && status.role !== 'bridge' ? <CarbonNetworkSimCard /> : null}
 
       <Panel title={t('status.runtime')}>
         <KvList items={runtime.map(({ term, value }) => ({ term: t(term), value }))} />
