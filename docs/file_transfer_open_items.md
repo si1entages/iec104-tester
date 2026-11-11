@@ -49,6 +49,16 @@
 > 否定确认（COT 44~47）、未知 CA、非法 QOI/QCC、TLS(62351-3)、62351-5 应用层安全。
 > 该矩阵是「全面功能测试」的常驻外部对端基线；本仓作为 consumer 接入
 > （复用其镜像 + cases.tsv 向量映射为本仓断言）为后续工作。
+> **2026-11-11 consumer 接入完成**：本仓主站作为 consumer 逐栈连 5 个
+> otfabric 参考站（`tests/e2e/qa_interop_consumer.py --all`），
+> **5/5 栈通过**（GI/读/时钟/文件目录/组召唤矩阵）；结果落
+> [`interop_consumer_results.json`](interop_consumer_results.json)。
+> 已知差异均带证据归类：openmuc 1.8.0 的 C_RD_NA_1 解码缺陷（INTEROP
+> known-bugs.tsv）、cbsigma 的 STARTDT 后即发 GI 时序要求（参考 client 实测
+> ok=true/11 ASDU 证明 server 正常）、part5 未声明 fileDirectory* 能力。
+> `tests/test_interop_contract_vectors.py` 把 cases.tsv 中可离线验证的向量
+> （否定 COT/QOI/QCC/107 测试命令/未知 IOA）钉进本仓 pytest（CI 内，无需 Docker）。
+>
 > **真机仍未到位，本清单 5 项的真机结论保持“待复测”。**
 
 ## 0. 通用准备

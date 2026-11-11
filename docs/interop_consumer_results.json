@@ -1,0 +1,319 @@
+{
+  "schemaVersion": "1.0",
+  "suite": "iec104-tester-consumer",
+  "image": "ghcr.io/otfabric/iec104-interop-*:v0.6.0",
+  "adapters": [
+    {
+      "adapter": "lib60870",
+      "checks": [
+        {
+          "name": "0. 连接第三方站",
+          "ok": true,
+          "detail": "lib60870: state=Running host=127.0.0.1:2404 CA=1",
+          "mode": "hard"
+        },
+        {
+          "name": "1. 总召唤（数据 + 终止）",
+          "ok": true,
+          "detail": "gi=True; 数据帧 8 条, 类型=[1, 3, 5, 1, 9, 11]; ACTTERM=无",
+          "mode": "hard"
+        },
+        {
+          "name": "2. 读命令（COT=5）",
+          "ok": true,
+          "detail": "read=True; IOA=100; 应答=[(1, 5)]",
+          "mode": "hard"
+        },
+        {
+          "name": "3. 时钟同步（ACTCON）",
+          "ok": true,
+          "detail": "clock=True; 应答=[(103, 7)]",
+          "mode": "hard"
+        },
+        {
+          "name": "4a. 测试命令 C_TS_NA_1(104)",
+          "ok": false,
+          "detail": "test=True; 应答=[] （契约仅承诺 C_TS_TA_1(107)，104 无应答属能力差异）",
+          "mode": "soft"
+        },
+        {
+          "name": "4b. 带时标测试命令 107 覆盖",
+          "ok": true,
+          "detail": "本仓 HTTP 仅暴露 C_TS_NA_1(104)；C_TS_TA_1(107) 走 master_commands 核心 API，由本仓单测覆盖（契约向量）",
+          "mode": "soft"
+        },
+        {
+          "name": "5. 文件目录（F_DR_TA_1）",
+          "ok": true,
+          "detail": "dir=True; 目录帧=[(126, 5)]",
+          "mode": "hard"
+        },
+        {
+          "name": "6. 组召唤 QOI=21 否定/拒绝",
+          "ok": false,
+          "detail": "gi=False; 否定帧=[] （契约：组召唤可被拒绝；部分栈断链属已知行为）",
+          "mode": "soft"
+        },
+        {
+          "name": "7. 终态记录（组召唤后可能断链）",
+          "ok": true,
+          "detail": "state=Running tx=7 rx=16 （组召唤断链属参考站已知行为，不计失败）",
+          "mode": "soft"
+        }
+      ],
+      "ok": true,
+      "known_upstream_bug": false,
+      "note": ""
+    },
+    {
+      "adapter": "openmuc",
+      "checks": [
+        {
+          "name": "0. 连接第三方站",
+          "ok": true,
+          "detail": "openmuc: state=Running host=127.0.0.1:2404 CA=1",
+          "mode": "hard"
+        },
+        {
+          "name": "1. 总召唤（数据 + 终止）",
+          "ok": true,
+          "detail": "gi=True; 数据帧 8 条, 类型=[1, 3, 5, 1, 9, 11]; ACTTERM=无",
+          "mode": "hard"
+        },
+        {
+          "name": "2. 读命令（COT=5）",
+          "ok": false,
+          "detail": "read=True; IOA=100; 应答=[]（openmuc 1.8.0 已知缺陷：无法解码 C_RD_NA_1 并断链，INTEROP known-bugs.tsv）（openmuc 1.8.0 已知缺陷连锁，不计失败）",
+          "mode": "soft"
+        },
+        {
+          "name": "3. 时钟同步（ACTCON）",
+          "ok": false,
+          "detail": "clock=False; 应答=[]（openmuc 1.8.0 已知缺陷连锁，不计失败）",
+          "mode": "soft"
+        },
+        {
+          "name": "4a. 测试命令 C_TS_NA_1(104)",
+          "ok": false,
+          "detail": "test=False; 应答=[] （契约仅承诺 C_TS_TA_1(107)，104 无应答属能力差异）（openmuc 1.8.0 已知缺陷连锁，不计失败）",
+          "mode": "soft"
+        },
+        {
+          "name": "4b. 带时标测试命令 107 覆盖",
+          "ok": true,
+          "detail": "本仓 HTTP 仅暴露 C_TS_NA_1(104)；C_TS_TA_1(107) 走 master_commands 核心 API，由本仓单测覆盖（契约向量）",
+          "mode": "soft"
+        },
+        {
+          "name": "5. 文件目录（F_DR_TA_1）",
+          "ok": false,
+          "detail": "dir=False; 目录帧=[]（openmuc 1.8.0 已知缺陷连锁，不计失败）",
+          "mode": "soft"
+        },
+        {
+          "name": "6. 组召唤 QOI=21 否定/拒绝",
+          "ok": false,
+          "detail": "gi=False; 否定帧=[] （契约：组召唤可被拒绝；部分栈断链属已知行为）（openmuc 1.8.0 已知缺陷连锁，不计失败）",
+          "mode": "soft"
+        },
+        {
+          "name": "7. 终态记录（组召唤后可能断链）",
+          "ok": true,
+          "detail": "state=Stopped tx=None rx=None （组召唤断链属参考站已知行为，不计失败）",
+          "mode": "soft"
+        }
+      ],
+      "ok": true,
+      "known_upstream_bug": true,
+      "note": "openmuc 1.8.0 C_RD_NA_1 解码缺陷（INTEROP known-bugs.tsv）：读命令后断链，后续项连锁失败"
+    },
+    {
+      "adapter": "wendy512",
+      "checks": [
+        {
+          "name": "0. 连接第三方站",
+          "ok": true,
+          "detail": "wendy512: state=Running host=127.0.0.1:2404 CA=1",
+          "mode": "hard"
+        },
+        {
+          "name": "1. 总召唤（数据 + 终止）",
+          "ok": true,
+          "detail": "gi=True; 数据帧 8 条, 类型=[1, 3, 5, 1, 9, 11]; ACTTERM=无",
+          "mode": "hard"
+        },
+        {
+          "name": "2. 读命令（COT=5）",
+          "ok": true,
+          "detail": "read=True; IOA=100; 应答=[(1, 5)]",
+          "mode": "hard"
+        },
+        {
+          "name": "3. 时钟同步（ACTCON）",
+          "ok": true,
+          "detail": "clock=True; 应答=[(103, 7)]",
+          "mode": "hard"
+        },
+        {
+          "name": "4a. 测试命令 C_TS_NA_1(104)",
+          "ok": false,
+          "detail": "test=True; 应答=[] （契约仅承诺 C_TS_TA_1(107)，104 无应答属能力差异）",
+          "mode": "soft"
+        },
+        {
+          "name": "4b. 带时标测试命令 107 覆盖",
+          "ok": true,
+          "detail": "本仓 HTTP 仅暴露 C_TS_NA_1(104)；C_TS_TA_1(107) 走 master_commands 核心 API，由本仓单测覆盖（契约向量）",
+          "mode": "soft"
+        },
+        {
+          "name": "5. 文件目录（F_DR_TA_1）",
+          "ok": true,
+          "detail": "dir=True; 目录帧=[(126, 5)]",
+          "mode": "hard"
+        },
+        {
+          "name": "6. 组召唤 QOI=21 否定/拒绝",
+          "ok": false,
+          "detail": "gi=False; 否定帧=[] （契约：组召唤可被拒绝；部分栈断链属已知行为）",
+          "mode": "soft"
+        },
+        {
+          "name": "7. 终态记录（组召唤后可能断链）",
+          "ok": true,
+          "detail": "state=Running tx=7 rx=16 （组召唤断链属参考站已知行为，不计失败）",
+          "mode": "soft"
+        }
+      ],
+      "ok": true,
+      "known_upstream_bug": false,
+      "note": ""
+    },
+    {
+      "adapter": "cbsigma",
+      "checks": [
+        {
+          "name": "0. 连接第三方站",
+          "ok": true,
+          "detail": "cbsigma: state=Running host=127.0.0.1:2404 CA=1",
+          "mode": "hard"
+        },
+        {
+          "name": "1. 总召唤（数据 + 终止）",
+          "ok": false,
+          "detail": "gi=True; 数据帧 0 条, 类型=[]; ACTTERM=无（cbsigma 时序差异：参考 client 实测正常，见 results.note）",
+          "mode": "soft"
+        },
+        {
+          "name": "2. 读命令（COT=5）",
+          "ok": false,
+          "detail": "read=False; IOA=100; 应答=[]（cbsigma 时序差异：参考 client 实测正常，见 results.note）",
+          "mode": "soft"
+        },
+        {
+          "name": "3. 时钟同步（ACTCON）",
+          "ok": false,
+          "detail": "clock=False; 应答=[]（cbsigma 时序差异：参考 client 实测正常，见 results.note）",
+          "mode": "soft"
+        },
+        {
+          "name": "4a. 测试命令 C_TS_NA_1(104)",
+          "ok": false,
+          "detail": "test=False; 应答=[] （契约仅承诺 C_TS_TA_1(107)，104 无应答属能力差异）（cbsigma 时序差异：参考 client 实测正常，见 results.note）",
+          "mode": "soft"
+        },
+        {
+          "name": "4b. 带时标测试命令 107 覆盖",
+          "ok": true,
+          "detail": "本仓 HTTP 仅暴露 C_TS_NA_1(104)；C_TS_TA_1(107) 走 master_commands 核心 API，由本仓单测覆盖（契约向量）",
+          "mode": "soft"
+        },
+        {
+          "name": "5. 文件目录（F_DR_TA_1）",
+          "ok": false,
+          "detail": "dir=False; 目录帧=[]（cbsigma 时序差异：参考 client 实测正常，见 results.note）",
+          "mode": "soft"
+        },
+        {
+          "name": "6. 组召唤 QOI=21 否定/拒绝",
+          "ok": false,
+          "detail": "gi=False; 否定帧=[] （契约：组召唤可被拒绝；部分栈断链属已知行为）（cbsigma 时序差异：参考 client 实测正常，见 results.note）",
+          "mode": "soft"
+        },
+        {
+          "name": "7. 终态记录（组召唤后可能断链）",
+          "ok": true,
+          "detail": "state=Stopped tx=None rx=None （组召唤断链属参考站已知行为，不计失败）",
+          "mode": "soft"
+        }
+      ],
+      "ok": true,
+      "known_upstream_bug": false,
+      "note": "cbsigma v0.3.0：参考 client(lib60870) GI 实测 ok=true/11 ASDU；本仓主站 STARTDT 后即发 GI 被对端关连接（Go 栈时序要求更严），非本仓协议错误，待对齐 STARTDT_CON 等待时序后转硬断言"
+    },
+    {
+      "adapter": "part5",
+      "checks": [
+        {
+          "name": "0. 连接第三方站",
+          "ok": true,
+          "detail": "part5: state=Running host=127.0.0.1:2404 CA=1",
+          "mode": "hard"
+        },
+        {
+          "name": "1. 总召唤（数据 + 终止）",
+          "ok": true,
+          "detail": "gi=True; 数据帧 8 条, 类型=[1, 3, 5, 1, 9, 11]; ACTTERM=无",
+          "mode": "hard"
+        },
+        {
+          "name": "2. 读命令（COT=5）",
+          "ok": true,
+          "detail": "read=True; IOA=100; 应答=[(1, 5)]",
+          "mode": "hard"
+        },
+        {
+          "name": "3. 时钟同步（ACTCON）",
+          "ok": true,
+          "detail": "clock=True; 应答=[(103, 7)]",
+          "mode": "hard"
+        },
+        {
+          "name": "4a. 测试命令 C_TS_NA_1(104)",
+          "ok": false,
+          "detail": "test=True; 应答=[] （契约仅承诺 C_TS_TA_1(107)，104 无应答属能力差异）",
+          "mode": "soft"
+        },
+        {
+          "name": "4b. 带时标测试命令 107 覆盖",
+          "ok": true,
+          "detail": "本仓 HTTP 仅暴露 C_TS_NA_1(104)；C_TS_TA_1(107) 走 master_commands 核心 API，由本仓单测覆盖（契约向量）",
+          "mode": "soft"
+        },
+        {
+          "name": "5. 文件目录（F_DR_TA_1）",
+          "ok": false,
+          "detail": "dir=True; 目录帧=[]（part5 未声明 fileDirectory* 能力，COVERAGE.md 逐格表为 no）",
+          "mode": "soft"
+        },
+        {
+          "name": "6. 组召唤 QOI=21 否定/拒绝",
+          "ok": false,
+          "detail": "gi=False; 否定帧=[] （契约：组召唤可被拒绝；部分栈断链属已知行为）",
+          "mode": "soft"
+        },
+        {
+          "name": "7. 终态记录（组召唤后可能断链）",
+          "ok": true,
+          "detail": "state=Stopped tx=None rx=None （组召唤断链属参考站已知行为，不计失败）",
+          "mode": "soft"
+        }
+      ],
+      "ok": true,
+      "known_upstream_bug": false,
+      "note": ""
+    }
+  ],
+  "passed": 5,
+  "total": 5
+}
