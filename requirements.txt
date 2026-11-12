@@ -1,6 +1,9 @@
 # 运行时依赖
+# 最低下界只用于「跨版本兼容矩阵」；精确可复现版本见 requirements.lock，
+# CI 的 dependency-audit job 以锁文件为准扫已知漏洞。
+# aiohttp>=3.14.4：3.14.3 及更早有 8 个已知 CVE（GHSA-5wr8 等，P1-2 发现）。
 PyYAML>=6.0
-aiohttp>=3.9
+aiohttp>=3.14.4
 openpyxl>=3.1
 
 # 开发/测试（可选）

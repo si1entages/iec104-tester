@@ -46,5 +46,11 @@
 
 ## Dependency security
 
-Dependabot 每周检查 pip / npm / GitHub Actions 依赖；发布包由
-`.github/workflows/release.yml` 在 Windows/Linux 构建并生成 SHA256SUMS。
+- 运行时依赖精确锁见 `requirements.lock`；`requirements.txt` / `pyproject.toml`
+  只给最低下界用于跨 Python 版本兼容矩阵。
+- CI 的 `dependency-audit` job 每次 push 跑 `pip-audit -r requirements.lock`
+  （任何已知漏洞即失败）与 `npm audit --audit-level=high`（报告式，不因镜像
+  未实现 advisory API 而阻断）。2026-11-12 首次接入时发现 `aiohttp 3.14.3`
+  有 8 个已知 CVE，已升级到 `3.14.4` 并复验 0 漏洞。
+- Dependabot 每周检查 pip / npm / GitHub Actions 依赖；发布包由
+  `.github/workflows/release.yml` 在 Windows/Linux 构建并生成 SHA256SUMS。

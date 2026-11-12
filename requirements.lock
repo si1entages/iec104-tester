@@ -1,0 +1,14 @@
+# 运行时依赖精确锁（P1-2 依赖可复现）。
+#
+# 由本机已验证通过的版本固化（2026-11-12）；CI 的 dependency-audit job 用
+# `pip-audit -r requirements.lock` 扫已知漏洞，Dependabot 每周提升级 PR。
+# 升级流程：改本文件 → 本地跑全量门禁 → 提交；不要回退到无下界的裸依赖。
+#
+# 生成基线：
+#   PyYAML 6.0.3 / aiohttp 3.14.4 / openpyxl 3.1.5
+#   （Python 3.11+；CI 3.11/3.13/3.14 矩阵实测通过）
+#   注：3.14.3 有 8 个已知 CVE（GHSA-5wr8 等），修复版本 3.14.4，
+#   由 P1-2 的 pip-audit 门禁发现并升级。
+PyYAML==6.0.3
+aiohttp==3.14.4
+openpyxl==3.1.5

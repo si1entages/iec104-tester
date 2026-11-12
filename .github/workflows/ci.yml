@@ -23,6 +23,35 @@ jobs:
       - name: Ruff check
         run: ruff check .
 
+  # P1-2：依赖已知漏洞门禁。锁文件是唯一可复现输入；前端用 npm audit。
+  # 只报「高危及以上」，避免传递依赖的中低危噪声让 CI 长期红；
+  # 每周 Dependabot PR 负责升级，本 job 负责拦住带漏洞的合入。
+  dependency-audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Audit Python runtime deps (pin set)
+        # pip-audit 无 --fail-on 参数：发现任何已知漏洞即非零退出（当前锁文件 0）。
+        # 2026-11-12 实测 aiohttp 3.14.3 有 8 个 CVE，锁已升到 3.14.4。
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          pip-audit -r requirements.lock --vulnerability-service pypi
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: webui/frontend/package-lock.json
+      - name: Audit frontend deps
+        # 前端 audit 走官方 registry；部分镜像不实现 advisory API（本机
+        # npmmirror 即返回 NOT_IMPLEMENTED），故此处只做可见性报告，
+        # 不因镜像/网络问题阻断 CI。Python 侧的 pip-audit 才是硬门禁。
+        working-directory: webui/frontend
+        continue-on-error: true
+        run: npm audit --audit-level=high --registry=https://registry.npmjs.org
+
   test:
     runs-on: ubuntu-24.04
     strategy:
@@ -36,8 +65,10 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: requirements.lock
       - name: Install dependencies
+        # 矩阵验证的是「跨 Python 版本兼容性」，故运行时仍用宽松下界；
+        # 精确锁由 dependency-audit job 与 requirements.lock 单独看护。
         run: |
           pip install PyYAML aiohttp openpyxl
           pip install pytest pytest-asyncio pytest-cov hypothesis psutil
