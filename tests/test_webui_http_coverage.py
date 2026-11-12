@@ -400,3 +400,40 @@ async def test_websocket_snapshot_and_refresh(master_client):
         second = await ws.receive_json()
         assert second["kind"] == "snapshot"
         assert "points" in second["data"]
+
+
+# ── P1-5 API 错误可诊断性 ──────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_api_error_has_machine_readable_code_field_request_id():
+    """4xx 带 code/field/request_id；ok/error 两键保持兼容（okSchema 忽略未知键）."""
+    from webui.bridge import EngineBridge
+    from webui.server import create_app
+
+    bridge = EngineBridge(role="master")
+    async with TestClient(TestServer(create_app(bridge))) as client:
+        r = await client.get("/api/frames/decode", params={"hex": ""})
+        assert r.status == 400
+        body = await r.json()
+        assert body["ok"] is False
+        assert body["error"] == "missing hex"          # 旧消费方不受影响
+        assert body["code"] == "missing_field"
+        assert body["field"] == "hex"
+        assert len(body["request_id"]) == 12
+
+        r = await client.get("/api/frames/decode", params={"hex": "00" * 2100})
+        assert r.status == 400
+        assert (await r.json())["code"] == "value_too_long"
+
+        r = await client.post("/api/master/start", json={"host": 123})
+        assert r.status == 400
+        body = await r.json()
+        assert body["field"] == "host"
+        assert body["code"] == "invalid_field"
+
+        # 每次 request_id 不同（可关联日志）
+        ids = set()
+        for _ in range(3):
+            r = await client.get("/api/frames/decode", params={"hex": ""})
+            ids.add((await r.json())["request_id"])
+        assert len(ids) == 3

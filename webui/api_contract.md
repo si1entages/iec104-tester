@@ -75,6 +75,13 @@
 约定：未知字段忽略（后端纯新增不破坏前端）；业务失败统一 `{ok:false, error:string}`；
 新增/修改响应字段时必须同步 `contracts.ts` 与 `types.ts`，否则编译或 CI 失败。
 
+> **P1-5 4xx 可诊断性**：HTTP 4xx 错误响应保留 `ok` / `error` 两键，并**纯新增**
+> `code`（稳定机器可读码，如 `invalid_field` / `missing_field` / `invalid_json`）、
+> `field`（出错的请求字段名，有则填）、`request_id`（12 位十六进制，用于把浏览器
+> 报错与服务端日志关联）。前端 `okSchema` 用 `obj`（忽略未知字段），零回归。
+> 目前为渐进式接入（先覆盖 `/api/frames/decode` 与 `/api/master/start` 的参数错误），
+> 历史端点仍可能只返回短 `error` 串。
+
 ### 2.1 状态与点表
 
 | 方法 | 路径 | 请求 | 响应 |

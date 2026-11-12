@@ -5,6 +5,7 @@
   "coverage_gate": 91,
   "frontend_tests": 179,
   "e2e_tests": 63,
+  "ci_jobs": 9,
   "i18n_hardcoded": 0,
   "ruff": "clean",
   "reproduce": "python -m pytest tests/ -q --cov=core --cov=webui --cov-branch --cov-report=term-missing --cov-fail-under=91",

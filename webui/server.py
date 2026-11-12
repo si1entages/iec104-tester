@@ -102,6 +102,27 @@ async def security_headers(request: web.Request, handler) -> web.Response:
     return resp
 
 
+def api_error(message: str, status: int = 400, *, code: str = "invalid_request",
+              field: str | None = None) -> web.Response:
+    """统一 4xx 错误响应（P1-5 可诊断性）.
+
+    保留 ``ok`` / ``error`` 两个既有键（前端 okSchema 忽略未知字段，
+    旧消费方零回归），纯新增：
+      - ``code``：稳定的机器可读错误码，便于脚本与文档引用；
+      - ``field``：出错的请求字段（有则填），替代「靠猜参数」；
+      - ``request_id``：短随机 id，便于把浏览器报错与服务端日志关联。
+
+    渐进式接入：先覆盖新增/高频参数错误端点，其余历史短串后续按同一模式迁移。
+    """
+    import uuid
+
+    body: dict = {"ok": False, "error": message, "code": code,
+                  "request_id": uuid.uuid4().hex[:12]}
+    if field:
+        body["field"] = field
+    return web.json_response(body, status=status)
+
+
 def _same_origin(request: web.Request) -> bool:
     """校验 Origin 与 Host 同源（P1-1 WebSocket 跨站劫持防护）。
 
@@ -543,34 +564,34 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
         """单帧逐段翻译（第二批体验改造 ④）：?hex=<hex> → {ok, format, segments}."""
         hex_str = request.query.get("hex", "")
         if not hex_str:
-            return web.json_response({"ok": False, "error": "missing hex"}, status=400)
+            return api_error("missing hex", code="missing_field", field="hex")
         if len(hex_str) > 4096:
-            return web.json_response({"ok": False, "error": "hex too long"}, status=400)
+            return api_error("hex too long", code="value_too_long", field="hex")
         return web.json_response(translate_hex(hex_str))
 
     async def api_master_start(request: web.Request) -> web.Response:
         try:
             body = await request.json()
         except Exception:
-            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+            return api_error("invalid JSON", code="invalid_json")
         # 同 api_slave_start：缺省回落 config.connection（body 显式优先）
         conn = bridge.config.connection
         host = body.get("host", conn.host)
         if not isinstance(host, str):
-            return web.json_response({"ok": False, "error": "invalid host"}, status=400)
+            return api_error("invalid host", code="invalid_field", field="host")
         port = body.get("port", conn.port)
         if not isinstance(port, int) or port < 0 or port > 65535:
-            return web.json_response({"ok": False, "error": "invalid port"}, status=400)
+            return api_error("invalid port", code="invalid_field", field="port")
         addr = body.get("addr", conn.common_addr)
         if not isinstance(addr, int) or addr < 0:
-            return web.json_response({"ok": False, "error": "invalid addr"}, status=400)
+            return api_error("invalid addr", code="invalid_field", field="addr")
         gi_interval = body.get("gi_interval", 0)
         if not isinstance(gi_interval, (int, float)) or gi_interval < 0:
-            return web.json_response({"ok": False, "error": "invalid gi_interval"},
-                                     status=400)
+            return api_error("invalid gi_interval", code="invalid_field",
+                             field="gi_interval")
         tls = body.get("tls")
         if tls is not None and not isinstance(tls, dict):
-            return web.json_response({"ok": False, "error": "invalid tls"}, status=400)
+            return api_error("invalid tls", code="invalid_field", field="tls")
         redundancy = body.get("redundancy")
         if redundancy is not None:
             if not isinstance(redundancy, dict):

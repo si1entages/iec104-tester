@@ -94,3 +94,41 @@ def test_release_docs_match_version() -> None:
         fe = str(baseline["frontend_tests"])
         assert f"{fe} passed" in text or f"**{fe} 单测**" in text, (
             f"{name} 前端基线行未同步为 {fe} passed")
+
+
+def test_baseline_single_source_covers_all_published_numbers() -> None:
+    """P1-5：把「数字单一真值源」从用例数扩到覆盖率/e2e/CI job/安全版本表.
+
+    旧守卫只看后端 + 前端用例数，导致 README 覆盖率 91.1 / 91.11 / 91.49、
+    SECURITY.md 支持版本停在 1.2.x、CHANGELOG 宣称「10/10 job」而 ci.yml
+    只有 8 个 job 等漂移长期并存。本用例把这些对外可见数字全部钉到
+    docs/baseline.json 与代码事实。
+    """
+    from core.version import __version__
+
+    baseline = json.loads((ROOT / "docs" / "baseline.json").read_text(encoding="utf-8"))
+
+    # 1) 双语 README 的覆盖率与 e2e 数字必须与基线一致
+    for name in ("README.md", "README_eng.md"):
+        text = (ROOT / name).read_text(encoding="utf-8")
+        assert f"{baseline['coverage_total']}%" in text, (
+            f"{name} 覆盖率数字与 baseline.json 不一致")
+        assert str(baseline["e2e_tests"]) in text, (
+            f"{name} e2e 用例数与 baseline.json 不一致")
+
+    # 2) CI job 数：防止 CHANGELOG 写「10/10」而 workflow 只有 8 个
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    # 只取 `jobs:` 之后的内容，避免把 `on:` 下的 push/pull_request 误当 job。
+    jobs_block = ci.split("\njobs:\n", 1)[-1]
+    jobs = re.findall(r"^  ([a-zA-Z][a-zA-Z0-9_-]*):\s*$", jobs_block, re.M)
+    assert len(jobs) == baseline["ci_jobs"], (
+        f"ci.yml job 数 {len(jobs)} != baseline.json {baseline['ci_jobs']}: {jobs}")
+
+    # 3) SECURITY.md 受支持版本表必须包含当前主版本
+    security = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
+    major_minor = ".".join(__version__.split(".")[:2])
+    assert f"{major_minor}.x" in security, (
+        f"SECURITY.md 未列出当前版本 {major_minor}.x")
+
+    # 4) 基线自身自洽：覆盖率必须 ≥ 门禁
+    assert baseline["coverage_total"] >= baseline["coverage_gate"]
