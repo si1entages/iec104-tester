@@ -7,6 +7,12 @@ import type { PointPatch } from '../lib/pointValue'
 import { useUiStore } from '../store/uiStore'
 import type {
   AlarmsSnapshot,
+  SniffStatus,
+  ProfilesResponse,
+  AuditRecordsResponse,
+  AuditVerifyResponse,
+  CommissionSessionResponse,
+  CommissionSessionsResponse,
   DesignDiffResponse,
   EngineEvent,
   Frame,
@@ -70,6 +76,12 @@ export const queryKeys = {
   alarms: () => ['alarms', activeRole()] as const,
   designDiff: () => ['design-diff', activeRole()] as const,
   timeline: () => ['timeline', activeRole()] as const,
+  commissionSessions: () => ['commission', activeRole(), 'sessions'] as const,
+  commissionSession: (id: string) => ['commission', activeRole(), 'session', id] as const,
+  auditRecords: () => ['audit', activeRole(), 'records'] as const,
+  auditVerify: () => ['audit', activeRole(), 'verify'] as const,
+  profiles: () => ['profiles', activeRole()] as const,
+  sniff: () => ['sniff', activeRole()] as const,
 }
 
 // ── 查询 ───────────────────────────────────────────────────────────────
@@ -371,6 +383,60 @@ export function useTestStatusQuery() {
   return useQuery<TestStatusResponse>({
     queryKey: queryKeys.testStatus(),
     queryFn: api.tests.status,
+    refetchInterval: (query) => (query.state.data?.running ? 1000 : 5000),
+  })
+}
+
+/** 对点/传动会话列表（WP2）；运行中 1s 轮询，空闲 5s。 */
+export function useCommissionSessionsQuery() {
+  return useQuery<CommissionSessionsResponse>({
+    queryKey: queryKeys.commissionSessions(),
+    queryFn: api.commission.sessions,
+    refetchInterval: (query) => (query.state.data?.status.running ? 1000 : 5000),
+  })
+}
+
+/** 单个验收会话明细（WP2）；运行中 1s 轮询以跟进逐点结论。 */
+export function useCommissionSessionQuery(id: string | null, running = false) {
+  return useQuery<CommissionSessionResponse>({
+    queryKey: queryKeys.commissionSession(id ?? ''),
+    queryFn: () => api.commission.get(id as string),
+    enabled: Boolean(id),
+    refetchInterval: running ? 1000 : false,
+  })
+}
+
+/** 操作审计记录（WP4a）：列表 + 汇总统计；5s 轮询保持实时性。 */
+export function useAuditRecordsQuery() {
+  return useQuery<AuditRecordsResponse>({
+    queryKey: queryKeys.auditRecords(),
+    queryFn: () => api.audit.records({ limit: 200 }),
+    refetchInterval: 5000,
+  })
+}
+
+/** 审计哈希链完整性校验结果（WP4a）：不轮询，验证明细页手动触发。 */
+export function useAuditVerifyQuery(enabled = false) {
+  return useQuery<AuditVerifyResponse>({
+    queryKey: queryKeys.auditVerify(),
+    queryFn: api.audit.verify,
+    enabled,
+  })
+}
+
+/** 工程配置方案列表（WP5）；低频变化，不做轮询。 */
+export function useProfilesQuery() {
+  return useQuery<ProfilesResponse>({
+    queryKey: queryKeys.profiles(),
+    queryFn: api.profiles.list,
+  })
+}
+
+/** 旁路抓包状态（WP9）：运行时 1s 轮询看统计，空闲 5s。 */
+export function useSniffQuery() {
+  return useQuery<SniffStatus>({
+    queryKey: queryKeys.sniff(),
+    queryFn: api.sniff.status,
     refetchInterval: (query) => (query.state.data?.running ? 1000 : 5000),
   })
 }

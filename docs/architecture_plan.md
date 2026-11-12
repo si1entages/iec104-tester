@@ -521,6 +521,35 @@ graph TD
 | **T98** | 桥接页纳入 UI 巡检矩阵（P1，0.5 人日；✅ 已交付 `5a662c7`） | 三页级门禁（ui-audit/ui-contrast/ui-nontext-contrast）补 bridge 页（走 BRIDGE 8769 webServer，PF/Carbon × 3 视口 × 中英深浅）。验收：桥接页 0 硬失败/0 裁切/0 console error |
 | **T99** | 非文本门禁覆盖 PF 伪元素/box-shadow 边框（P1，1 人日；✅ 已交付 `5a662c7`） | 「边框」段补 `::before`/`::after` 逐边 border 读取 + 零偏移零模糊正扩散 box-shadow 环（readFocus 同筛选）；对比色取内外相邻色较优者。验收：PF 命中 > 0、Carbon 不劣化（原 10）、0 硬失败；真缺陷按标准修 |
 
+### WP 序列：现场工程可用优化（2026-11-11 起，方案见 `docs/optimization_plan_v111.md`）
+
+> 编号改用 `WP` 以免与既有 T01~T99 冲突。T 序列保持「仅 T50 / SCD 私有映射两项外部阻塞」不变。
+
+| 任务ID | 任务名称 | 交付物 / 验收证据 | 状态 |
+|--------|---------|------------------|------|
+| **WP1** | ASDU 地址字段长度可配（P0） | `core/protocol/address.py`（`AsduAddressConfig` + 进程级 `set_default` / 任务级 `use_default` / 单帧 override 三级）；`core/protocol/asdu.py` 编解码按配置取 CA 1/2B、IOA 1/2/3B、COT 1/2B，IOA 溢出显式报错不静默截断；`AppConfig.asdu_address` YAML save/load；CLI 7 个新参数（通用 3 + 桥两侧 4）；`--demo` 透传、headless 桥独立加载配置；`BridgeConfig.listen_address/upstream_address` 两侧任务级隔离；9 个解码调用点去掉硬编码 `ca_length=2`；`/api/status` 新增只读 `asdu_address` 键 + 前端 contracts/types/Carbon/PF 状态页显示。文档 `docs/asdu_address_config.md`。 | ✅ 已实现（v1.11 开发中） |
+| **WP2** | 对点/传动验收闭环（P0） | `core/data/commissioning.py`（判定规则：品质/值/超时/SBO NACK 一律 FAIL，无期望值 MANUAL 不出假 PASS）+ `core/data/commission_store.py`（独立 SQLite `commissioning.db` WAL+RLock）+ `webui/commissioning.py`（编排：SBO 两段式、DEACT 清理、暂停周期 GI、`commission.*` 事件不新增 WS kind）+ `webui/commission_export.py`（xlsx/json/html 全转义交付物）；8 端点仅 master/slave 角色注册，契约 `webui/api_contract.md` §2.4c 双向自检；前端 `useCommission` + Carbon/PF 双页面 + 菜单「对点传动」（bridge 隐藏），逐点期望值/异址回读/人工改判/帧 hex 证据。 | ✅ 已实现（v1.11 开发中） |
+| **WP4a** | 操作审计 + 多用户三角色（P0 前半） | `core/data/audit.py`（SHA-256 哈希链 SQLite，`verify()` 报断点）+ `webui/audit.py`（`--auth-config` 三角色 viewer/operator/admin，`role_allowed()` 唯一真值源，token 只存哈希）+ `bridge._cmd()` 汇聚点落链（帧证据 tx/rx）+ WP2 编排联动 `commission/*` + 4 端点（`/api/audit/*`、`/api/auth/users`）+ `/api/auth` 增 `mode/operator/role` + 前端「操作审计」页（Carbon/PF）。**兼容模式行为与 v1.10.0 一致**；viewer 越权 403 不入链。 | ✅ 已实现（v1.11 开发中）；WP4b 闭锁层待开工 |
+| **WP4b** | 防误操作闭锁（P0 后半） | `core/engine/interlock.py`（多条件 AND 求值、取值失败按不满足、非法配置加载即报错）+ 点表 `interlock` 字段（YK/YC/STEP，YAML 往返非空才写）+ `bridge._interlock_gate()`（下发前求值，不满足零帧；DEACT 例外）+ 命令端点新增 `force`（需 admin + 写 `force-unlock` 审计）+ 前端「联锁」标记与强制解锁复选框。文档 `docs/interlock.md`。 | ✅ 已实现（v1.11 开发中） |
+| **WP5** | 工程配置方案管理（P1） | `core/data/profiles.py`（YAML 方案存取 + 名称校验 + 活动指针）+ `webui/profiles.py`（capture/apply/restore + 点表导入 + 审计）+ 8 端点（契约 §2.4f）+ `core/config.py::apply_profile` + CLI `--profile` + 前端「工程配置方案」卡片（状态总览页，Carbon/PF）。**启动不自动应用**，刷新由前端 restore。文档 `docs/profiles.md`。 | ✅ 已实现（v1.11 开发中） |
+| **WP6** | 链路参数可观测面板（P1） | `ConnectionStateMachine.snapshot()`（状态/时长/四定时器剩余/20 条变迁时间线）+ `SequenceManager.snapshot()`（k/w/VS/VR/unacked/窗口）+ `TCPClient.link_stats()`（重连计数/最近失败原因，未建连也可用）+ 引擎 `link_snapshot()` 聚合 + `/api/status` 只增 `link` 键（无引擎也在）+ 前端 `CarbonLinkStatsCard`/`PfLinkStatsCard`（未确认 I 帧与 t1 剩余并排 + 时间线）。契约 §2.4g。 | ✅ 已实现（v1.11 开发中） |
+| **WP7** | 报文值域解码树（P1） | `frame_translate.decode_tree()`（`{apci, asdu, objects[]}`；**SQ=1 展开 base+i**；五位品质位 + raw 不截位 + 时标 + 原始字节）+ `/api/frames/decode` 纯新增 `tree` 键（§2.9，`segments` 不变）+ 前端两个报文查看器「对象」列就地展开子表（只对含对象的 I 帧出表）。 | ✅ 已实现（v1.11 开发中） |
+| **WP8** | 原生 Excel/PDF 报告（P1） | `core/export/`（`Evidence` + xlsx/pdf/html 三导出器）；`GET /api/export/report?format=`（§2.4h）；PDF 为可选依赖 `report[pdf]`，未装时 400 可读提示。逐点证据 + 审计流水并入三种格式。 | ✅ 已实现（v1.11 开发中） |
+| **WP9** | 旁路真实网卡抓包（P1） | `core/capture/sniffer.py`（Linux AF_PACKET / Windows Npcap；BPF 端口过滤；pcap 复用既有写入导入链路）；4 端点（§2.14b）+ 抓包页卡片；权限不足诚实降级。 | ✅ 已实现（v1.11 开发中），真网卡端到端受权限约束 |
+| **WP10** | 点表在线编辑 + 服务化（P1） | `POST /api/points/upsert` / `DELETE /api/points/delete`（§2.4i，**不重置设计基准**）+ 前端编辑对话框；`Dockerfile`（多阶段）/`docker-compose.yml`/`deploy/iec104-tester.service`/`deploy/install-service.ps1`/`docs/deploy.md`；CLI 工具纳入 exe 随包。 | ✅ 已实现（v1.11 开发中） |
+| **WP3** | 文件传输完工 + T50 按新口径验收（P0） | `core/protocol/file_semantics.py`（ed1/ed2/project 语义档位）+ `FileTransferSlave` 多节分包（逐节 CHS）+ `FileTransferMaster.start_upload()` 上传方向 + `POST /api/master/file {action:"upload"}`；5 项开放项按本仓真实 TCP 互测 + lib60870-C/.NET/otfabric 交叉证据结案（`docs/file_transfer_open_items.md`）。 | ✅ 已实现（2026-11-12 按新口径结案） |
+| WP11 | 标准合规收口（62351 / 冗余组 / 自动对时 / SCD 私有映射） | 见 `docs/optimization_plan_v111.md` §4 | ⏳ 待开工（B=1，标准原文 + 厂商样本） |
+
+**WP1 验收实测（2026-11-11）**：`tests/test_asdu_address_config.py` 45 例 + `tests/test_tcp_bridge.py` 新增 2 例全绿；默认 2/3/2 下既有黄金帧逐字节不变；全量后端 **1770 passed / 覆盖率 91.25%**（门禁 91）、前端 typecheck + 133 单测、Playwright **61 e2e** 全绿；ruff 全绿。
+
+**WP2 验收实测（2026-11-11）**：`tests/test_commissioning.py`（判定规则/持久化/导出转义/API 全流程/编排状态机）全绿；全量后端 **1817 passed / 覆盖率 91.09%**（门禁 91）、前端 typecheck + **137 单测**、i18n 清单 0、Playwright **62 e2e**（含新增视觉基线 `commission-light.png`）全绿。
+
+**WP4a 验收实测（2026-11-12）**：`tests/test_audit.py` 32 例（哈希链追加/篡改检测报断点 id/三角色权限矩阵/兼容模式不变/viewer 越权 403 链上无痕/编排联动）+ 既有 auth 断言适配全绿；全量后端 **1849 passed / 覆盖率 91.05%**（门禁 91）、前端 typecheck + 137 单测、i18n 清单 0、Playwright **63 e2e**（含新增视觉基线 `audit-light.png`）、ruff 全绿。
+
+**WP4b 验收实测（2026-11-12）**：`tests/test_interlock.py` 35 例（解析/求值/点表 YAML 往返/**闭锁不满足时发送列表为空**/非 admin force 拒绝且零帧/DEACT 例外/API 契约形状）全绿；全量后端 **1880 passed / 覆盖率 91.06%**（门禁 91）、前端 typecheck + 137 单测、i18n 清单 0、Playwright **63 e2e**（既有基线零漂移）、ruff 全绿。
+
+**WP5 验收实测（2026-11-12）**：`tests/test_profiles.py` 42 例（名称校验防穿越/存取与坏文件容错/**3 套方案切换后连接+t0~t3+k/w+ASDU 长度+阈值全部还原**/点表引用还原与缺失跳过/导入导出往返/方案文件即合法 `--config`/三角色权限/审计四类动作）全绿；全量后端 **1926 passed / 覆盖率 91.05%**（门禁 91）、前端 typecheck + 137 单测、i18n 清单 0、Playwright **63 e2e**（仅 `status-light.png` 因新增卡片更新）、ruff 全绿。
+
 ---
 
 ## 5. 潜在技术风险
@@ -794,3 +823,20 @@ apps/venv/                      # 待删除（T02）
 **新决策落地任务**：Q6 多站接入（T16）、Q7 前端重写（T10~T15/T19）、Q8 版本对齐（T01）、Q9 历史库默认开（T17）、Q10 契约版本化（T18）。
 
 **结构变更**：§0 修正 Q1/Q5；§1 分层图纳入 logging_manager/webui 拆分/前端工程；§2 模块表按新行数更新、新增前端节点与 R7/R8 依赖规则；§3 选型改「aiohttp + Vite/React/TS/AntD5」，新增日志/历史库选型、更新 PyInstaller；§4 **重做任务表**（归档 7 + 待办 24）；§5 新增前端重写/Node 构建/历史库写放大/日志开销 4 项风险并上调 God Class；§6 重排 M1~M5；§7 改为「决策结论 + 仍待确认小问题」；§8/§9 保留主理人原文，同步 RACI/任务号与 482 基线；附录 A/B 同步。
+
+**WP6 验收实测（2026-11-12）**：`tests/test_link_observability.py` 21 例（三处快照字段与语义/时间线有界/**真 TCP 静默对端制造 t1 超时并同时断言未确认 I 帧、t1 剩余、重连计数**/未建连也有失败原因/降级路径不崩 status）全绿；全量后端 **1947 passed / 覆盖率 91.10%**（门禁 91）、前端 typecheck + **149 单测**（新增 12 例链路展示逻辑）、i18n 清单 0、Playwright **63 e2e**（`status-light.png` 因新增面板重生成）、ruff 全绿。
+
+**WP7 验收实测（2026-11-12）**：`tests/test_frame_decode_tree.py` 23 例（I/S/U 三帧/`SQ=1` 20 对象逐字段对构造输入/五位置品质（QDS）/SIQ 无 OV/CP56 时标/单对象降级/截断帧可读错误/`segments` 旧契约不变）全绿；全量后端 **1970 passed / 覆盖率 91.08%**（门禁 91）、前端 typecheck + **154 单测**（新增 5 例解码树展示逻辑）、i18n 清单 0、Playwright **63 e2e**、ruff 全绿。
+
+**WP8/9/10 验收实测（2026-11-12）**：`tests/test_export_report.py`（三格式逐点条数一致/PDF 可选依赖降级/HTML 转义/端点分支）+ `tests/test_sniffer.py`（构造以太网帧解析/五类畸形帧/权限降级/pcap 往返）+ `tests/test_points_online_edit.py`（**设计基准不被在线编辑重置**/全类型字段/端点）全绿；另交付物实测：compose YAML / systemd 单元 / PowerShell 脚本语法校验通过，本机 Python 起同一入口 html/xlsx/pdf 三格式均 200，旁路抓包在无 Npcap 时按预期返回可读原因。全量后端 **2073 passed / 覆盖率 91.11%**（门禁 91）、前端 typecheck + **162 单测**、i18n 清单 0、Playwright **63 e2e**、ruff 全绿。
+
+**WP3 验收实测（2026-11-12，新口径）**：本仓 master↔slave 真实 TCP 互测跑通
+`F_SC 目录/select/request → F_FR → F_SR → F_SC(SCQ=6) → F_SG/F_LS → COMPLETED`；
+多节下载 768B/3 节×256B 逐节 CHS 无告警、文件逐字节还原；上传 560B 落盘 +
+F_AF 肯定 + COMPLETED；CHS 篡改回否定且不落盘。
+`tests/test_file_transfer_*.py` 全套 + `tests/test_interop_contract_vectors.py` 共
+**101 passed**；5 项开放项以多实现交叉证据结案。全量后端
+**2093 passed / 覆盖率 91.26%**（门禁 91）、前端 162 单测、i18n 0、
+Playwright **63 e2e**、ruff 全绿。**发布阈值（WP1~WP4 + WP3 新口径）已达成**。
+
+**WP11 验收实测（2026-11-12，按新口径）**：用户确认「按同一口径处理」，WP11 与 WP3/T50 一样以互测 + 开源交叉证据验收。拆 11a(B=0)/11b(增强项)：`docs/baseline.json` 单一真值源 + 版本守卫用例数断言（实测能抓漂移）、`auto_clock_sync` 死配置收口、合规阈值/时标格式配置化、`master_protocol` 多类型 GI 响应表驱动 17 例、62351 最小合规说明（保留「不宣称应用层合规」边界）+ 冗余切换接入 WP6。`tests/test_wp11a_config.py` 11 例 / `tests/test_wp11a_coverage.py` 17 例 / `linkPanel.test.ts` +2 例全绿。全量后端 **2121 passed / 覆盖率 91.49%**、前端 **164 单测**、i18n 0、Playwright **63 e2e**、ruff 全绿。**11 个 WP 全部收口，发布阈值达成**。

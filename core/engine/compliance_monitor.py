@@ -81,6 +81,7 @@ class ComplianceMonitor:
     expected_ca: int | None = None   # T86：显式期望公共地址（None=首帧建基线）
     w: int = 8
     max_violations: int = _MAX_VIOLATIONS
+    max_time_skew_s: float = _MAX_TIME_SKEW_S
     violations: deque = field(default_factory=lambda: deque(maxlen=_MAX_VIOLATIONS))
     violation_counts: dict = field(default_factory=dict)
 
@@ -290,9 +291,9 @@ class ComplianceMonitor:
                 tag = getattr(first, "time_tag", None)
                 if tag is not None and hasattr(tag, "to_epoch"):
                     delta = abs(tag.to_epoch() - now)
-                    if delta > _MAX_TIME_SKEW_S:
+                    if delta > self.max_time_skew_s:
                         self._add(now, "time-skew", _side_of(direction),
-                                  f"时标偏离观察时刻 {delta:.0f}s（阈值 {_MAX_TIME_SKEW_S:.0f}s）")
+                                  f"时标偏离观察时刻 {delta:.0f}s（阈值 {self.max_time_skew_s:.0f}s）")
             except Exception:  # noqa: BLE001 — 对象体解析失败一律跳过（保守）
                 pass
 

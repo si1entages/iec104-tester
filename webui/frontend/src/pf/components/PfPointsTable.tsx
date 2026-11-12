@@ -5,6 +5,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 
 import { usePointsQuery } from '../../api/queries'
 import type { Point } from '../../api/types'
+import { PfPointEditButtons, PfPointEditDialog } from './PfPointEditDialog'
 import { useT } from '../../i18n'
 import { formatMeasurement } from '../../lib/format'
 import { isStalePoint } from '../../lib/pointValue'
@@ -57,6 +58,8 @@ export function PfPointsTable({
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const [keyword, setKeyword] = useState('')
   const [type, setType] = useState<(typeof TYPE_TABS)[number]>('all')
+  // WP10a：编辑对话框目标（null=关闭，'new'=新增，其余=编辑该点）
+  const [editTarget, setEditTarget] = useState<Point | 'new' | null>(null)
 
   const rows = useMemo(() => {
     const kw = keyword.trim().toLowerCase()
@@ -119,6 +122,13 @@ export function PfPointsTable({
                   </Button>
                 ))}
               </span>
+            </ToolbarItem>
+            <ToolbarItem>
+              <PfPointEditButtons
+                selected={selected ?? null}
+                onAdd={() => setEditTarget('new')}
+                onEdit={() => setEditTarget(selected ?? null)}
+              />
             </ToolbarItem>
             <ToolbarItem align={{ default: 'alignEnd' }}>
               <span style={{ opacity: 0.75, fontSize: 13 }}>{t('common.total', { n: rows.length })}</span>
@@ -212,6 +222,12 @@ export function PfPointsTable({
                       </td>
                       <td className="pf-v6-c-table__td" style={{ width: COLUMNS[1].width }}>
                         {p.type}
+                        {(p.interlock?.length ?? 0) > 0 ? (
+                          <Label isCompact color="orange" style={{ marginInlineStart: 6 }}
+                            title={t('pcd.interlockTitle')}>
+                            {t('pcd.interlockTag')}
+                          </Label>
+                        ) : null}
                       </td>
                       <td
                         className="pf-v6-c-table__td"
@@ -269,6 +285,11 @@ export function PfPointsTable({
         </div>
         </div>
       </div>
+          <PfPointEditDialog
+        point={editTarget === 'new' ? null : editTarget}
+        open={editTarget !== null}
+        onClose={() => setEditTarget(null)}
+      />
     </div>
   )
 }

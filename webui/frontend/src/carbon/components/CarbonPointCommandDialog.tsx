@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { Modal, RadioButton, Tag } from '@carbon/react'
+import { Checkbox, Modal, RadioButton, Tag } from '@carbon/react'
 
 import { api } from '../../api/endpoints'
 import { useCommand } from '../../api/queries'
@@ -23,6 +23,7 @@ export function CarbonPointCommandDialog({ point, disabled = false, onClose }: P
   const [spKind, setSpKind] = useState<SetpointKind>('short_float')
   const [spValue, setSpValue] = useState(0)
   const [stepUp, setStepUp] = useState(true)
+  const [force, setForce] = useState(false)
   const [last, setLast] = useState<{ ok: boolean; text: string } | null>(null)
 
   useEffect(() => {
@@ -31,6 +32,7 @@ export function CarbonPointCommandDialog({ point, disabled = false, onClose }: P
     setSpKind(setpointKindOf(point))
     setSpValue(typeof point.value === 'number' ? point.value : 0)
     setStepUp(true)
+    setForce(false)
     setLast(null)
   }, [point])
 
@@ -39,9 +41,14 @@ export function CarbonPointCommandDialog({ point, disabled = false, onClose }: P
   const step = useCommand(api.master.step)
   const busy = yk.isPending || setpoint.isPending || step.isPending
 
+  const interlocks = point?.interlock ?? []
+  const hasInterlock = interlocks.length > 0
+  const asText = interlocks
+    .map((c) => `${c.ioa}${c.label ? `（${c.label}）` : ''} → ${c.value ? t('pcd.on') : t('pcd.off')}`)
+    .join('；')
   const kind = point ? directCommandKind(point) : null
   const double = point ? isDoubleCommand(point) : false
-  const dangerous = kind === 'yk' && ykOn === 'off'
+  const dangerous = (kind === 'yk' && ykOn === 'off') || force
 
   const send = async (): Promise<void> => {
     if (!point) return
@@ -53,6 +60,7 @@ export function CarbonPointCommandDialog({ point, disabled = false, onClose }: P
           select: false,
           double,
           with_time: false,
+          force,
         })
         setLast(
           r.ok
@@ -66,6 +74,7 @@ export function CarbonPointCommandDialog({ point, disabled = false, onClose }: P
           kind: spKind,
           select: false,
           with_time: false,
+          force,
         })
         setLast(
           r.ok
@@ -73,7 +82,9 @@ export function CarbonPointCommandDialog({ point, disabled = false, onClose }: P
             : { ok: false, text: t('pcd.spFailed', { error: r.error ?? t('cmd.unknown') }) },
         )
       } else {
-        const r = await step.mutateAsync({ ioa: point.ioa, state: stepUp ? 2 : 1, select: false })
+        const r = await step.mutateAsync({
+          ioa: point.ioa, state: stepUp ? 2 : 1, select: false, force,
+        })
         setLast(
           r.ok
             ? { ok: true, text: t('pcd.stepSent', { dir: stepUp ? t('pcd.up') : t('pcd.down') }) }
@@ -183,6 +194,26 @@ export function CarbonPointCommandDialog({ point, disabled = false, onClose }: P
                 onChange={() => setStepUp(false)}
               />
             </div>
+          ) : null}
+
+          {hasInterlock ? (
+            <>
+              <div style={{ marginTop: 12 }}>
+                <Tag size="sm" type="magenta">{t('pcd.interlockTag')}</Tag>
+              </div>
+              <Note kind="warning" title={t('pcd.interlockTitle')} style={{ marginTop: 8 }}>
+                {t('pcd.interlockDesc', { cond: asText })}
+              </Note>
+              <div style={{ marginTop: 8 }}>
+                <Checkbox
+                  id="cb-pcd-force"
+                  labelText={t('pcd.forceLabel')}
+                  checked={force}
+                  onChange={(_e, checked) => setForce(Boolean(checked))}
+                />
+                <div style={{ fontSize: 12, color: 'var(--cds-text-secondary)' }}>{t('pcd.forceDesc')}</div>
+              </div>
+            </>
           ) : null}
 
           {point.sbo ? <Note kind="warning" title={t('pcd.sboTitle')} style={{ marginTop: 12 }}>{t('pcd.sboDesc')}</Note> : null}

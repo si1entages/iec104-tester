@@ -1,0 +1,33 @@
+# 示例工程配置方案（WP5）：可直接在界面「工程配置方案」里选用/另存，
+# 也可用 `python app.py --profile 示例-标准2_3_2` 或 `--config 本文件` 启动。
+# 方案文件本身就是合法的 AppConfig YAML——`--config` 与方案目录双向通用。
+name: 示例-标准2_3_2
+mode: master
+note: 标准 IEC 104 口径（CA=2B / IOA=3B / COT=2B，t1=15s，k=12/w=8）
+connection:
+  host: 127.0.0.1
+  port: 2404
+  common_addr: 1
+  reconnect: true
+  reconnect_interval: 5.0
+  max_connections: 16
+timers:
+  t0: 30.0
+  t1: 15.0
+  t2: 10.0
+  t3: 20.0
+flow_control:
+  k: 12
+  w: 8
+asdu_address:
+  ca_length: 2
+  ioa_length: 3
+  cot_length: 2
+point_table:
+  file: configs/demo_points.yaml
+alarms:
+  stale_seconds: 60.0
+  comm_seconds: 10.0
+  jump_delta: null
+  debounce: 2
+  sound: false

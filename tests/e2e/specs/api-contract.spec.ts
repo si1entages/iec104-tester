@@ -12,9 +12,12 @@ import { expect, test } from '@playwright/test'
 
 import {
   authProbeResponseSchema,
+  auditRecordsResponseSchema,
+  auditVerifyResponseSchema,
   captureFilesResponseSchema,
   captureFramesResponseSchema,
   captureStatusSchema,
+  commissionSessionsResponseSchema,
   frameDecodeSchema,
   historyDataRecordSchema,
   historyFrameRecordSchema,
@@ -70,6 +73,9 @@ const GET_CASES: ContractCase[] = [
   { path: '/api/tests/status', schema: testStatusResponseSchema },
   { path: '/api/logs', schema: logsResponseSchema },
   { path: '/api/export/session.json', schema: sessionExportSchema },
+  { path: '/api/commission/sessions', schema: commissionSessionsResponseSchema },
+  { path: '/api/audit/records', schema: auditRecordsResponseSchema },
+  { path: '/api/audit/verify', schema: auditVerifyResponseSchema },
 ]
 
 async function assertContract(

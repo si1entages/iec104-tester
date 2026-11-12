@@ -1,6 +1,6 @@
 [project]
 name = "iec104-tester"
-version = "1.10.0"
+version = "1.11.0"
 description = "IEC 60870-5-104 协议测试工具 — 主站/子站模拟器"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -16,6 +16,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# WP8：原生 PDF 报告（未安装时 html/xlsx 仍可用，PDF 端点返回 400 + 安装提示）
+pdf = [
+    "reportlab>=4.0",
+]
 build = [
     "pyinstaller>=6.0",
 ]

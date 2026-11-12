@@ -108,7 +108,7 @@
 | POST | `/api/master/bitstring` | `ioa: int (≥0)`, `value: int (≥0, 32bit)` | `{ok, error?}` |
 | POST | `/api/master/delay` | `delay_ms: int (0–60000)` | `{ok, error?}` |
 | POST | `/api/master/param` | `kind: "float"\|"normalized"\|"scaled"\|"activation"`, `ioa: int (≥0)`, `value: number=0`, `qualifier: int=1` | `{ok, error?}` |
-| POST | `/api/master/file` | `action: "directory"\|"select"\|"request"`, `ioa: int=0 (≥0)`, `file_name: int=0 (≥0)` | `{ok, error?}` |
+| POST | `/api/master/file` | `action: "directory"\|"select"\|"request"\|"upload"`, `ioa: int=0 (≥0)`, `file_name: int=0 (≥0)`, `cot?: int (5/6/13)`, `qualifier?: int (0-7)`, `data?: str (upload 专用，hex，≤64 KiB)`, `segment_size?: int (1-255, 默认 200)` | `{ok, error?}` |
 
 > `with_time=true` → 带时标类型（YK: `C_SC_TA_1` / `C_DC_TA_1`）。
 >
@@ -118,6 +118,25 @@
 > 其带时标变体；IEC 60870-5-101/104 允许设点命令停止激活）。
 > 子站应答 DEACTCON (COT=9)；撤销不走选择-执行（SBO）两段式，单帧直发。
 > 缺省 `false` → 行为与改动前一致（COT=6 ACT）。
+
+> **WP3 文件传输（2026-11-12 按新口径验收：本仓真实 TCP 互测 + 多开源实现交叉证据）**
+>
+> - `action="upload"` 为**上传方向（主站→子站）**：主站发 `F_SC(SCQ=1)` 选文件 →
+>   逐段 `F_SG` → `F_LS(LSQ=1, CHS=本节算术和 mod 256)`；子站收完校验 CHS 后
+>   落盘并回 `F_AF(AFQ=1 肯定 / 2 否定)`，主站据此置 COMPLETED/ERROR。
+>   `data` 非法 hex / 空 / 超长、CHS 不符均有可读业务错误；**未连接引擎时参数错误
+>   也精确报出**（校验先于 `require_master()`）。
+> - `cot`/`qualifier` 为目录召唤组合探测用覆盖；缺省值由**文件传输语义档位**
+>   （`AppConfig.file_transfer.profile`，见下）决定。
+> - **从站多节分包**：`file_transfer.section_size > 0` 时把文件切成 N 节，每节
+>   `F_SR → (主站 SCQ=6) → F_SG… → F_LS(LSQ=3) → F_AF(3)`，最后节 `LSQ=1`；
+>   **逐节 CHS** 按本节数据计算（非整文件）。`section_size=0`（默认）= 历史单节行为。
+> - **语义档位** `configs/master_config.yaml` 的 `file_transfer` 节：
+>   `{profile: "ed1"|"ed2"|"project", section_size: int=0, nof_enum?: bool}`。
+>   `ed1`（默认，逐字节兼容历史：目录 COT=13/SCQ=5）、
+>   `ed2`（lib60870.NET + otfabric 共识：目录 COT=5/SCQ=0、NOF 枚举校验）、
+>   `project`（同 ed1，明确命名）。非法档位名**加载期即报错**。
+>   依据与 5 项开放项回填见 [`docs/file_transfer_open_items.md`](../docs/file_transfer_open_items.md)。
 
 > `TlsOptions`（T20，纯新增可选字段，不影响 `schemaVersion`）：`{enabled: bool,
 > certfile?: str, keyfile?: str, cafile?: str, verify?: bool=true,
@@ -174,7 +193,211 @@
 
 > 说明：`/api/points/import` 的 `auto` 嗅探顺序为 —— 以 `{` 开头 → `json`；
 > 首行含 `,` 且含 `type` → `csv`；否则 → `yaml`。
+
+### 2.4c 对点 / 传动验收（WP2；master/slave 角色注册，bridge 角色不注册）
+
+| 方法 | 路径 | 请求 | 响应 |
+|------|------|------|------|
+| GET | `/api/commission/sessions` | `?limit=100`（1~500） | `{ok, sessions: CommissionSessionSummary[], status: {running, session_id, cursor, total}}` |
+| POST | `/api/commission/sessions` | `{name?: str, operator?: str, ioas?: int[] (空=全选), expected?: Record<ioa, value>, command_ioas?: Record<ioa, command_ioa> (现场遥控与回读遥信异址时指定)}` | `{ok, session: CommissionSession}` |
+| GET | `/api/commission/sessions/{id}` | — | `{ok, session: CommissionSession}`；不存在 404 |
+| POST | `/api/commission/sessions/{id}/run` | `{operator?: str}` | `{ok, running, session_id, cursor, total}` |
+| POST | `/api/commission/sessions/{id}/stop` | — | `{ok, running, session_id, cursor, total}` |
+| POST | `/api/commission/sessions/{id}/verdict` | `{ioa: int, verdict: "pending"\|"pass"\|"fail"\|"manual", note?: str, operator?: str}` | `{ok, item: CommissionItem}` |
+| DELETE | `/api/commission/sessions/{id}` | — | `{ok}`（未找到时 `ok=false`） |
+| GET | `/api/commission/sessions/{id}/export` | `?format=xlsx\|json\|html`（默认 xlsx） | 对应格式二进制（attachment）；xlsx 为签字用对点表，html 自包含可打印为 PDF |
+
+> `CommissionItem`：`{ioa, name, kind: "YX"\|"YC"\|"YK"\|"STEP", group, command_ioa?, expected, actual,
+> quality, verdict, note, operator, checked_at, tx_frame, rx_frame, tx_time, rx_time,
+> reason, tolerance}`；`CommissionSession` 另含 `{id, name, created_at, operator,
+> status: "idle"\|"running"\|"done"\|"stopped", items, point_table_snapshot,
+> started_at, finished_at, cursor, note, summary: {total, pass, fail, manual, pending, done}}`。
+> 运行进度经现有 `event` kind 广播 `type: "commission.started"|"commission.item"|
+> "commission.stopping"|"commission.finished"`，前端复用 `useLiveEvents()` 即可，
+> 不新增 WS kind、不递增 `schemaVersion`。
+> SBO 被拒 / 超时 / 命令失败一律判 `fail`；未设期望值的点判 `manual` 并跳过自动下发。
 >
+### 2.4d 操作审计与多用户三角色（WP4a；master/slave 角色注册，bridge 角色不注册）
+
+| 方法 | 路径 | 请求 | 响应 |
+|------|------|------|------|
+| GET | `/api/audit/records` | `?limit=200`（1~5000）、`?operator=`、`?action=`、`?result=ok\|fail`、`?since=<unix_ts>`（均可选） | `{ok, records: AuditRecord[], stats: {total, operators, fails, last_ts}}` |
+| GET | `/api/audit/verify` | — | `{ok, valid, total, broken_at: int\|null, reason: str}`；任何一条被删/改都会报出首个断点 id |
+| GET | `/api/audit/export` | `?format=json\|csv`（默认 json） | 对应格式（attachment `audit_log.json/csv`）；非法 format 400 |
+| GET | `/api/auth/users` | —（**admin only**，其余角色 403；未启用多用户时 404） | `{ok, users: [{name, role}]}`（不含任何 token 材料） |
+
+> `AuditRecord`：`{id, ts, operator, role, source_ip, action, target, result: "ok"\|"fail",
+> reason, tx_frame, rx_frame, prev_hash, hash}`。
+> **审计覆盖范围（WP4a 口径）**：经命令汇聚点（`EngineBridge._cmd`）的主/子站命令与
+> WP2 传动下发（`action = "master/yk"` 等去 `/api/` 前缀路径；传动为
+> `commission/yk|yc|step`，`operator` 取会话检查人、`role="system"`）；
+> 帧证据取命令开始之后的 tx/rx 首帧 hex（rx 应答晚到则留空）。
+> **被 401/403 拒绝的动作不入链**（验收判据：越权动作链上无痕）。
+> 防篡改：`hash = SHA256(prev_hash ‖ canonical_json)`，首条 `prev_hash` 为 64 个 `0`；
+> 校验见 `/api/audit/verify`。哈希防事后删改，不防「能改库者整链重算」（威胁模型边界）。
+>
+> **多用户三角色（`--auth-config users.yaml`，格式 `{"users": [{name, token, role}]}`）**：
+> `role ∈ {viewer, operator, admin}`。权限矩阵（可判定，`role_allowed()` 为唯一真值源）：
+> - **viewer**：全部 GET（读点表/审计/状态）；一切 POST/DELETE 403；
+> - **operator**：GET + 操作类 POST（master 命令族、slave 模拟置数、commission
+>   会话/传动、bridge 启停、测试/压测）；**点表写入族（`/api/points/*` POST）、
+>   `/api/auth/users`、一切 DELETE 403**；
+> - **admin**：全部放行。
+> 未配置 `--auth-config`/`--auth-token` 时整体直通（兼容模式，行为与 v1.10.0 一致，
+> 无身份不入审计链）；仅配单 token 时为**匿名 admin**，前端可用 `X-Operator` 头
+> 补充操作人姓名；多用户模式忽略 `X-Operator`（以 token 映射为准防冒名）。
+> `/api/auth` 探测纯新增字段：`mode: "none"|"token"|"users"`、命中时 `operator`/`role`
+> （schemaVersion 不递增，见 §1.3 兼容约定）。
+>
+### 2.4e 防误操作闭锁（WP4b；作用于 §2.2/§2.3 的命令端点，纯新增可选键）
+
+闭锁是**独立于 SBO** 的业务安全前置条件（SBO 属协议层时序，闭锁属"当前工况是否允许"）。
+点表 YK / YC / STEP 点可声明 `interlock`（AND 关系，条件引用遥信期望位置）::
+
+    yk:
+      - ioa: 2001
+        name: 1号机合闸
+        interlock:
+          - ioa: 1001        # 引用遥信
+            value: false     # 须为分位
+            label: 刀闸位置   # 可选
+
+| 端点 | 新增请求键 | 行为 |
+|------|-----------|------|
+| `POST /api/master/yk` / `setpoint` / `step` / `bitstring` | `force?: bool`（默认 false） | 闭锁不满足且 `force=false` → **200 `{ok: false, error, interlock}`，链路上不发任何命令帧**；`force=true` 需 admin 角色，放行并写 `"<kind>/force-unlock"` 审计（`role != admin` 时 200 `{ok:false, error}` 且不发帧） |
+| `GET /api/points` | 命令行（YK/YC/STEP）新增只读 `interlock: [{ioa, value, label}]` | 前端显示「联锁」标记与条件；无配置时为空数组 |
+
+> 拒绝响应中的 `interlock` 为 `{blocked: bool, reason: str, conditions: [{ioa, value, label}],
+> observed: [{ioa, value: bool|null}]}`（`observed.value=null` 表示遥信未上送）。
+> **取值失败按不满足处理**（未知工况不操作，安全取向）。
+> 未配置 `interlock` 的点、以及未启用认证的兼容模式，行为与历史版本**完全一致**。
+> 拒绝（`interlock-blocked`）与强制解锁（`force-unlock`）均写入 §2.4d 的同一条审计链；
+> `deactivate`（撤销选择）不受闭锁限制，始终可发。
+>
+### 2.4f 工程配置方案（WP5；master/slave 角色注册）
+
+一个「方案」= 一次现场调试的完整工程参数集，落 `configs/profiles/<名称>.yaml`
+（**纯文本 YAML，可用 git 管理，也可直接当 `--config` 使用**）。
+
+| 方法 | 路径 | 请求 | 响应 |
+|------|------|------|------|
+| GET | `/api/profiles` | — | `{ok, profiles: ProfileInfo[], active: str}`；无方案目录时 `profiles: []`（不是错误） |
+| GET | `/api/profiles/{name}` | — | `{ok, name, config: {…}, summary: ProfileSummary}`；不存在 404 |
+| POST | `/api/profiles/{name}` | `{config?: object}`（省略/空 = **快照当前生效参数**） | `{ok, name, path}`；非法名 400 |
+| POST | `/api/profiles/{name}/apply` | — | `{ok, name, applied: str[]}`（逐项列出还原了什么，如 `["connection","timers.t1","asdu_address","point_table"]`）；不存在 404 |
+| POST | `/api/profiles/restore` | — | 应用记录中的活动方案；无活动方案时 `{ok: false, error}`（HTTP 200，非错误） |
+| POST | `/api/profiles/import` | `?name=<名称>`，body 为方案 YAML 文本 | `{ok, name, path}`；YAML 非法/名非法 400 |
+| GET | `/api/profiles/{name}/export` | — | `application/x-yaml`（attachment `profile_<名称>.yaml`） |
+| DELETE | `/api/profiles/{name}` | — | `{ok}`；删除同时清空活动指针 |
+
+> `ProfileInfo`：`{name, updated_at, size, summary}`；
+> `ProfileSummary`：`{mode, host, port, common_addr, ca_length, ioa_length, cot_length,
+> point_table, note, timers:{t0..t3?}, flow_control:{k,w?}}`。
+>
+> - **方案覆盖范围**：连接（host/port/公共地址/重连）、链路参数（t0~t3、k/w）、
+>   ASDU 地址长度（WP1，`apply` 时同步 `set_default`）、点表文件引用、告警阈值、
+>   报告默认标题。**不含** TLS/证书路径、历史库保留期、显示偏好——避免一份方案
+>   悄悄改掉安全与存储配置（`--profile` 的叠加规则相同）。
+> - **活动方案与刷新恢复**：`apply` 会把方案名记入 `configs/profiles/_active.yaml`
+>   （该文件被 git 忽略）；前端挂载时调用 `POST /api/profiles/restore` 还原。
+>   **服务端启动时刻意不自动应用方案**，保证端口/角色只由 CLI 与 `--config` 决定；
+>   需要无浏览器场景时用显式 `--profile <名称>`。
+> - **权限**：方案是管理动作 → `admin` 可写；`operator`/`viewer` 只读（§2.4d 矩阵）。
+> - **审计**：保存/应用/删除/导入写 §2.4d 的哈希链（`profiles/save|apply|delete`）。
+> - **点表引用缺失**：`apply` 时引用的点表文件不存在 → 记日志并跳过该项，
+>   其余参数照常还原（响应 `applied` 里不含 `point_table`）。
+>
+### 2.4g 链路参数可观测（WP6；`GET /api/status` 纯新增 `link` 键）
+
+`link` 段是**只读快照**，不新增端点、不递增 `schemaVersion`（§1.3）。**引擎未启动时也存在**
+（`state`/`sequence` 为 `null`，`transport` 给出配置目标），因为"连不上"正是最需要看它的时刻。
+
+```jsonc
+"link": {
+  "role": "master" | "slave",
+  "state": {                       // 连接状态机（ConnectionStateMachine.snapshot）
+    "state": "Stopped" | "Connecting" | "Running",
+    "since_seconds": 12.4,         // 当前状态已保持时长
+    "timers": {                    // t0~t3：active=false 时 remaining=0（"没在计时"）
+      "t1": {"timeout": 15.0, "active": true, "elapsed": 3.2, "remaining": 11.8}
+    },
+    "history": [                   // 最近 20 次变迁（旧→新），墙钟秒
+      {"ts": 1794450419.31, "from": "Stopped", "to": "Connecting"}
+    ]
+  } | null,
+  "sequence": {                    // 流控（SequenceManager.snapshot）
+    "k": 12, "w": 8, "send_seq": 5, "recv_seq": 3, "last_ack_rx": 2,
+    "unacked": 3,                  // 已发未确认 I 帧数 —— t1 超时的直接前因
+    "window_available": true, "i_frame_count": 1
+  } | null,
+  "transport": {                   // TCP 传输层（TCPClient.link_stats）
+    "target": "10.0.0.1:2404",
+    "connected": true,
+    "tls": false,
+    "reconnect_count": 2,          // 已重连次数
+    "max_reconnects": 0,           // 0 = 无限
+    "reconnect_interval": 5.0,
+    "reconnect_in_seconds": 5.0,   // 当前处于重连等待时为间隔值，否则 null
+    "ever_connected": true,
+    "last_error": "ConnectionRefusedError: [WinError 10061] ...",  // 最近失败原因
+    "last_error_at": 1794450400.5
+  } | null,
+  "redundancy": {...} | null,      // 仅主站且启用冗余时（与既有 status.redundancy 同形）
+  "clients": 2,                    // 仅子站：当前客户端数
+  "client_id": "127.0.0.1:52344"    // 仅子站：快照取自哪条连接（首条）
+}
+```
+
+> **子站口径**：子站可同时接受多个客户端，`state`/`sequence`/`transport` 取**首条**连接的视图，
+> `clients` 给出总数。多连接逐条定位请用桥接观察页或历史报文。
+> **主站口径**：`transport` 来自 `TCPClient`；**从未建连时也能给出 `last_error`**
+> （如端口无人监听），这是排障最常遇到的情形。
+> 状态机时间线是**内存环形**（20 条），进程重启即清空；不落库（观测不引入持久化副作用）。
+>
+### 2.4h 多格式报告导出（WP8；只新增端点，既有 `/report.html` 不变）
+
+| 方法 | 路径 | 请求 | 响应 |
+|------|------|------|------|
+| GET | `/api/export/report` | `?format=html\|xlsx\|pdf`、`?title=&notes=&conclusion=&conclusion_kind=&session=<id>&audit_limit=200` | 对应格式文件（attachment）；非法 format 400 |
+
+> 三种格式共用同一份 `Evidence`（会话信息 + 帧统计 + **WP2 逐点证据** + WP4 审计流水 +
+> 告警 + 结论 + 曲线），**逐点证据条数必然一致**（测试断言）。`?session=` 缺省取最近
+> 一次传动会话。xlsx 三个 sheet：摘要 / 逐点证据 / 审计流水；PDF 为横向 A4 表。
+> **PDF 需可选依赖 `reportlab`**（`pip install .[pdf]`）：未安装时返回
+> `400 {ok:false, error:"...pip install iec104-tester[pdf]..."}`，**不是 500**——
+> onefile 包在未装 extra 时 html/xlsx 仍可用。`/api/export/report.html` 行为不变。
+
+### 2.4i 点表在线编辑（WP10a）
+
+| 方法 | 路径 | 请求 | 响应 |
+|------|------|------|------|
+| POST | `/api/points/upsert` | `{type: "YX"\|"YC"\|"YK"\|"YM"\|"STEP", point: {ioa: int, name?, group?, enabled?, subtype?, unit?, min_value?, max_value?, decimal_places?, sbo?, ...}}` | `{ok, created, point?: {ioa,type,name,group,enabled}}`；字段非法 400 |
+| DELETE | `/api/points/delete` | `?type=YK&ioa=2001` | `{ok, deleted}`；点不存在 404 |
+
+> `ioa` 已存在时**就地改字段**（保持对象引用），不存在则新增；类型相关字段只带该类型
+> 有意义的键。**关键约定：在线增改删点不重置 `design` 设计基准**——基准是导入时的
+> 设计快照，现场改点后 `GET /api/points/design-diff` 应仍能报出「多/缺」差异；
+> 要更新基准须显式 `POST /api/points/design {action:"set"}`。
+
+### 2.14b 旁路真实网卡抓包（WP9）
+
+| 方法 | 路径 | 请求 | 响应 |
+|------|------|------|------|
+| GET | `/api/sniff/status` | — | `{ok, running, capability, stats, frames, port}` |
+| POST | `/api/sniff/start` | `{port?: int, iface?: str}` | `{ok, capability, port}`；**能力/权限不足时 `200 {ok:false, error, capability}`**（业务错误，不是 500） |
+| POST | `/api/sniff/stop` | — | `{ok, frames, stats}` |
+| GET | `/api/sniff/export` | `?raw=1` 可选 | pcap（attachment）；无数据 400 |
+
+> `capability = {available, backend, reason, requires_root}`；`stats = {packets, apdus,
+> bytes, dropped, errors, last_error}`。
+> **诚实降级**：`available=false` 时 `reason` 必给具体原因（如「Windows 需安装 Npcap 与
+> scapy」），绝不假装抓到包。Linux 用 `AF_PACKET`（需 root/CAP_NET_RAW），
+> Windows 需 Npcap + scapy。
+> 抓到的 APDU 构造成既有 `FrameEntry`，**pcap 写入 / 导入 / 回放 / diff 全链路零改动复用**。
+> 只保留与 `tcp port <port>`（默认 2404）相关且以 `0x68` 开头、长度自洽的完整 APDU；
+> 半帧不猜、不产出。缓冲上限 20000 帧，超出丢弃最旧并计入 `dropped`。
+> 此能力受现场网络镜像/权限约束，**属增强项，不属发布门禁**。
+
 ### 2.4a 透明桥（所有角色应用均注册；非 bridge 角色调用人话业务拒绝 `{ok: false, error: 仅 bridge 角色支持该操作}`）
 
 | 方法 | 路径 | 请求 | 响应 |
@@ -267,6 +490,22 @@
 > I/U/S 帧类型与序号）→ ASDU（TypeID 含义 / VSQ 与 SQ / COT 含义 / 源发与公共
 > 地址 / 逐个信息体 IOA+值+品质+时标）。解析失败段只记备注行，不抛 5xx；
 > `hex` 非法/过短返回 `{ok: false, error}`。前端报文查看器悬停 HEX 单元格时调用。
+>
+> **WP7 纯新增 `tree` 键（结构化解码树）**：同一响应额外返回
+> `tree: {ok, error?, format, apci, asdu, objects[]} | null`，供报文查看器
+> 「值域」列展开子表（`segments` 契约不变，旧消费方忽略 `tree` 即可）。
+>
+> - `apci`：`{length, asdu_length, frame_type, tx_seq, rx_seq, u_func, u_func_name}`；
+> - `asdu`：`{type_id, type_name, sq, num, cot, cot_name, pn, test, origin_addr,
+>   common_addr, object_count}`；
+> - `objects[]`：`{index, ioa, sq_index?, value_display, value, quality,
+>   quality_bits: {iv,nt,sb,bl,ov} | null, quality_raw, timestamp, raw_hex}`。
+>   **SQ=1 时已展开为 `base + i`** 并带 `sq_index`（避免界面显示成"N 个对象同地址"）；
+>   `value` 收敛为 bool/int/float/str/null；`quality_raw` 保留原始字节（IV=0x80 不截位）。
+>   注意：**SIQ/DIQ 的 bit0 是值本身，不含 OV**（OV 仅 QDS 有），故单点遥信的
+>   `quality_bits.ov` 恒为 false。
+> - `tree` 为 `null` 表示该帧无法结构化（如 APCI 截断）；`tree.error` 非空表示
+>   头部已解出但信息体解析失败（此时 `objects` 为空，不编造半截对象）。
 
 ### 2.10 一键诊断包
 

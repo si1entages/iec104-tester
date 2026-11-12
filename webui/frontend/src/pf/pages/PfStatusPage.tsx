@@ -22,12 +22,15 @@ import {
 } from '@patternfly/react-core'
 
 import { useUiStore } from '../../store/uiStore'
+import { reportDownloadUrl } from '../../api/endpoints'
 import { usePointsQuery, useStatusQuery } from '../../api/queries'
 import { useT } from '../../i18n'
 import type { MessageKey } from '../../i18n'
 import { PfAlarmCard } from '../components/PfAlarmCard'
 import { PfNetworkSimCard } from '../components/PfNetworkSimCard'
 import { PfPointsTable } from '../components/PfPointsTable'
+import { PfLinkStatsCard } from '../components/PfLinkStatsCard'
+import { PfProfilesCard } from '../components/PfProfilesCard'
 
 function Stat({ label, value, unit }: { label: string; value: string; unit?: string }) {
   return (
@@ -56,6 +59,12 @@ export function PfStatusPage() {
     { term: 'status.addr', value: String(status?.addr ?? '-') },
     { term: 'conn.vsVr', value: `${status?.vs ?? '-'} / ${status?.vr ?? '-'}` },
     { term: 'conn.window', value: status?.window ?? '-' },
+    {
+      term: 'status.asduAddress',
+      value: status?.asdu_address
+        ? `${status.asdu_address.ca_length}/${status.asdu_address.ioa_length}/${status.asdu_address.cot_length} B`
+        : '-',
+    },
   ]
 
   const [conclusionKind, setConclusionKind] = useState('')
@@ -127,6 +136,17 @@ export function PfStatusPage() {
                   onClick={() => void exportReport()} title={t('status.exportReportHint')}>
             {t('status.exportReport')}
           </Button>
+          {/* WP8：原生 xlsx / PDF（PDF 需后端 report[pdf] extra） */}
+          <Button variant="link" isInline data-testid="export-report-xlsx"
+                  title={t('status.exportReportXlsxHint')}
+                  onClick={() => { window.location.href = reportDownloadUrl('xlsx') }}>
+            {t('status.exportReportXlsx')}
+          </Button>
+          <Button variant="link" isInline data-testid="export-report-pdf"
+                  title={t('status.exportReportPdfHint')}
+                  onClick={() => { window.location.href = reportDownloadUrl('pdf') }}>
+            {t('status.exportReportPdf')}
+          </Button>
         </Flex>
       </PageSection>
       <PageSection variant="secondary">
@@ -180,6 +200,10 @@ export function PfStatusPage() {
           </CardBody>
         </Card>
       </PageSection>
+
+      {/* WP6：链路参数可观测；WP5：工程配置方案——bridge 角色都不渲染 */}
+      {status && status.role !== 'bridge' ? <PfLinkStatsCard status={status} /> : null}
+      {status && status.role !== 'bridge' ? <PfProfilesCard /> : null}
     </>
   )
 }

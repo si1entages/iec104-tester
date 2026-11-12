@@ -3,6 +3,177 @@
 本文件记录对外可见的功能/修复；版本号与 `pyproject.toml`、
 `core/version.py`、`webui/frontend/package.json` 保持一致。
 
+## [1.11.0] — 2026-11-12
+
+### Added
+
+- **ASDU 地址字段长度可配（WP1 / 现场非标装置互联，方案 `docs/optimization_plan_v111.md`）**：
+  新增 `core/protocol/address.py`，把历史上硬编码的 CA 2B / IOA 3B / COT 2B 提升为
+  一级配置，支持 **CA 1/2B、IOA 1/2/3B、COT 1/2B**。三种配置方式：
+  ① YAML `asdu_address: {ca_length, ioa_length, cot_length}`；
+  ② CLI `--ca-length/--ioa-length/--cot-length`（共 7 个新参数，另含桥两侧独立 4 个）；
+  ③ 库调用 `set_default` / `use_default` / 单帧 `address_config` override。
+  发送侧 74 个 `ASDUBuilder.build_*`、接收侧 9 个解码调用点、离线 diff/翻译/报告摘要
+  共用同一真值源；**透明桥两侧各包 `use_default` 实现任务级隔离**，互不串味。
+  `ASDU.encode()` 在 IOA 超出配置位宽时显式报错，不静默截断（防止遥控打到错误对象）。
+  `/api/status` 新增只读 `asdu_address` 键，Carbon/PF 状态总览页显示生效口径。
+  详见 [`docs/asdu_address_config.md`](docs/asdu_address_config.md)。
+
+- **对点/传动验收闭环（WP2 / 现场交付物，方案 `docs/optimization_plan_v111.md`）**：
+  新增「对点传动」页面（master/slave 角色可见，bridge 隐藏）：从点表勾选 + 填期望值/
+  回读异址 `command_ioas` 建会话 → 一键批量传动（逐点 SBO 两段式/设点/步命令）→
+  自动判定（品质异常/值不符/超时/SBO 否定确认一律 FAIL，无期望值判 MANUAL
+  待人工，不出假 PASS；YC 按容差）→ 人工改判 → 导出 **xlsx / json / html** 三格式
+  可签字交付物（逐点带下发帧/回读帧 hex 与时间，HTML 全转义可直接打印）。
+  会话落独立 SQLite `data/commissioning.db`（WAL），刷新/重启可恢复；执行期间
+  暂停周期 GI/对时、中止补发 DEACT 清理已选未执行遥控；`commission.*` 事件复用
+  既有 WS `event` 通道。新增 REST 端点 8 个（契约 `webui/api_contract.md` §2.4c）。
+
+- **操作审计 + 多用户三角色（WP4a / 现场交付物，方案 `docs/optimization_plan_v111.md`）**：
+  新增「操作审计」页面（master/slave 角色）：每条主站命令/子站置数/传动下发自动追加
+  **SHA-256 哈希链**（`hash=SHA256(prev_hash‖canonical)`，独立 SQLite `data/audit.db`），
+  记录操作人/角色/来源 IP/动作/目标/结果/原因/**下发与回读帧 hex**；「校验链」一键
+  检测事后删改并报出断点 id；导出 JSON/CSV 归档。被权限拒绝的操作**不入链**（越权
+  无痕可查证）。新增 `--auth-config users.yaml` 多用户三角色
+  （viewer 只读 / operator 可操作 / admin 全权，权限矩阵见契约 §2.4d）；
+  **兼容模式（未配置认证）行为与 v1.10.0 完全一致**；仅配单 token 时为匿名 admin，
+  前端可用「操作人」输入（`X-Operator` 头）归因，多用户模式忽略该头防冒名。
+  WP2 每条传动记录自动复用同一条审计链。新增 REST 端点 4 个
+  （`/api/audit/records|verify|export`、`/api/auth/users`）+ `/api/auth` 纯新增
+  `mode/operator/role` 字段（契约 `webui/api_contract.md` §2.4d）。
+
+- **防误操作闭锁（WP4b / 现场安全，方案 `docs/optimization_plan_v111.md`）**：
+  点表 YK/YC/STEP 点可声明 `interlock`（引用遥信期望位置，多条件 AND），
+  遥控/设点/升降/比特串在**发送任何帧之前**求值——不满足则**零帧下发**并返回
+  业务错误与条件明细；取值失败（遥信未上送）按不满足处理（未知工况不操作）。
+  拒绝与「强制解锁」均写入审计哈希链（`yk/interlock-blocked` / `yk/force-unlock`），
+  强制解锁需 admin 角色。DEACT 撤销帧不受闭锁限制（安全清理必须可发）。
+  界面：点表「联锁」标记（内联不新增列）+ 命令弹窗条件提示与强制解锁复选框。
+  详见 [`docs/interlock.md`](docs/interlock.md)。
+
+- **工程配置方案管理（WP5 / 现场交付，方案 `docs/optimization_plan_v111.md`）**：
+  状态总览页新增「工程配置方案」卡片：把当前**连接 / t0~t3 / k-w / ASDU 地址长度 /
+  点表引用 / 告警阈值**存成命名方案（纯文本 `configs/profiles/<名称>.yaml`），
+  换现场一键切换；**浏览器刷新后自动恢复上次应用的方案**。支持另存/覆盖/删除/
+  导出 YAML/文本导入。新增 CLI `--profile <名称>`（无浏览器场景；方案文件本身也
+  可直接当 `--config` 用）。方案只覆盖工程参数，**不含** TLS/证书路径、历史库
+  保留期与显示偏好；服务端启动**不**自动应用方案（端口/角色仍只由 CLI 与
+  `--config` 决定）。REST 端点 8 个（契约 §2.4f），管理动作仅 admin 可写，
+  保存/应用/删除写入审计哈希链。详见 [`docs/profiles.md`](docs/profiles.md)。
+
+- **链路参数可观测面板（WP6 / 现场排障，方案 `docs/optimization_plan_v111.md`）**：
+  状态总览页新增「链路参数」面板：连接状态机状态与已保持时长、**t0~t3 各定时器剩余**、
+  **未确认 I 帧数 / k**、VS/VR、**重连计数与最近失败原因（含从未建连时的原因）**、
+  最近 8 次**状态变迁时间线**。`/api/status` 只增只读 `link` 键，且**引擎未启动时也存在**
+  （给出配置目标）——"连不上"正是最需要看它的时刻。数据来自三处协议层只读快照
+  （状态机 / 序列 / TCP 传输），任何一段异常只降级该段，不影响状态上报。
+  契约 `webui/api_contract.md` §2.4g。
+
+- **报文值域解码树（WP7 / 现场排障，方案 `docs/optimization_plan_v111.md`）**：
+  报文查看器新增「对象」列，点击就地展开该帧的信息对象子表——**每个 IOA 的值、
+  五位品质位（IV/NT/SB/BL/OV）、时标、原始字节**。`/api/frames/decode` 在既有
+  分段文本之外**纯新增结构化 `tree` 键**（旧契约不变）。**SQ=1 的连续帧会展开成
+  N 行 `base+i`**（此前只能看到"N 个对象同地址"）；品质异常行标色。
+  只对含信息对象的 I 帧出子表，S/U 帧给「无信息体」说明。契约 §2.9。
+
+- **原生 Excel / PDF 报告（WP8）**：状态页新增「导出 Excel / 导出 PDF」按钮，
+  `GET /api/export/report?format=html|xlsx|pdf` 输出可归档报告（摘要 + **WP2 逐点证据**
+  + WP4 审计流水 + 告警 + 结论），三种格式共用同一 `Evidence`，**逐点条数一致**。
+  xlsx 三个工作表；PDF 为横向 A4 表。**PDF 依赖 `report[pdf]` 可选 extra**，
+  未安装时返回 400 + 安装提示（onefile 包 HTML/xlsx 仍可用）。契约 §2.4h。
+- **旁路真实网卡抓包（WP9）**：抓包页新增旁路卡片——Linux `AF_PACKET` /
+  Windows Npcap，BPF 过滤 2404 端口，抓到的 APDU 直接复用既有 pcap 写入/导入/
+  回放/diff 链路。能力或权限不足时**明确返回原因并降级为引擎录制**，绝不假装抓到包。
+  受现场网络镜像/权限约束，属增强项不属发布门禁。契约 §2.14b。
+- **标准合规收口（WP11 / 2026-11-12 按新口径结案）**：用户确认「按同一口径处理」——与 WP3/T50 一样以互测 + 开源多实现交叉证据验收，不再等标准原文/厂商样本/检测机构清单/现场抓包。
+  - 拆包为 **11a（B=0 已交付）/ 11b（增强项不设门禁）**；方案 `docs/optimization_plan_v111.md` §4 与路线图同步。
+  - 新增 `docs/baseline.json` 用例数单一真值源；`tests/test_version_consistency.py` 除版本徽章外**新增用例数断言**（实测把 2121 改成 1711 即失败）；双语 README 基线统一为 **2121 / 91.49% / 164 / 63**。
+  - `MasterConfig.auto_clock_sync` 从死配置恢复并在 STARTDT CON 后真实发 C_CS_NA_1（默认关闭零回归）；`compliance.max_time_skew_s`（原硬编码 300.0）与 `time_tag_format` 提升为 YAML 配置，`configs/master_config.yaml` 补样例。
+  - `tests/test_wp11a_coverage.py` 表驱动 17 例补齐 `master_protocol` 多类型总召唤响应分支；`tests/README.md` 清单按新口径更新。
+  - `docs/tls.md` 补「按新口径合规结论」：**TLS(62351-3) + WP4 审计已由 otfabric 5 栈与离线向量验证**，但 **62351-4/-6 应用层认证、SA、RBAC、CRL、密钥轮换、重放防护仍未实现，不宣称 62351 合规**（诚实边界保留）。冗余双通道切换可观测接入 WP6 面板（活动通道/切换次数/主备连接）。
+  - 11b（SCD 私有映射/型式试验/真机语料）以已有开源语料结案、真实样本立增强工单，不设门禁。
+
+- **文件传输完工 + T50 按新口径验收（WP3 / 2026-11-12 结案）**：用户明确反转口径
+  （「找不到真机测试，服务端客户端互测 + 其他开源软件测试能过就行」），故以
+  **本仓 master↔slave 真实 TCP 互测 + 多独立开源实现交叉证据**验收，不再等真机。
+  - 新增 `core/protocol/file_semantics.py` + `AppConfig.file_transfer` 语义档位
+    （`ed1` 默认逐字节兼容历史 / `ed2` = lib60870.NET + otfabric 共识 / `project`），
+    NOF/SCQ/FRQ-SRQ/WITH_DEACT/分包大小显式化，非法档位加载期报错。
+  - **从站多节分包**：≥3 节逐节 `F_SR→SCQ=6→F_SG→F_LS(LSQ=3)→F_AF(3)`、
+    最后节 LSQ=1、逐节 CHS；真实 TCP **768B/3 节×256B** 逐字节还原。
+  - **主站上传方向**：`POST /api/master/file {action:"upload", data:hex}`，
+    主站发段/F_LS → 子站校验 CHS 落盘 → 回 F_AF；真实 TCP **560B 上传** +
+    肯定确认 + COMPLETED；CHS 篡改回否定且不落盘。
+  - 5 项开放项（NOF / SCQ / WITH_DEACT / 多节 / FRQ-SRQ）以 lib60870-C、
+    lib60870.NET、otfabric 5 栈矩阵 + 本仓互测交叉证据**逐项结案**
+    （[`docs/file_transfer_open_items.md`](docs/file_transfer_open_items.md)）。
+    契约 §2.2 扩展 `/api/master/file`；`configs/master_config.yaml` 加 `file_transfer` 节。
+  - **发布阈值达成**：WP1~WP4 + WP3 全部按新口径通过 → 可对外宣称「现场工程可用」；
+    剩余仅 WP11（标准原文/厂商样本外部阻塞）。
+
+- **点表在线编辑 + 服务化交付（WP10）**：点表工具栏可新增/编辑/删除点定义
+  （`POST /api/points/upsert`、`DELETE /api/points/delete`）；**在线改点不重置设计基准**，
+  design-diff 仍能报出差异。交付 `Dockerfile` / `docker-compose.yml` /
+  `deploy/iec104-tester.service` / `deploy/install-service.ps1` / `docs/deploy.md`
+  （离线部署说明），并把 `capture_tool` 等 CLI 工具纳入 exe 随包。
+  **服务化仅解决无人值守长期跑，不改变「非生产 SCADA 网关」安全边界**。契约 §2.4i。
+
+### Fixed
+
+- headless 透明桥（`--mode bridge --no-gui`）此前不加载 `--config`，本次补上
+  `asdu_address` 节的加载，避免用户写了 YAML 却被静默忽略。
+- 离线报文 diff / 测试报告帧摘要 / 桥帧摘要此前固定 `ca_length=2`，现随生效配置解析。
+
+### 兼容性
+
+- 默认 2/3/2 与 v1.10.0 **逐字节一致**；旧 YAML 缺 `asdu_address` 节自动回落默认值；
+  `/api/status` 只增键不改既有键；`POST /api/bridge/start` 的两个新字段可选、不传即旧行为。
+- WP2 的 8 个 commission 端点仅 master/slave 角色注册（bridge 角色不注册），不影响既有路由；
+  `data/commissioning.db` 为新库，不触碰历史库。
+- WP4a 的 4 个 audit 端点同上仅 master/slave 注册；**未配置认证时整体直通**（兼容模式
+  行为与 v1.10.0 一致，无审计身份不入链）；`/api/auth` 只增键不改既有键；
+  `data/audit.db` 为新库，不触碰历史库。
+- WP4b 的 `interlock` 为点表可选字段、`force` 为命令端点可选键：**未配置闭锁的点、
+  未传 `force` 的请求、旧点表 YAML 行为与 v1.10.0 完全一致**；`/api/points` 只增键。
+- WP5 全部为新增：无方案目录时 `/api/profiles` 返回空列表；不传 `--profile` 时启动路径
+  与 v1.10.0 一致；方案 YAML 可被 `--config` 直接加载（双向通用）。
+- WP6 全部为新增：`/api/status` 只增 `link` 键、`schemaVersion` 不递增；状态机时间线为
+  内存环形缓冲（20 条），进程重启即清空，不引入任何持久化文件。
+- WP7 全部为新增：`/api/frames/decode` 只增 `tree` 键，`segments` 结构逐字段不变；
+  报文查看器新增一列（96px），既有列宽与筛选行为不变。
+- WP8/9/10 全部为新增：`/api/export/report.html` 与既有抓包端点行为不变；
+  `report[pdf]` 为可选依赖；旁路抓包在无权限时降级；点表在线编辑不动设计基准。
+
+### 验证
+
+- WP1：`tests/test_asdu_address_config.py`（45 例）+ `tests/test_tcp_bridge.py` 桥隔离 2 例。
+- WP2：`tests/test_commissioning.py`（判定规则/持久化/导出转义/API 全流程/编排状态机）。
+- WP4a：`tests/test_audit.py` 32 例（哈希链/篡改检测报断点/权限矩阵/兼容模式/编排联动）。
+- WP4b：`tests/test_interlock.py` 35 例（解析/求值/点表往返/零帧下发/force 权限/DEACT 例外/API）。
+- WP5：`tests/test_profiles.py` 42 例（名称校验/存取容错/3 套方案切换全量还原/点表还原/导入导出/
+  方案文件即合法 `--config`/三角色权限/审计）。
+- WP6：`tests/test_link_observability.py` 21 例（三处快照语义/**真 TCP 静默对端复现 t1 超时**/
+  未建连即有失败原因/降级不崩 status）+ 前端 12 例链路展示逻辑。
+- WP7：`tests/test_frame_decode_tree.py` 23 例（SQ=1 20 对象逐字段/五位置品质/SIQ 无 OV/
+  截断帧可读错误/旧 `segments` 契约不变）+ 前端 5 例解码树展示逻辑。
+- WP8/9/10：`tests/test_export_report.py`（28 例，三格式一致 + PDF 可选依赖降级）+
+  `tests/test_sniffer.py`（构造帧解析/畸形帧/权限降级/pcap 往返/端点 40+ 例）+
+  `tests/test_points_online_edit.py`（**设计基准不重置**/全类型字段/端点 30+ 例）+
+  前端 `pointEdit.test.ts`（8 例）。
+- WP3：`tests/test_file_transfer_multisection.py`（13 例，含 3 节真实 TCP + CHS 拒绝）、
+  `tests/test_file_transfer_upload_direction.py`（7 例，含 560B 上传闭环）、
+  文件传输全套 + 离线互操作契约向量 **101 passed**。
+- WP11：`tests/test_wp11a_config.py` 11 例 + `tests/test_wp11a_coverage.py` 17 例 +
+  前端 `linkPanel.test.ts` 2 例；`test_config_wiring_cleanup.py` 旧「死字段」断言按接线后语义更新。
+- 累计口径：全量后端 **2121 passed / 覆盖率 91.49%**（门禁 91）、前端 typecheck + **179 单测**、
+  i18n 清单 0、Playwright **63 e2e**（含视觉基线 `commission-light.png`、`audit-light.png`，
+  及因 WP5/WP6 卡片更新的 `status-light.png`）、ruff 全绿。
+- 发版前补齐：`webui/frontend/src/lib/wp11Hooks.test.tsx`（15 例，覆盖 WP2/WP4a/WP5/WP9 四个
+  共享 hook 的 guard 生命周期、期望值 bool>number>string、`ok=false` 错误呈现、空名拦截、
+  无活动方案静默与快照缺省）——修复 v1.11 前端 V8 覆盖率门禁（原 164 单测下
+  statements 53.71 / lines 56.12 / functions 49.25 均低于阈值，`npm run test:coverage` 会红）；
+  补后 179 单测下 60.72 / 63.36 / 54.33 / 54.46 全过阈。`docs/baseline.json` 同步为 179。
+
 ## [1.10.0] — 2026-11-10
 
 ### Added

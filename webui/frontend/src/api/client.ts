@@ -22,6 +22,26 @@ export type QueryValue = string | number | boolean | null | undefined
 /** 访问令牌在 localStorage 的键（B7：服务端 --auth-token 启用时使用） */
 export const TOKEN_KEY = 'iec104_token'
 
+/** 操作人姓名在 localStorage 的键（WP4a：兼容单 token 模式下的审计归因头） */
+export const OPERATOR_KEY = 'iec104_operator'
+
+/** 读取本地保存的操作人姓名（审计 X-Operator 头；多用户 token 模式下后端忽略） */
+export function getOperator(): string {
+  try {
+    return localStorage.getItem(OPERATOR_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+export function setOperator(name: string): void {
+  try {
+    localStorage.setItem(OPERATOR_KEY, name)
+  } catch {
+    // 存储不可用时静默：操作人头只是归因增强，不阻塞操作
+  }
+}
+
 /**
  * 合并模式（单进程双角色）下，子站 API/WS 挂在 `/slave` 前缀。
  * 单角色模式该前缀为 null，主/子站都直接用 `/api`。
@@ -107,6 +127,9 @@ async function send(method: string, path: string, options: RequestOptions = {}):
   const headers: Record<string, string> = {}
   const token = getToken()
   if (token) headers['Authorization'] = `Bearer ${token}`
+  // WP4a：操作人归因头（兼容单 token 模式；多用户模式下后端以 token 映射为准）
+  const operator = getOperator()
+  if (operator) headers['X-Operator'] = operator
   const init: RequestInit = { method, headers }
   if (options.text !== undefined) {
     headers['Content-Type'] = options.contentType ?? 'text/plain;charset=utf-8'
@@ -151,6 +174,14 @@ export async function apiPost<T>(
   return asContract(path, schema, await send('POST', path, { json }))
 }
 
+/** DELETE 无请求体，响应仍是 JSON（WP2 删除验收会话）。 */
+export async function apiDelete<T>(
+  path: string,
+  schema: Schema<T>,
+): Promise<T> {
+  return asContract(path, schema, await send('DELETE', path))
+}
+
 /** POST 原始文本（YAML / 点表导入），响应仍是 JSON。 */
 export async function apiPostText<T>(
   path: string,
@@ -169,6 +200,8 @@ export async function apiPostBytes<T>(
   const headers: Record<string, string> = { 'Content-Type': 'application/octet-stream' }
   const token = getToken()
   if (token) headers['Authorization'] = `Bearer ${token}`
+  const operator = getOperator()
+  if (operator) headers['X-Operator'] = operator
   const init: RequestInit = { method: 'POST', headers, body: data }
   return asContract(path, schema, await fetch(buildUrl(path), init))
 }

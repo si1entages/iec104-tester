@@ -139,6 +139,149 @@ def _translate_asdu(asdu: ASDU) -> list[str]:
     return lines
 
 
+def _quality_bits(quality: Any) -> dict:
+    """五位品质位 → 布尔字典（WP7；按 IEC 60870-5-101 位定义）."""
+    return {
+        "iv": bool(getattr(quality, "invalid", False)),
+        "nt": bool(getattr(quality, "not_topical", False)),
+        "sb": bool(getattr(quality, "substituted", False)),
+        "bl": bool(getattr(quality, "blocked", False)),
+        "ov": bool(getattr(quality, "overflow", False)),
+    }
+
+
+def _object_entry(index: int, obj: Any, type_id: int) -> dict:
+    """单个信息对象 → 结构化条目（值/品质/时标/原始字节）.
+
+    ``raw_hex`` 是该信息对象的线上字节（含 IOA 之后的全部内容），
+    便于现场把可疑对象直接拿去和装置手册对照。
+    """
+    data = getattr(obj, "data", None)
+    entry: dict[str, Any] = {"index": index, "ioa": int(getattr(obj, "ioa", 0))}
+    try:
+        entry["value_display"] = _display_value(type_id, data)
+    except Exception:  # noqa: BLE001 — 单个对象解析失败不影响整帧
+        entry["value_display"] = str(getattr(data, "value", data))
+    try:
+        entry["value"] = _jsonable_value(data)
+    except Exception:  # noqa: BLE001
+        entry["value"] = None
+    try:
+        quality = get_value_quality(data)
+        entry["quality"] = str(quality)
+        entry["quality_bits"] = _quality_bits(quality)
+        entry["quality_raw"] = int(getattr(quality, "raw", 0))
+    except Exception:  # noqa: BLE001 — 无品质字段的类型（系统命令等）
+        entry["quality"] = ""
+        entry["quality_bits"] = None
+        entry["quality_raw"] = None
+    ts = None
+    try:
+        ts = get_value_timestamp(data) or getattr(obj, "time_tag", None)
+    except Exception:  # noqa: BLE001
+        ts = None
+    if ts is not None:
+        try:
+            entry["timestamp"] = ts.to_datetime_str()
+        except Exception:  # noqa: BLE001
+            entry["timestamp"] = None
+    else:
+        entry["timestamp"] = None
+    try:
+        raw = bytes(data) if isinstance(data, (bytes, bytearray)) else None
+        entry["raw_hex"] = raw.hex().upper() if raw is not None else None
+    except Exception:  # noqa: BLE001
+        entry["raw_hex"] = None
+    return entry
+
+
+def _jsonable_value(data: Any) -> Any:
+    """把信息体的值收敛成 JSON 可表示的形态（bool/int/float/str/None）."""
+    if data is None:
+        return None
+    if isinstance(data, (bool, int, float, str)):
+        return data
+    if isinstance(data, (bytes, bytearray)):
+        return bytes(data).hex().upper()
+    inner = getattr(data, "value", None)
+    if isinstance(inner, (bool, int, float, str)):
+        return inner
+    if inner is not None:
+        return str(inner)
+    return str(data)
+
+
+def decode_tree(hex_str: str) -> dict[str, Any]:
+    """结构化解码树（WP7）：``{ok, format, apci, asdu, objects, error?}``.
+
+    与 :func:`translate_hex` 的分段文本互补——文本给人看，树给前端渲染可展开子表。
+    **SQ=1 时** ASDU 只携带首地址，后续对象地址为 ``base + i``；这里显式展开
+    并标 ``sq_index``，避免界面显示成"20 个对象同地址"。
+    """
+    raw = _hex_bytes(hex_str)
+    if raw is None:
+        return {"ok": False, "error": "非法 HEX 串"}
+    if len(raw) < 6:
+        return {"ok": False, "error": f"帧过短：{len(raw)} 字节（至少 6）"}
+
+    out: dict[str, Any] = {"ok": True, "format": "?", "apci": None, "asdu": None,
+                           "objects": []}
+    try:
+        apci, _ = APCICodec.decode(raw)
+    except ValueError as e:
+        out["error"] = f"APCI 解析失败：{e}"
+        return out
+    out["format"] = apci.frame_type.name
+    out["apci"] = {
+        "length": data_len(raw),
+        "asdu_length": apci.asdu_length,
+        "frame_type": apci.frame_type.name,
+        "tx_seq": getattr(apci, "tx_seq", None),
+        "rx_seq": getattr(apci, "rx_seq", None),
+        "u_func": getattr(apci, "u_func", None),
+        "u_func_name": U_FUNC_NAMES.get(getattr(apci, "u_func", -1)),
+    }
+    if out["format"] != "I" or len(raw) <= 6:
+        return out
+
+    body = raw[6: 2 + raw[1]]
+    try:
+        asdu = ASDU.decode(body)
+    except Exception:  # noqa: BLE001 — 退回只解头部，至少给出 TypeID/COT
+        try:
+            asdu = ASDU.decode_header(body)
+            out["error"] = "ASDU 信息体解析失败（仅解出头部）"
+        except Exception as e:  # noqa: BLE001
+            out["error"] = f"ASDU 解析失败：{e}"
+            return out
+
+    type_id = int(asdu.type_id)
+    out["asdu"] = {
+        "type_id": type_id,
+        "type_name": _type_name(type_id),
+        "sq": bool(asdu.sq),
+        "num": int(asdu.num),
+        "cot": int(asdu.cot),
+        "cot_name": _cot_name(asdu.cot, asdu.pn, asdu.test),
+        "pn": bool(asdu.pn),
+        "test": bool(asdu.test),
+        "origin_addr": int(asdu.origin_addr),
+        "common_addr": int(asdu.common_addr),
+        "object_count": len(asdu.objects),
+    }
+    for i, obj in enumerate(asdu.objects):
+        entry = _object_entry(i + 1, obj, type_id)
+        if asdu.sq:
+            entry["sq_index"] = i
+        out["objects"].append(entry)
+    return out
+
+
+def data_len(raw: bytes) -> int:
+    """APDU 总长度（首字节 0x68 + 长度字节 + 2）."""
+    return raw[1] + 2
+
+
 def translate_hex(hex_str: str) -> dict[str, Any]:
     """翻译一帧 HEX 为分段文本。返回 ``{ok, error?, format?, segments?}``.
 
@@ -151,6 +294,11 @@ def translate_hex(hex_str: str) -> dict[str, Any]:
         return {"ok": False, "error": f"帧过短：{len(raw)} 字节（至少 6）"}
 
     segments: list[dict[str, Any]] = []
+    # WP7：同一份 HEX 顺带产出结构化树（纯新增键；失败时为 None，不影响分段文本）
+    try:
+        tree = decode_tree(hex_str)
+    except Exception:  # noqa: BLE001
+        tree = None
     apci_lines, fmt, asdu_body = _translate_apci(raw)
     segments.append({"title": "APCI（传输控制头）", "lines": apci_lines})
 
@@ -162,9 +310,10 @@ def translate_hex(hex_str: str) -> dict[str, Any]:
                 asdu = ASDU.decode_header(asdu_body)
             except Exception as e:
                 segments.append({"title": "ASDU", "lines": [f"ASDU 解析失败：{e}"]})
-                return {"ok": True, "format": fmt, "segments": segments}
+                return {"ok": True, "format": fmt, "segments": segments,
+                        "tree": tree}
         segments.append({"title": f"ASDU（{_type_name(int(asdu.type_id))}）", "lines": _translate_asdu(asdu)})
     elif fmt == "I":
         segments.append({"title": "ASDU", "lines": ["I 帧无 ASDU"]})
 
-    return {"ok": True, "format": fmt, "segments": segments}
+    return {"ok": True, "format": fmt, "segments": segments, "tree": tree}

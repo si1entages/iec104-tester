@@ -120,6 +120,7 @@ def run_web(role: str, http_port: int | None = None, open_browser: bool = True,
             point_table=None, connection: dict | None = None,
             history_db=None, engine_config=None,
             http_host: str = "127.0.0.1", auth_token: str | None = None,
+            auth_config: str | None = None,
             web_tls_cert: str | None = None,
             web_tls_key: str | None = None,
             history_dbs: dict | None = None) -> None:
@@ -183,6 +184,7 @@ def run_web(role: str, http_port: int | None = None, open_browser: bool = True,
                    connection=connection, history_db=history_db,
                    history_dbs=history_dbs,
                    app_config=engine_config, auth_token=auth_token,
+                   auth_config=auth_config,
                    ssl_context=ssl_context)
     except KeyboardInterrupt:
         pass
@@ -285,6 +287,13 @@ def _demo_commands(args, http_port: int, iec_port: int) -> list[str]:
         cmd += ["--config", args.config]
     if args.point_table:
         cmd += ["--point-table", args.point_table]
+    # WP1：地址长度 CLI 覆盖必须透传给子进程，否则演示/子进程会退回默认 2/3/2。
+    # 用 getattr 兼容精简 Namespace（单元测试与库调用路径）。
+    for flag, value in (("--ca-length", getattr(args, "ca_length", None)),
+                        ("--ioa-length", getattr(args, "ioa_length", None)),
+                        ("--cot-length", getattr(args, "cot_length", None))):
+        if value is not None:
+            cmd += [flag, str(value)]
     return cmd
 
 
@@ -459,8 +468,30 @@ def cli(default_role: str | None = None) -> int:
         help="[bridge] 上游证书主机名校验（按 IP 连接而证书只签域名时必填）"
     )
     parser.add_argument(
+        "--bridge-listen-ca-length", type=int, choices=(1, 2), default=None,
+        help="[bridge] 监听侧 ASDU 公共地址字节数（默认同 asdu_address.ca_length）"
+    )
+    parser.add_argument(
+        "--bridge-listen-ioa-length", type=int, choices=(1, 2, 3), default=None,
+        help="[bridge] 监听侧 ASDU 信息对象地址字节数（默认同 asdu_address.ioa_length）"
+    )
+    parser.add_argument(
+        "--bridge-upstream-ca-length", type=int, choices=(1, 2), default=None,
+        help="[bridge] 上游侧 ASDU 公共地址字节数（默认同 asdu_address.ca_length）"
+    )
+    parser.add_argument(
+        "--bridge-upstream-ioa-length", type=int, choices=(1, 2, 3), default=None,
+        help="[bridge] 上游侧 ASDU 信息对象地址字节数（默认同 asdu_address.ioa_length）"
+    )
+    parser.add_argument(
         "--config", type=str, default=None,
         help="配置文件路径 (YAML)"
+    )
+    parser.add_argument(
+        "--profile", type=str, default=None,
+        help="工程配置方案名（WP5）：从 configs/profiles/<名称>.yaml 加载工程参数"
+             "（连接 / t0~t3 / k-w / ASDU 地址长度 / 点表引用），在 --config 之后叠加；"
+             "方案文件本身也可直接当 --config 用"
     )
     parser.add_argument(
         "--host", type=str, default=None,
@@ -517,6 +548,12 @@ def cli(default_role: str | None = None) -> int:
              "默认读环境变量 IEC104_AUTH_TOKEN"
     )
     parser.add_argument(
+        "--auth-config", type=str, default=None,
+        help="多用户三角色表 YAML（WP4a：viewer 只读 / operator 可操作 / "
+             "admin 全权），格式 {'users': [{name, token, role}]}；"
+             "未命中时回落 --auth-token"
+    )
+    parser.add_argument(
         "--web-tls-cert", type=str, default=None,
         help="Web UI HTTPS 证书 (PEM)；设置后 Web 服务以 HTTPS 监听"
     )
@@ -527,6 +564,18 @@ def cli(default_role: str | None = None) -> int:
     parser.add_argument(
         "--no-browser", action="store_true",
         help="启动 Web 服务时不自动打开浏览器"
+    )
+    parser.add_argument(
+        "--ca-length", type=int, choices=(1, 2), default=None,
+        help="ASDU 公共地址字节数 (1 或 2；默认 2)；覆盖 --config 的 asdu_address.ca_length"
+    )
+    parser.add_argument(
+        "--ioa-length", type=int, choices=(1, 2, 3), default=None,
+        help="ASDU 信息对象地址字节数 (1/2/3；默认 3)；覆盖 --config 的 asdu_address.ioa_length"
+    )
+    parser.add_argument(
+        "--cot-length", type=int, choices=(1, 2), default=None,
+        help="ASDU 传送原因字节数 (1 或 2；默认 2)；覆盖 --config 的 asdu_address.cot_length"
     )
     parser.add_argument(
         "--demo", action="store_true",
@@ -603,6 +652,26 @@ def cli(default_role: str | None = None) -> int:
     else:
         config = AppConfig()
 
+    # WP5：--profile 在 --config 之后叠加工程参数（连接/t0~t3/k-w/ASDU 长度/点表引用）。
+    # 取不到方案文件时直接报错退出——用户显式点名了方案，静默忽略会让现场无从察觉。
+    profile_name = getattr(args, "profile", None)
+    if profile_name:
+        from core.config import apply_profile
+        from core.data.profiles import ProfileNameError, validate_name
+
+        try:
+            safe = validate_name(profile_name)
+        except ProfileNameError as e:
+            print(f"--profile 无效：{e}", file=sys.stderr, flush=True)
+            raise SystemExit(2) from e
+        profile_path = Path("configs/profiles") / f"{safe}.yaml"
+        try:
+            applied = apply_profile(config, profile_path)
+        except FileNotFoundError as e:
+            print(f"--profile 加载失败：{e}", file=sys.stderr, flush=True)
+            raise SystemExit(2) from e
+        logger.info("Applied profile '%s' (%s)", safe, ", ".join(applied))
+
     # 命令行参数覆盖（both 不是 AppConfig 的合法 mode；引擎按角色单独设置）
     if args.mode and args.mode != "both":
         config.mode = args.mode
@@ -616,6 +685,22 @@ def cli(default_role: str | None = None) -> int:
         config.connection.host = args.upstream_host
     if args.upstream_port:
         config.connection.port = args.upstream_port
+
+    # ASDU 地址字段长度（WP1）：命令行 > 配置文件 > 标准默认值 2/3/2。
+    # 注入协议层全局默认，使 ASDUBuilder 与所有引擎解码共用同一真值源；
+    # 未指定任何覆盖时 set_default(标准默认) 为 no-op，字节行为零变化。
+    from core.protocol.address import AsduAddressConfig, set_default
+    if any(v is not None for v in (args.ca_length, args.ioa_length, args.cot_length)):
+        config.asdu_address = AsduAddressConfig(
+            ca_length=args.ca_length or config.asdu_address.ca_length,
+            ioa_length=args.ioa_length or config.asdu_address.ioa_length,
+            cot_length=args.cot_length or config.asdu_address.cot_length,
+        )
+    set_default(config.asdu_address)
+    logger.info(
+        f"ASDU address lengths: ca={config.asdu_address.ca_length} "
+        f"ioa={config.asdu_address.ioa_length} cot={config.asdu_address.cot_length}"
+    )
 
     # TLS 命令行覆盖（T20）。优先级：命令行 > 配置文件。
     if args.tls:
@@ -754,6 +839,7 @@ def cli(default_role: str | None = None) -> int:
                 point_table=point_table, connection=connection,
                 history_db=history_db, history_dbs=history_dbs, engine_config=config,
                 http_host=args.http_host, auth_token=args.auth_token,
+                auth_config=getattr(args, "auth_config", None),
                 web_tls_cert=args.web_tls_cert, web_tls_key=args.web_tls_key)
         return 0
     finally:
@@ -777,7 +863,35 @@ def _run_bridge(args, logger) -> int:
     """
     import asyncio
 
+    # WP1：headless 桥在 config 主加载路径之前返回，需在此独立注入地址长度。
+    # 优先级与 Web 模式一致：--config 的 asdu_address → CLI 通用覆盖 → 标准默认。
+    from core.config import AppConfig, load_config
     from core.engine.tcp_bridge import BridgeConfig, TcpBridge, describe_frame
+    from core.protocol.address import AsduAddressConfig, set_default
+    def _opt(name: str):
+        """防御式取可选 CLI 参数（精简 Namespace / 库调用路径兼容）。"""
+        return getattr(args, name, None)
+
+    if _opt("config") and Path(args.config).exists():
+        base = load_config(args.config).asdu_address
+    else:
+        base = AppConfig().asdu_address
+    base = AsduAddressConfig(
+        ca_length=_opt("ca_length") or base.ca_length,
+        ioa_length=_opt("ioa_length") or base.ioa_length,
+        cot_length=_opt("cot_length") or base.cot_length,
+    )
+    set_default(base)
+
+    def _side_addr(ca: int | None, ioa: int | None) -> AsduAddressConfig | None:
+        """两侧独立覆盖；None = 沿用进程默认（use_default(None) 不覆盖）。"""
+        if ca is None and ioa is None:
+            return None
+        return AsduAddressConfig(
+            ca_length=ca or base.ca_length,
+            ioa_length=ioa or base.ioa_length,
+            cot_length=base.cot_length,
+        )
 
     cfg = BridgeConfig(
         listen_host=args.listen_host or "0.0.0.0",
@@ -785,6 +899,10 @@ def _run_bridge(args, logger) -> int:
         upstream_host=args.upstream_host,
         upstream_port=args.upstream_port or 2404,
         upstream_hostname=args.bridge_upstream_tls_hostname or "",
+        listen_address=_side_addr(_opt("bridge_listen_ca_length"),
+                                  _opt("bridge_listen_ioa_length")),
+        upstream_address=_side_addr(_opt("bridge_upstream_ca_length"),
+                                    _opt("bridge_upstream_ioa_length")),
     )
     # 桥 TLS（T84）：监听侧=服务端 context（对主站扮演子站）；上游侧=客户端
     # context（对子站扮演主站）。两侧独立可配（明文↔TLS 混合桥接同样支持）。

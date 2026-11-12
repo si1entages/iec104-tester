@@ -10,6 +10,7 @@ import { formatMeasurement } from '../../lib/format'
 import { isStalePoint } from '../../lib/pointValue'
 import { directCommandHint } from '../../lib/pointCommand'
 import { pointKey } from '../../lib/pointValue'
+import { CarbonPointEditButtons, CarbonPointEditDialog } from './CarbonPointEditDialog'
 import { CarbonQualityTags } from './CarbonQualityTags'
 
 /**
@@ -56,6 +57,8 @@ export function CarbonPointsTable({
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const [keyword, setKeyword] = useState('')
   const [type, setType] = useState<(typeof TYPE_TABS)[number]>('all')
+  // WP10a：编辑对话框目标（null=关闭，'new'=新增，其余=编辑该点）
+  const [editTarget, setEditTarget] = useState<Point | 'new' | null>(null)
 
   const rows = useMemo(() => {
     const kw = keyword.trim().toLowerCase()
@@ -124,7 +127,15 @@ export function CarbonPointsTable({
             style={{ cursor: onSelect ? 'pointer' : 'default' }}
           >
             <td style={{ width: COLUMNS[0].width }}>{p.ioa}</td>
-            <td style={{ width: COLUMNS[1].width }}>{p.type}</td>
+            <td style={{ width: COLUMNS[1].width }}>
+              {p.type}
+              {(p.interlock?.length ?? 0) > 0 ? (
+                <Tag size="sm" type="magenta" title={t('pcd.interlockTitle')}
+                  style={{ marginInlineStart: 4 }}>
+                  {t('pcd.interlockTag')}
+                </Tag>
+              ) : null}
+            </td>
             <td
               style={{
                 width: COLUMNS[2].width,
@@ -207,6 +218,11 @@ export function CarbonPointsTable({
               </Button>
             ))}
           </span>
+          <CarbonPointEditButtons
+            selected={selected ?? null}
+            onAdd={() => setEditTarget('new')}
+            onEdit={() => setEditTarget(selected ?? null)}
+          />
           <span style={{ marginLeft: 'auto', color: 'var(--cds-text-secondary)', fontSize: 13 }}>
             {t('common.total', { n: rows.length })}
           </span>
@@ -258,6 +274,11 @@ export function CarbonPointsTable({
           </div>
         </div>
       </div>
+          <CarbonPointEditDialog
+        point={editTarget === 'new' ? null : editTarget}
+        open={editTarget !== null}
+        onClose={() => setEditTarget(null)}
+      />
     </div>
   )
 }

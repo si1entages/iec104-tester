@@ -423,3 +423,58 @@ async def test_bridge_injection_corrupt_and_delay_relays():
     finally:
         await bridge.stop()
         await slave.stop()
+
+
+# ── WP1：桥两侧 ASDU 地址长度隔离 ─────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_bridge_two_sides_have_independent_address_config():
+    """桥两侧分别包 use_default，describe_frame 各自按所属侧长度解析、互不串味。
+
+    1B CA / 2B IOA 的帧（监听侧）与 2B CA / 3B IOA 的帧（上游侧）在同一
+    进程的两个转发任务里必须各自解出正确 CA，不能互相污染。
+    """
+    from core.protocol.address import AsduAddressConfig, set_default, use_default
+    from core.protocol.apci import APCICodec
+
+    set_default(None)  # 进程默认 2/3/2
+    short = AsduAddressConfig(1, 2, 2)
+    standard = AsduAddressConfig(2, 3, 2)
+
+    # 用显式配置构造两侧各一帧 I 帧（不依赖全局默认）
+    from core.protocol.asdu import ASDU, InformationObject
+    from core.protocol.types import COT, TypeID
+
+    def make_i(cfg: AsduAddressConfig, ca: int, ioa: int) -> bytes:
+        a = ASDU(type_id=TypeID.C_IC_NA_1, sq=False, num=1, cot=COT.ACT,
+                 common_addr=ca, address_config=cfg)
+        a.objects.append(InformationObject(ioa=ioa, data=bytes([20])))
+        return APCICodec.encode_i(0, 0, a.encode())
+
+    short_frame = make_i(short, 7, 0x0102)
+    std_frame = make_i(standard, 0x0102, 0x030201)
+
+    async def side(cfg, frame):
+        with use_default(cfg):
+            await asyncio.sleep(0)
+            return describe_frame(frame)
+
+    a, b = await asyncio.gather(side(short, short_frame), side(standard, std_frame))
+    assert "ca=7" in a, f"监听侧 1B CA 解析错误: {a}"
+    assert "ca=258" in b, f"上游侧 2B CA 解析错误: {b}"
+    set_default(None)
+
+
+def test_bridge_config_defaults_to_process_level():
+    """未给两侧单独配置时，use_default(None) 不覆盖进程默认（WP1 回归）。"""
+    from core.protocol.address import AsduAddressConfig, set_default
+    from core.protocol.apci import APCICodec
+    from core.protocol.asdu import ASDUBuilder
+
+    set_default(AsduAddressConfig(1, 2, 2))
+    try:
+        # 模拟 _pump_with_address(address=None)：不覆盖，仍应按 1/2/2 解析
+        frame = APCICodec.encode_i(0, 0, ASDUBuilder.build_general_interrogation(7))
+        assert "ca=7" in describe_frame(frame)
+    finally:
+        set_default(None)

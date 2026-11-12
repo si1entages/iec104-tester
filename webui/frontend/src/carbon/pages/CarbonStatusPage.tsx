@@ -3,12 +3,15 @@ import { Button, Select, SelectItem, TextInput } from '@carbon/react'
 import { useUiStore } from '../../store/uiStore'
 import { useState } from 'react'
 
+import { reportDownloadUrl } from '../../api/endpoints'
 import { usePointsQuery, useStatusQuery } from '../../api/queries'
 import { useT } from '../../i18n'
 import type { MessageKey } from '../../i18n'
 import { CarbonAlarmCard } from '../components/CarbonAlarmCard'
 import { CarbonNetworkSimCard } from '../components/CarbonNetworkSimCard'
 import { CarbonPointsTable } from '../components/CarbonPointsTable'
+import { CarbonLinkStatsCard } from '../components/CarbonLinkStatsCard'
+import { CarbonProfilesCard } from '../components/CarbonProfilesCard'
 import { KvList, Panel, Stat } from '../components/ui'
 
 export function CarbonStatusPage() {
@@ -22,6 +25,12 @@ export function CarbonStatusPage() {
     { term: 'status.addr', value: String(status?.addr ?? '-') },
     { term: 'conn.vsVr', value: `${status?.vs ?? '-'} / ${status?.vr ?? '-'}` },
     { term: 'conn.window', value: status?.window ?? '-' },
+    {
+      term: 'status.asduAddress',
+      value: status?.asdu_address
+        ? `${status.asdu_address.ca_length}/${status.asdu_address.ioa_length}/${status.asdu_address.cot_length} B`
+        : '-',
+    },
   ]
 
   const [conclusionKind, setConclusionKind] = useState('')
@@ -104,6 +113,17 @@ export function CarbonStatusPage() {
         >
           {t('status.exportReport')}
         </Button>
+        {/* WP8：原生 xlsx / PDF（PDF 需后端 report[pdf] extra，缺失时后端返回可读错误） */}
+        <Button kind="ghost" size="sm" data-testid="export-report-xlsx"
+          title={t('status.exportReportXlsxHint')}
+          onClick={() => { window.location.href = reportDownloadUrl('xlsx') }}>
+          {t('status.exportReportXlsx')}
+        </Button>
+        <Button kind="ghost" size="sm" data-testid="export-report-pdf"
+          title={t('status.exportReportPdfHint')}
+          onClick={() => { window.location.href = reportDownloadUrl('pdf') }}>
+          {t('status.exportReportPdf')}
+        </Button>
       </div>
       <div className="app-tiles">
         <Stat label={t('status.points')} value={String(status?.points ?? points.length)} unit={t('status.unit.points')} />
@@ -122,9 +142,15 @@ export function CarbonStatusPage() {
         <KvList items={runtime.map(({ term, value }) => ({ term: t(term), value }))} />
       </Panel>
 
+      {/* WP6：链路参数可观测（bridge 角色无 104 引擎，不渲染） */}
+      {status && status.role !== 'bridge' ? <CarbonLinkStatsCard status={status} /> : null}
+
       <Panel title={t('pt2.title')}>
         <CarbonPointsTable height={420} />
       </Panel>
+
+      {/* WP5：工程配置方案——bridge 角色无连接参数，不渲染 */}
+      {status && status.role !== 'bridge' ? <CarbonProfilesCard /> : null}
     </div>
   )
 }

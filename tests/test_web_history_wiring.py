@@ -143,12 +143,13 @@ class TestBackwardCompatibleApi:
         """旧调用位置参数不变：role/host/port/point_table/connection.
 
         D3 在尾部新增 ``app_config``，B7 再新增 ``auth_token``（均默认 None，
-        纯关键字参数），既有位置参数调用不受影响。
+        纯关键字参数），既有位置参数调用不受影响；WP4a 在 auth_token 后
+        插入 ``auth_config``（同样纯关键字），位置参数顺序依旧不变。
         """
         params = list(inspect.signature(run_server).parameters)
         assert params == ["role", "host", "port", "point_table",
                           "connection", "history_db", "app_config",
-                          "auth_token", "ssl_context", "history_dbs"]
+                          "auth_token", "auth_config", "ssl_context", "history_dbs"]
 
 
 class TestWebModeEndToEnd:

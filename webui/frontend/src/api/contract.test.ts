@@ -14,6 +14,10 @@ import {
   okSchema,
   schemaResponseSchema,
   testStatusResponseSchema,
+  commissionSessionResponseSchema,
+  commissionSessionsResponseSchema,
+  commissionStatusResponseSchema,
+  commissionItemResponseSchema,
 } from './contracts'
 
 describe('contract DSL', () => {
@@ -112,5 +116,47 @@ describe('响应 schema', () => {
       testStatusResponseSchema.parse({ ok: true, running: false, run: null }, '/api/tests/status')
         .run,
     ).toBeNull()
+  })
+})
+
+describe('WP2 对点/传动验收契约', () => {
+  const item = {
+    ioa: 1, name: '开关A', kind: 'YX', group: 1, expected: true,
+    tolerance: 0, actual: true, quality: 'GOOD', verdict: 'pass',
+    note: '', operator: '甲', checked_at: 1, tx_frame: '6804',
+    rx_frame: '6806', tx_time: 1, rx_time: 2, reason: '',
+  }
+  const summary = { total: 1, pending: 0, pass: 1, fail: 0, manual: 0, done: 1 }
+  const session = {
+    id: 'c-1', name: '验收', created_at: 1, operator: '甲', status: 'done',
+    started_at: 1, finished_at: 2, cursor: 1, note: '',
+    summary, point_count: 1, items: [item],
+  }
+
+  it('会话明细：合法形状通过，缺 items 拒绝', () => {
+    expect(commissionSessionResponseSchema.parse({ ok: true, session }, '/x')).toBeTruthy()
+    expect(() => commissionSessionResponseSchema.parse(
+      { ok: true, session: { ...session, items: undefined } }, '/x')).toThrow(ApiContractError)
+  })
+
+  it('会话列表：status 必须含 running/session_id/cursor/total', () => {
+    const status = { ok: true, running: false, session_id: null, cursor: 0, total: 0 }
+    expect(commissionSessionsResponseSchema.parse(
+      { ok: true, sessions: [{ ...session, items: undefined }], status }, '/x')).toBeTruthy()
+    expect(() => commissionSessionsResponseSchema.parse(
+      { ok: true, sessions: [], status: { ok: true, running: false } }, '/x'))
+      .toThrow(ApiContractError)
+  })
+
+  it('结论枚举：非法 verdict 拒绝', () => {
+    expect(() => commissionSessionResponseSchema.parse(
+      { ok: true, session: { ...session, items: [{ ...item, verdict: 'bogus' }] } }, '/x'))
+      .toThrow(ApiContractError)
+  })
+
+  it('单条改判响应与状态响应', () => {
+    expect(commissionItemResponseSchema.parse({ ok: true, item }, '/x')).toBeTruthy()
+    expect(commissionStatusResponseSchema.parse(
+      { ok: true, running: true, session_id: 'c-1', cursor: 1, total: 3 }, '/x')).toBeTruthy()
   })
 })

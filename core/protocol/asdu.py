@@ -13,6 +13,7 @@ import struct
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
+from .address import AsduAddressConfig, get_default
 from .constants import (
     MAX_ASDU_LENGTH,
     VSQ_NUM_MASK,
@@ -305,6 +306,13 @@ class ASDU:
     origin_addr: int = 0        # 发起地址
     common_addr: int = 1        # 公共地址 (站地址)
     objects: list[InformationObject] = field(default_factory=list)
+    # 地址字段字节数；None = 取当前任务/进程默认（见 core.protocol.address）。
+    # 显式赋值用于离线工具按帧指定，优先级高于默认配置。
+    address_config: AsduAddressConfig | None = None
+
+    def _addr(self) -> AsduAddressConfig:
+        """本 ASDU 生效的地址配置：实例显式值 > 当前任务默认。"""
+        return self.address_config if self.address_config is not None else get_default()
 
     # ── 类级缓存（lazy init）──────────────────────────────────────
     _DECODERS: ClassVar[dict | None] = None
@@ -479,7 +487,12 @@ class ASDU:
     # ── 编码 ────────────────────────────────────────────────────────
 
     def encode(self) -> bytes:
-        """编码 ASDU 为字节序列."""
+        """编码 ASDU 为字节序列.
+
+        地址字段字节数取自 ``self._addr()``：默认 2/3/2 与历史实现完全一致，
+        配置后可对接 1 字节 CA / 2 字节 IOA 等非标装置。
+        """
+        addr = self._addr()
         buf = bytearray()
 
         # Type ID
@@ -491,24 +504,29 @@ class ASDU:
             vsq |= VSQ_SQ_BIT
         buf.append(vsq)
 
-        # COT (2 bytes: cause + origin)
-        # bit0-5: 传送原因码; bit6: P/N 否定确认; bit7: T 测试位
+        # COT: 第 1 字节为原因码 + P/N + T；第 2 字节（cot_length=2 时）为源发地址
         cot_byte = (self.cot & 0x3F) | (0x40 if self.pn else 0) | (0x80 if self.test else 0)
         buf.append(cot_byte)
-        buf.append(self.origin_addr & 0xFF)
+        if addr.cot_length == 2:
+            buf.append(self.origin_addr & 0xFF)
 
-        # Common Address (2 bytes, little-endian)
-        buf.append(self.common_addr & 0xFF)
-        buf.append((self.common_addr >> 8) & 0xFF)
+        # Common Address (little-endian, 1 或 2 字节)
+        for shift in range(0, addr.ca_length * 8, 8):
+            buf.append((self.common_addr >> shift) & 0xFF)
 
         # Information Objects
         for i, obj in enumerate(self.objects):
-            # IOA (3 bytes, little-endian) — 仅在非SQ模式或第一个对象时写入
+            # IOA (little-endian, 1/2/3 字节) — 仅在非SQ模式或第一个对象时写入
             if not self.sq or i == 0:
                 ioa = obj.ioa + i if self.sq else obj.ioa
-                buf.append(ioa & 0xFF)
-                buf.append((ioa >> 8) & 0xFF)
-                buf.append((ioa >> 16) & 0xFF)
+                # 地址超出配置位宽时宁可报错，也不能静默截成另一个点：
+                # 现场误配 2B IOA 却写 3B 地址会导致遥控打到错误对象上。
+                if ioa < 0 or ioa >= (1 << (8 * addr.ioa_length)):
+                    raise ValueError(
+                        f"IOA {ioa} out of range for ioa_length={addr.ioa_length}"
+                    )
+                for shift in range(0, addr.ioa_length * 8, 8):
+                    buf.append((ioa >> shift) & 0xFF)
 
             # Data
             if obj.data is not None:
@@ -546,14 +564,20 @@ class ASDU:
     # ── 解码 ────────────────────────────────────────────────────────
 
     @classmethod
-    def decode(cls, data: bytes, ca_length: int = 2) -> ASDU:
+    def decode(cls, data: bytes, ca_length: int | None = None,
+               address_config: AsduAddressConfig | None = None) -> ASDU:
         """从字节序列解码 ASDU.
 
         Args:
-            data: ASDU 字节数据（不含APCI头）
-            ca_length: 公共地址长度 (1或2)
+            data: ASDU 字节数据（不含 APCI 头）
+            ca_length: 公共地址长度 (1 或 2)。**显式 override**，仅覆盖 CA
+                长度，其余字段仍取生效配置；离线工具按帧指定时使用。
+            address_config: 完整地址配置 override；与 ``ca_length`` 同时给出时
+                以本参数的 CA 长度为准（保留旧调用点行为）。
+                两者都不传时取当前任务/进程默认（见 :mod:`core.protocol.address`）。
         """
-        if len(data) < 4 + ca_length:
+        addr = cls._resolve_addr(ca_length, address_config)
+        if len(data) < addr.header_size:
             raise ValueError(f"ASDU too short: {len(data)} bytes")
 
         pos = 0
@@ -575,16 +599,16 @@ class ASDU:
         test = bool(cot_byte & 0x80)
         cot = cot_byte & 0x3F
         pos += 1
-        origin_addr = data[pos]
-        pos += 1
-
-        # Common Address
-        if ca_length == 2:
-            common_addr = data[pos] | (data[pos + 1] << 8)
-            pos += 2
-        else:
-            common_addr = data[pos]
+        origin_addr = 0
+        if addr.cot_length == 2:
+            origin_addr = data[pos]
             pos += 1
+
+        # Common Address (little-endian)
+        common_addr = 0
+        for i in range(addr.ca_length):
+            common_addr |= data[pos + i] << (8 * i)
+        pos += addr.ca_length
 
         asdu = cls(
             type_id=type_id,
@@ -595,10 +619,11 @@ class ASDU:
             test=test,
             origin_addr=origin_addr,
             common_addr=common_addr,
+            address_config=addr,
         )
 
         # Information Objects
-        ioa_size = 3  # 标准IOA长度3字节
+        ioa_size = addr.ioa_length
         remaining = data[pos:]
         base_ioa = 0
 
@@ -607,7 +632,9 @@ class ASDU:
             if not sq or i == 0:
                 if len(remaining) < ioa_size:
                     break
-                base_ioa = remaining[0] | (remaining[1] << 8) | (remaining[2] << 16)
+                base_ioa = 0
+                for j in range(ioa_size):
+                    base_ioa |= remaining[j] << (8 * j)
                 remaining = remaining[ioa_size:]
 
             ioa = base_ioa + i if sq else base_ioa
@@ -631,22 +658,43 @@ class ASDU:
 
         return asdu
 
+    @staticmethod
+    def _resolve_addr(ca_length: int | None,
+                      address_config: AsduAddressConfig | None) -> AsduAddressConfig:
+        """合并「当前默认 + 完整 override + 仅 CA override」为最终配置.
+
+        优先级：``ca_length`` 显式值 > ``address_config`` > 当前任务默认。
+        旧调用点 ``ASDU.decode(data, ca_length=2)`` 因此保持原语义（只改 CA
+        长度，IOA/COT 沿用当时默认），不会出现旧测试集体错位。
+        """
+        base = address_config or get_default()
+        if ca_length is None:
+            return base
+        return AsduAddressConfig(
+            ca_length=ca_length,
+            ioa_length=base.ioa_length,
+            cot_length=base.cot_length,
+        )
+
     @classmethod
-    def decode_header(cls, data: bytes, ca_length: int = 2) -> ASDU:
+    def decode_header(cls, data: bytes, ca_length: int | None = None,
+                      address_config: AsduAddressConfig | None = None) -> ASDU:
         """仅解析 ASDU 头部（TypeID / VSQ / COT+PN / CA），不解析信息体.
 
         用于信息体类型未知或无法解析时仍能提取头部字段，以便按标准
         回送 "未知类型标识/未知传送原因/未知公共地址" 应答。
 
         Args:
-            data: ASDU 字节数据（不含APCI头）
-            ca_length: 公共地址长度 (1或2)
+            data: ASDU 字节数据（不含 APCI 头）
+            ca_length: 公共地址长度显式 override (1 或 2)
+            address_config: 完整地址配置 override
 
         Returns:
             仅含头部字段、objects 为空的 ASDU；
             未知 TypeID 时 type_id 保存原始整数值。
         """
-        if len(data) < 4 + ca_length:
+        addr = cls._resolve_addr(ca_length, address_config)
+        if len(data) < addr.header_size:
             raise ValueError(f"ASDU too short: {len(data)} bytes")
 
         pos = 0
@@ -668,13 +716,14 @@ class ASDU:
         test = bool(cot_byte & 0x80)
         cot = cot_byte & 0x3F
         pos += 1
-        origin_addr = data[pos]
-        pos += 1
+        origin_addr = 0
+        if addr.cot_length == 2:
+            origin_addr = data[pos]
+            pos += 1
 
-        if ca_length == 2:
-            common_addr = data[pos] | (data[pos + 1] << 8)
-        else:
-            common_addr = data[pos]
+        common_addr = 0
+        for i in range(addr.ca_length):
+            common_addr |= data[pos + i] << (8 * i)
 
         return cls(
             type_id=type_id,
@@ -685,6 +734,7 @@ class ASDU:
             test=test,
             origin_addr=origin_addr,
             common_addr=common_addr,
+            address_config=addr,
         )
 
     @classmethod
@@ -1934,7 +1984,8 @@ class APDU:
             return APCICodec.encode_u(self.u_func)
 
     @classmethod
-    def decode(cls, data: bytes, ca_length: int = 2) -> APDU:
+    def decode(cls, data: bytes, ca_length: int | None = None,
+               address_config: AsduAddressConfig | None = None) -> APDU:
         """解码完整 APDU."""
         from .apci import APCICodec
 
@@ -1947,7 +1998,7 @@ class APDU:
 
         if apci.is_i_frame:
             asdu_data = data[6:6 + apci.asdu_length]
-            apdu.asdu = ASDU.decode(asdu_data, ca_length)
+            apdu.asdu = ASDU.decode(asdu_data, ca_length, address_config)
         elif apci.is_u_frame:
             apdu.u_func = apci.u_func
 

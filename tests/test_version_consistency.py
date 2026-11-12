@@ -76,3 +76,21 @@ def test_release_docs_match_version() -> None:
     assert en.get("version") == __version__, f"README_eng 版本徽章漂移: {en}"
     assert zh.get("tests"), "README 缺少 Tests 徽章"
     assert zh["tests"] == en.get("tests"), f"双语 README 用例数不一致: {zh} vs {en}"
+
+    # WP11a：用例数不再只比「双语一致」，必须与单一真值源 docs/baseline.json 相等。
+    # 旧守卫只断言 zh==en，导致 1711/1667 长期漂移未被发现。
+    baseline = json.loads((ROOT / "docs" / "baseline.json").read_text(encoding="utf-8"))
+    expected = str(baseline["backend_passed"])
+    assert zh["tests"] == expected, (
+        f"README Tests 徽章 {zh['tests']} != baseline.json {expected}")
+    assert en.get("tests") == expected, (
+        f"README_eng Tests 徽章 {en.get('tests')} != baseline.json {expected}")
+    for name in ("README.md", "README_eng.md"):
+        text = (ROOT / name).read_text(encoding="utf-8")
+        assert f"{expected} passed" in text or f"({expected};" in text, (
+            f"{name} 基线行未同步为 {expected} passed")
+        # 前端单测数同样纳入单一真值源：v1.11 发版前补 15 例 hook 测试时，
+        # 曾出现 README 仍写 164 而 baseline.json 已是 179 的漂移。
+        fe = str(baseline["frontend_tests"])
+        assert f"{fe} passed" in text or f"**{fe} 单测**" in text, (
+            f"{name} 前端基线行未同步为 {fe} passed")

@@ -16,6 +16,7 @@ import {
   ModalHeader,
   Radio,
   Label,
+  Checkbox,
 } from '@patternfly/react-core'
 
 import { api } from '../../api/endpoints'
@@ -39,6 +40,7 @@ export function PfPointCommandDialog({ point, disabled = false, onClose }: Props
   const [spKind, setSpKind] = useState<SetpointKind>('short_float')
   const [spValue, setSpValue] = useState(0)
   const [stepUp, setStepUp] = useState(true)
+  const [force, setForce] = useState(false)
   const [last, setLast] = useState<{ ok: boolean; text: string } | null>(null)
 
   useEffect(() => {
@@ -47,6 +49,7 @@ export function PfPointCommandDialog({ point, disabled = false, onClose }: Props
     setSpKind(setpointKindOf(point))
     setSpValue(typeof point.value === 'number' ? point.value : 0)
     setStepUp(true)
+    setForce(false)
     setLast(null)
   }, [point])
 
@@ -59,7 +62,11 @@ export function PfPointCommandDialog({ point, disabled = false, onClose }: Props
   if (!point || !kind) return null
 
   const double = isDoubleCommand(point)
-  const dangerous = kind === 'yk' && ykOn === 'off'
+  const interlocks = point.interlock ?? []
+  const asText = interlocks
+    .map((c) => `${c.ioa}${c.label ? `（${c.label}）` : ''} → ${c.value ? t('pcd.on') : t('pcd.off')}`)
+    .join('；')
+  const dangerous = (kind === 'yk' && ykOn === 'off') || force
 
   const send = async (): Promise<void> => {
     try {
@@ -70,6 +77,7 @@ export function PfPointCommandDialog({ point, disabled = false, onClose }: Props
           select: false,
           double,
           with_time: false,
+          force,
         })
         setLast(
           r.ok
@@ -83,6 +91,7 @@ export function PfPointCommandDialog({ point, disabled = false, onClose }: Props
           kind: spKind,
           select: false,
           with_time: false,
+          force,
         })
         setLast(
           r.ok
@@ -90,7 +99,9 @@ export function PfPointCommandDialog({ point, disabled = false, onClose }: Props
             : { ok: false, text: t('pcd.spFailed', { error: r.error ?? t('cmd.unknown') }) },
         )
       } else {
-        const r = await step.mutateAsync({ ioa: point.ioa, state: stepUp ? 2 : 1, select: false })
+        const r = await step.mutateAsync({
+          ioa: point.ioa, state: stepUp ? 2 : 1, select: false, force,
+        })
         setLast(
           r.ok
             ? { ok: true, text: t('pcd.stepSent', { dir: stepUp ? t('pcd.up') : t('pcd.down') }) }
@@ -192,6 +203,26 @@ export function PfPointCommandDialog({ point, disabled = false, onClose }: Props
             <Radio id="pf-pcd-down" name="pf-pcd-step" label={t('pcd.down')} isChecked={!stepUp} onChange={() => setStepUp(false)} />
           </div>
         </FormGroup>
+      ) : null}
+
+      {interlocks.length > 0 ? (
+        <>
+          <div style={{ marginTop: 12, marginBottom: 8 }}>
+            <Label isCompact color="orange">{t('pcd.interlockTag')}</Label>
+          </div>
+          <Alert isInline variant="warning" title={t('pcd.interlockTitle')}>
+            {t('pcd.interlockDesc', { cond: asText })}
+          </Alert>
+          <div style={{ marginTop: 8 }}>
+            <Checkbox
+              id="pf-pcd-force"
+              label={t('pcd.forceLabel')}
+              isChecked={force}
+              onChange={(_e, checked) => setForce(checked)}
+            />
+            <div style={{ fontSize: 12, opacity: 0.7 }}>{t('pcd.forceDesc')}</div>
+          </div>
+        </>
       ) : null}
 
       {point.sbo ? (

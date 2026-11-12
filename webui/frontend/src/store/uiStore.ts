@@ -7,7 +7,7 @@ import { applyThemeToDom, resolveInitialTheme, saveThemePreference } from '../li
 import type { ThemeMode } from '../lib/themePreference'
 import type { WsStatus } from '../ws/client'
 
-export type PageKey = 'status' | 'master' | 'slave' | 'multi' | 'logs' | 'history' | 'capture' | 'tests' | 'bridge'
+export type PageKey = 'status' | 'master' | 'slave' | 'multi' | 'logs' | 'history' | 'capture' | 'tests' | 'commission' | 'audit' | 'bridge'
 
 const LOCALE_KEY = 'iec104_locale'
 

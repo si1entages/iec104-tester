@@ -132,7 +132,10 @@ async def test_parameter_and_file_dispatch():
 def test_status_fields_with_and_without_engine():
     s = _session("master")
     st = s.status_fields()
-    assert st == {"started": False, "running": False}
+    # WP6 起无引擎也会带只读 link 段（配置目标 + 未连接），故按子集断言，
+    # 同时显式确认既有两个键的值未变。
+    assert st["started"] is False and st["running"] is False
+    assert "link" in st and st["link"]["transport"]["connected"] is False
 
     s.engine = _RecorderEngine()
     st = s.status_fields()

@@ -15,6 +15,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 from .types import (
     LSQ_NAMES,
@@ -370,6 +371,58 @@ class FileTransferMaster(FileTransferManager):
             self._on_send_asdu(asdu_data)
         logger.info(f"File ACK sent: qualifier={qualifier}")
 
+    # ── WP3c：上传方向（主站 → 子站）────────────────────────────────
+
+    def start_upload(self, ioa: int, file_name: int, data: bytes,
+                     *, segment_size: int = 200) -> None:
+        """发起一次上传：选文件 → 分段发 F_SG → F_LS 结束.
+
+        方向判定由**调用方**保证（主站发、子站收）。子站收到 F_LS(LSQ=1)
+        后回 F_AF(1)，主站 ``handle_ack`` 置 COMPLETED。
+        段数据按 ``segment_size`` 切分（F_SG 的 LOS 为 1 字节，上限 255）。
+        """
+        from .asdu import ASDUBuilder
+
+        if not data:
+            raise ValueError("上传文件数据不能为空")
+        size = max(1, min(int(segment_size), 255))
+        self._context.file_name = file_name
+        self._context.file_length = len(data)
+        self._context.section_name = 1
+        self._context.data = bytearray(data)
+        self._context.start_time = time.monotonic()
+        self._context.state = FileTransferState.FILE_SELECTED
+
+        # 1) 选择文件（SCQ=1），子站回 F_FR 表示已准备好接收
+        if self._on_send_asdu:
+            self._on_send_asdu(ASDUBuilder.build_call_directory(
+                self._common_addr, ioa, file_name, qualifier=SCQ_SELECT_FILE))
+        # 2) 逐段发送
+        for off in range(0, len(data), size):
+            chunk = data[off:off + size]
+            if self._on_send_asdu:
+                self._on_send_asdu(ASDUBuilder.build_file_segment(
+                    self._common_addr, ioa, file_name, 1, chunk))
+        # 3) 最后一节（整个文件，LSQ=1）+ 本节 CHS
+        if self._on_send_asdu:
+            self._on_send_asdu(ASDUBuilder.build_last_section(
+                self._common_addr, ioa, file_name, 1,
+                LSQ_FILE_TRANSFER_WITHOUT_DEACT, section_checksum(data)))
+        self._context.state = FileTransferState.LAST_SECTION
+        logger.info(
+            f"Upload sent: name={file_name} size={len(data)} "
+            f"segments={(len(data) + size - 1) // size}")
+
+    def handle_upload_ack(self, data: AckFileSection) -> bool:
+        """上传侧收到 F_AF：肯定文件 → COMPLETED。返回是否成功."""
+        if data.qualifier == AFQ_POS_ACK_FILE:
+            self._context.state = FileTransferState.COMPLETED
+            logger.info("Upload acknowledged (file positive)")
+            return True
+        self._context.state = FileTransferState.ERROR
+        logger.warning(f"Upload rejected: AFQ={data.qualifier}")
+        return False
+
 
 class FileTransferSlave(FileTransferManager):
     """子站文件传输管理器.
@@ -387,7 +440,8 @@ class FileTransferSlave(FileTransferManager):
 
     def __init__(self, common_addr: int = 1, *,
                  inject_lsq: int | None = None,
-                 inject_srq_negative: bool = False):
+                 inject_srq_negative: bool = False,
+                 semantics: Any = None):
         """子站文件传输管理器.
 
         Args:
@@ -395,13 +449,22 @@ class FileTransferSlave(FileTransferManager):
             inject_lsq: F_LS 的 LSQ 覆盖值（T50/C4 §3 场景注入：2=文件带去激活、
                 4=节带去激活；None=默认 1，行为不变）
             inject_srq_negative: F_SR 的 SRQ 置 0x80（§5 否定节就绪场景注入）
+            semantics: WP3a 语义档位（None=ed1，历史单节行为）
         """
         super().__init__(common_addr)
+        from .file_semantics import ED1
+
+        self._semantics = semantics if semantics is not None else ED1
         self._context.direction = FileTransferDirection.DOWNLOAD
         self._file_data: dict[int, bytes] = {}  # 文件数据缓存
         self._segment_size: int = 200  # 每段最大字节数
         self._inject_lsq = inject_lsq
         self._inject_srq_negative = inject_srq_negative
+        # WP3b：多节分包状态（section_size>0 时启用；0=历史单节行为）
+        self._sections: list[tuple[int, bytes]] = []  # [(节号, 本节数据)]
+        self._section_index: int = 0
+        self._ioa: int = 0  # 记录本次传输的 IOA，供后续节主动上送
+        self._awaiting_section_ack: bool = False
 
     def set_file_data(self, file_name: int, data: bytes) -> None:
         """设置文件数据."""
@@ -431,6 +494,10 @@ class FileTransferSlave(FileTransferManager):
             self._context.file_length = len(file_data)
             self._context.data = bytearray(file_data)
             self._context.state = FileTransferState.FILE_SELECTED
+            self._ioa = ioa
+            self._section_index = 0
+            self._awaiting_section_ack = False
+            self._sections = self._split_sections(bytes(file_data))
 
             if qualifier == SCQ_SELECT_FILE:
                 self._send_file_ready(ioa)
@@ -492,13 +559,34 @@ class FileTransferSlave(FileTransferManager):
             # 发送节准备就绪
             self._send_section_ready(ioa)
 
-    def _send_section_ready(self, ioa: int) -> None:
-        """发送节准备就绪."""
-        from .asdu import ASDUBuilder
-        self._context.section_name = 1  # 默认节1
-        self._context.section_length = self._context.file_length
+    # ── WP3b：多节分包 ────────────────────────────────────────────
 
-        srq = 0x80 if self._inject_srq_negative else 0  # §5 否定节就绪注入
+    def _split_sections(self, data: bytes) -> list[tuple[int, bytes]]:
+        """按语义档位的 section_size 把文件切成多节；0/未配置=单节（历史行为）."""
+        size = int(getattr(self._semantics, "section_size", 0) or 0)
+        if size <= 0 or len(data) <= size:
+            return [(1, data)]
+        return [
+            (i + 1, data[i * size:(i + 1) * size])
+            for i in range((len(data) + size - 1) // size)
+        ]
+
+    def _send_section_ready(self, ioa: int) -> None:
+        """发送当前节的节准备就绪 (F_SR_NA_1)——多节时按 _section_index 推进."""
+        from .asdu import ASDUBuilder
+
+        multi = len(self._sections) > 1
+        if multi:
+            if self._section_index >= len(self._sections):
+                return
+            number, payload = self._sections[self._section_index]
+            self._context.section_name = number
+            self._context.section_length = len(payload)
+            self._context.data = bytearray(payload)  # 仅本节数据，供 _send_segments
+        else:
+            self._context.section_name = 1
+            self._context.section_length = self._context.file_length
+        srq = 0x80 if self._inject_srq_negative else 0
         asdu_data = ASDUBuilder.build_section_ready(
             self._common_addr, ioa, self._context.file_name,
             self._context.section_name, self._context.section_length, status=srq
@@ -506,26 +594,30 @@ class FileTransferSlave(FileTransferManager):
         if self._on_send_asdu:
             self._on_send_asdu(asdu_data)
         self._context.state = FileTransferState.SECTION_READY
-        logger.info(f"Section Ready sent: section={self._context.section_name} "
-                    f"length={self._context.section_length} srq=0x{srq:02x}")
+        self._awaiting_section_ack = False
+        logger.info(
+            f"Section Ready sent: section={self._context.section_name} "
+            f"length={self._context.section_length} srq=0x{srq:02x} "
+            f"({self._section_index + 1}/{len(self._sections)} sections)")
 
     def handle_section_ready_ack(self, ioa: int, data: SectionReadyAck) -> None:
-        """处理节准备就绪确认."""
+        """处理节准备就绪确认（历史 F_SR_NB 路径）."""
         logger.info(f"Section Ready ACK received: file_name={data.file_name} section={data.section_name}")
-        if data.status == 0:  # 肯定
-            # 开始发送段
+        if data.status == 0:
             self._send_segments(ioa)
 
     def _send_segments(self, ioa: int) -> None:
-        """发送所有段."""
+        """发送**当前节**的所有段，并以 F_LS 结束本节.
+
+        多节时：非最后节 LSQ=3（仅本节结束），最后节 LSQ=1（整个文件结束）。
+        CHS 按**本节**数据计算（逐节校验，与主站 handle_last_section 对齐）。
+        """
         from .asdu import ASDUBuilder
         data = bytes(self._context.data)
         segment_count = 0
-
         for i in range(0, len(data), self._segment_size):
             chunk = data[i:i + self._segment_size]
             segment_count += 1
-
             asdu_data = ASDUBuilder.build_file_segment(
                 self._common_addr, ioa, self._context.file_name,
                 self._context.section_name, chunk
@@ -535,43 +627,86 @@ class FileTransferSlave(FileTransferManager):
 
         self._context.segment_number = segment_count
         self._context.state = FileTransferState.TRANSFERRING
-        logger.info(f"Sent {segment_count} segments")
+        logger.info(f"Sent {segment_count} segments (section={self._context.section_name})")
+        self._send_last_section(ioa, data)
 
-        # 发送最后的节
-        self._send_last_section(ioa)
-
-    def _send_last_section(self, ioa: int) -> None:
+    def _send_last_section(self, ioa: int, section_data: bytes) -> None:
         """发送最后的节 (F_LS_NA_1).
 
-        本实现把整个文件作为**单个节**发送，故 LSQ = 1
-        （``FILE_TRANSFER_WITHOUT_DEACT``：整个文件传输结束、不要求去激活），
-        由主站据此判定接收完成（见 ``FileTransferManager.handle_last_section``）。
-
-        ``ASDUBuilder.build_last_section`` 的第 5/6 个位置参数分别是 LSQ 八位组与
-        CHS 八位组；CHS = 本节所有段数据的算术和 mod 256（见 ``section_checksum``）。
+        多节：非最后节 LSQ=3、最后节 LSQ=1；单节：LSQ=1（历史行为）。
+        ``ASDUBuilder.build_last_section`` 第 5/6 位置参数为 LSQ/CHS 八位组；
+        CHS = 本节所有段数据算术和 mod 256（见 ``section_checksum``）。
         """
         from .asdu import ASDUBuilder
-        lsq = self._inject_lsq if self._inject_lsq is not None             else LSQ_FILE_TRANSFER_WITHOUT_DEACT
+        if self._inject_lsq is not None:
+            lsq = self._inject_lsq
+        elif len(self._sections) > 1 and self._section_index < len(self._sections) - 1:
+            lsq = LSQ_SECTION_TRANSFER_WITHOUT_DEACT   # 3：本节结束，文件未结束
+        else:
+            lsq = LSQ_FILE_TRANSFER_WITHOUT_DEACT       # 1：整个文件结束
         asdu_data = ASDUBuilder.build_last_section(
             self._common_addr, ioa, self._context.file_name,
             self._context.section_name,
-            lsq,                                              # LSQ 八位组（可注入 2/4）
-            section_checksum(bytes(self._context.data)),      # CHS 八位组
+            lsq,
+            section_checksum(section_data),
         )
         if self._on_send_asdu:
             self._on_send_asdu(asdu_data)
         self._context.state = FileTransferState.LAST_SECTION
+        self._awaiting_section_ack = True
         logger.info(f"Last Section sent: lsq={lsq} segments={self._context.segment_number}")
 
     def handle_ack(self, ioa: int, data: AckFileSection) -> None:
-        """处理确认."""
+        """处理 F_AF 确认：肯定节 → 主动推下一节；肯定文件 → 完成."""
         logger.info(f"ACK received: file_name={data.file_name} section={data.section_name} qualifier={data.qualifier}")
-        if data.qualifier in (AFQ_POS_ACK_FILE, AFQ_POS_ACK_SECTION):
+        if data.qualifier == AFQ_POS_ACK_SECTION:
+            # 仅本节被确认：多节时推进到下一节，重新发 F_SR 驱动主站请求
+            if self._section_index < len(self._sections) - 1:
+                self._section_index += 1
+                self._context.state = FileTransferState.SECTION_READY
+                self._send_section_ready(self._ioa or ioa)
+            else:
+                self._context.state = FileTransferState.COMPLETED
+        elif data.qualifier == AFQ_POS_ACK_FILE:
             self._context.state = FileTransferState.COMPLETED
             logger.info("File transfer completed")
         else:
             self._context.state = FileTransferState.ERROR
             logger.warning(f"File transfer rejected: qualifier={data.qualifier}")
+
+    # ── WP3c：上传方向接收侧（主站 → 子站）──────────────────────────
+
+    def handle_incoming_file_segment(self, data: FileSegment) -> None:
+        """接收主站发来的段并累积（上传方向）."""
+        self._context.file_name = data.file_name
+        self._context.section_name = data.section_name
+        self._context.data.extend(data.data)
+        self._section_data.extend(data.data)
+        self._context.state = FileTransferState.TRANSFERRING
+
+    def handle_incoming_last_section(self, ioa: int, data: LastSection) -> bytes:
+        """接收主站发来的 F_LS：校验 CHS、落盘、回 F_AF(肯定/否定文件).
+
+        Returns: 要回送的 F_AF ASDU 字节（由 slave_response 发出）。
+        """
+        from .asdu import ASDUBuilder
+
+        expected = section_checksum(bytes(self._section_data))
+        ok = data.chs == expected
+        if ok:
+            payload = bytes(self._context.data)
+            self._file_data[data.file_name] = payload
+            self._context.file_length = len(payload)
+            self._context.state = FileTransferState.COMPLETED
+            logger.info(f"Upload received: name={data.file_name} size={len(payload)}")
+        else:
+            self._context.state = FileTransferState.ERROR
+            logger.warning(
+                f"Upload CHS mismatch: received={data.chs:#04x} expected={expected:#04x}; "
+                "file rejected")
+        afq = AFQ_POS_ACK_FILE if ok else AFQ_NEG_ACK_FILE
+        return ASDUBuilder.build_ack_file_section(
+            self._common_addr, ioa, data.file_name, data.section_name, afq)
 
     def _send_directory(self, ioa: int) -> None:
         """发送目录."""

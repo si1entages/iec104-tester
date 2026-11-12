@@ -181,6 +181,23 @@ class SequenceManager:
         """计算两个序列号的差值（模 2^15）."""
         return (a - b) & 0x7FFF
 
+    def snapshot(self) -> dict:
+        """只读快照（WP6）：k/w、序号、未确认 I 帧数、窗口是否可用.
+
+        ``unacked`` 即"已发送但未获确认的 I 帧数"——t1 超时的直接前因，
+        现场排障第一眼要看的就是它是否逼近 ``k``。
+        """
+        return {
+            "k": self._k,
+            "w": self._w,
+            "send_seq": self._send_seq,
+            "recv_seq": self._recv_seq,
+            "last_ack_rx": self._last_ack_rx,
+            "unacked": self.unconfirmed_count,
+            "window_available": self.send_window_available,
+            "i_frame_count": self._i_frame_count,
+        }
+
     def reset(self) -> None:
         """重置所有序列号."""
         with self._lock:

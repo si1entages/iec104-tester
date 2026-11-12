@@ -41,6 +41,14 @@ export interface Status {
   simulation_yc?: boolean
   /** 冗余双通道运行态（仅主站启用时存在）（E3） */
   redundancy?: RedundancyStatus
+  /** 链路可观测快照（WP6；无引擎时 state/sequence 为 null，transport 仍有目标） */
+  link?: LinkSnapshot
+  /** 生效的 ASDU 地址字段字节数（WP1；由 --config / --ca-length 等注入） */
+  asdu_address?: {
+    ca_length: number
+    ioa_length: number
+    cot_length: number
+  }
   /** 桥角色运行统计（running 时存在）（T74） */
   bridge_stats?: Record<string, number>
   /** 桥角色当前配置（running 时存在） */
@@ -98,6 +106,8 @@ export interface Point {
   subtype?: string
   /** 仅 YK：是否需要选择-执行（SBO） */
   sbo?: boolean
+  /** WP4b：命令点（YK/YC/STEP）的防误操作闭锁条件；空/缺省 = 未配置 */
+  interlock?: InterlockCondition[]
   /** 仅 YC：工程单位（设计规范 §5.3，界面按 `值 + 单位` 显示） */
   unit?: string
   /** 仅 YC：显式小数位（缺省按量级推断） */
@@ -145,12 +155,74 @@ export interface FrameTranslation {
   segments: FrameSegment[]
 }
 
+// ── 报文值域解码树（WP7，契约 §2.9）───────────────────────────────────
+
+/** 五位品质位（按 IEC 60870-5-101；SIQ/DIQ 的 bit0 是值本身，无 OV） */
+export interface QualityBits {
+  iv: boolean
+  nt: boolean
+  sb: boolean
+  bl: boolean
+  ov: boolean
+}
+
+/** 单个信息对象（SQ=1 时已展开为 base+i） */
+export interface FrameObject {
+  index: number
+  ioa: number
+  /** SQ=1 时的对象内序号（0 起）；SQ=0 无此键 */
+  sq_index?: number
+  value_display: string
+  value: number | boolean | string | null
+  quality: string
+  quality_bits: QualityBits | null
+  quality_raw: number | null
+  timestamp: string | null
+  raw_hex: string | null
+}
+
+export interface FrameApciTree {
+  length: number
+  asdu_length: number
+  frame_type: string
+  tx_seq: number | null
+  rx_seq: number | null
+  u_func: number | null
+  u_func_name: string | null
+}
+
+export interface FrameAsduTree {
+  type_id: number
+  type_name: string
+  sq: boolean
+  num: number
+  cot: number
+  cot_name: string
+  pn: boolean
+  test: boolean
+  origin_addr: number
+  common_addr: number
+  object_count: number
+}
+
+/** 结构化解码树（WP7）：与 segments 文本互补，供表格展开子表 */
+export interface FrameTree {
+  ok: boolean
+  error?: string
+  format: 'I' | 'S' | 'U' | '?'
+  apci: FrameApciTree | null
+  asdu: FrameAsduTree | null
+  objects: FrameObject[]
+}
+
 /** 与后端契约 §2.9 一致：成功响应是**扁平**结构，没有 `translation` 包裹层 */
 export interface FrameDecodeResponse {
   ok: boolean
   error?: string
   format?: FrameTranslation['format']
   segments?: FrameSegment[]
+  /** WP7：结构化树（纯新增键；旧消费方忽略） */
+  tree?: FrameTree | null
 }
 
 /** `GET /api/schema` */
@@ -235,6 +307,14 @@ export interface GiRequest {
   qoi?: number
 }
 
+/** 防误操作闭锁条件（WP4b）：引用的遥信须处于期望位置 */
+export interface InterlockCondition {
+  ioa: number
+  /** 期望位置：true=合位，false=分位 */
+  value: boolean
+  label?: string
+}
+
 export interface YkRequest {
   ioa: number
   /** 单命令 0=分/1=合；双命令 1=分/2=合 */
@@ -245,6 +325,8 @@ export interface YkRequest {
   with_time?: boolean
   /** true → COT=8 DEACT 撤销帧（D1）；撤销 SBO 选择时与 select=true 同发 */
   deactivate?: boolean
+  /** WP4b：闭锁不满足时强制下发（需 admin；服务端写强制解锁审计） */
+  force?: boolean
 }
 
 export type SetpointKind = 'short_float' | 'normalized' | 'scaled'
@@ -255,6 +337,8 @@ export interface SetpointRequest {
   kind?: SetpointKind
   select?: boolean
   with_time?: boolean
+  /** WP4b：闭锁不满足时强制下发（需 admin） */
+  force?: boolean
 }
 
 export interface StepRequest {
@@ -262,6 +346,8 @@ export interface StepRequest {
   /** 1 = 降一步，2 = 升一步 */
   state: 1 | 2
   select?: boolean
+  /** WP4b：闭锁不满足时强制下发（需 admin） */
+  force?: boolean
 }
 
 export interface BitstringRequest {
@@ -824,11 +910,244 @@ export interface SimulationRequest {
   condition?: Partial<NetworkCondition>
 }
 
-/** 认证探测（契约 §2.13）：是否需要令牌、本次携带的令牌是否有效 */
+/** 认证探测（契约 §2.13）：是否需要令牌、本次携带的令牌是否有效；
+ * WP4a 纯新增 mode/operator/role（旧消费方可忽略） */
 export interface AuthProbeResponse {
   ok: boolean
   required: boolean
   valid: boolean
+  mode?: 'none' | 'token' | 'users'
+  operator?: string
+  role?: string
+}
+
+// ── 点表在线编辑（WP10a）──────────────────────────────────────────────
+
+/** 点定义编辑载荷：type 由外层带；point.ioa 必填，其余可省略（就地改字段） */
+export interface PointUpsertRequest {
+  type: 'YX' | 'YC' | 'YK' | 'YM' | 'STEP'
+  point: {
+    ioa: number
+    name?: string
+    group?: number
+    enabled?: boolean
+    subtype?: string
+    inverted?: boolean
+    unit?: string
+    min_value?: number
+    max_value?: number
+    dead_band?: number
+    scale?: number
+    offset?: number
+    decimal_places?: number
+    command_type?: string
+    sbo?: boolean
+    timeout_ms?: number
+    step_size?: number
+  }
+}
+
+export interface PointUpsertResponse {
+  ok: boolean
+  created: boolean
+  error?: string
+  point?: { ioa: number; type: string; name: string; group: number; enabled: boolean }
+}
+
+export interface PointDeleteResponse {
+  ok: boolean
+  deleted: boolean
+  error?: string
+}
+
+// ── 旁路真实网卡抓包（WP9，契约 §2.14b）───────────────────────────────
+
+export interface SniffCapability {
+  available: boolean
+  backend: string
+  reason: string
+  requires_root: boolean
+}
+
+export interface SniffStats {
+  packets: number
+  apdus: number
+  bytes: number
+  dropped: number
+  errors: number
+  last_error: string
+}
+
+export interface SniffStatus {
+  ok: boolean
+  running: boolean
+  capability: SniffCapability
+  stats: SniffStats
+  frames: number
+  port: number
+}
+
+// ── 链路可观测（WP6，契约 §2.4g）─────────────────────────────────────
+
+export interface LinkTimerInfo {
+  timeout: number
+  /** false 表示未在计时（此时 remaining=0 是"没在计时"，不是"只剩 0 秒"） */
+  active: boolean
+  elapsed: number
+  remaining: number
+}
+
+export interface LinkStateTransition {
+  ts: number
+  from: string
+  to: string
+}
+
+export interface LinkStateSnapshot {
+  state: string
+  since_seconds: number
+  timers: Record<string, LinkTimerInfo>
+  history: LinkStateTransition[]
+}
+
+export interface LinkSequenceSnapshot {
+  k: number
+  w: number
+  send_seq: number
+  recv_seq: number
+  last_ack_rx: number
+  /** 已发送未确认 I 帧数——t1 超时的直接前因 */
+  unacked: number
+  window_available: boolean
+  i_frame_count: number
+}
+
+export interface LinkTransportSnapshot {
+  target: string
+  connected: boolean
+  tls: boolean
+  reconnect_count: number
+  max_reconnects: number
+  reconnect_interval: number
+  reconnect_in_seconds: number | null
+  ever_connected: boolean
+  last_error: string
+  last_error_at: number
+}
+
+export interface LinkSnapshot {
+  role: Role
+  state: LinkStateSnapshot | null
+  sequence: LinkSequenceSnapshot | null
+  transport: LinkTransportSnapshot | null
+  redundancy?: RedundancyStatus | null
+  /** 仅子站：当前客户端数 */
+  clients?: number
+  /** 仅子站：快照取自哪条连接 */
+  client_id?: string
+}
+
+// ── 操作审计（WP4a，契约 §2.4d）───────────────────────────────────────
+
+export type AuditResult = 'ok' | 'fail'
+
+/** 单条审计记录：hash = SHA256(prev_hash ‖ canonical_json) */
+export interface AuditRecord {
+  id: number
+  ts: number
+  operator: string
+  role: string
+  source_ip: string
+  action: string
+  target: string
+  result: AuditResult
+  reason: string
+  tx_frame: string
+  rx_frame: string
+  prev_hash: string
+  hash: string
+}
+
+export interface AuditStats {
+  total: number
+  operators: number
+  fails: number
+  last_ts: number | null
+}
+
+export interface AuditRecordsResponse {
+  ok: boolean
+  records: AuditRecord[]
+  stats: AuditStats
+}
+
+export interface AuditVerifyResponse {
+  ok: boolean
+  valid: boolean
+  total: number
+  broken_at: number | null
+  reason: string
+}
+
+export interface AuditUser {
+  name: string
+  role: string
+}
+
+export interface AuditUsersResponse {
+  ok: boolean
+  users: AuditUser[]
+}
+
+// ── 工程配置方案（WP5，契约 §2.4f）────────────────────────────────────
+
+export interface ProfileSummary {
+  mode: string
+  host: string
+  port: number | null
+  common_addr: number | null
+  ca_length: number | null
+  ioa_length: number | null
+  cot_length: number | null
+  point_table: string
+  note: string
+  timers: Record<string, number | null>
+  flow_control: Record<string, number | null>
+}
+
+export interface ProfileInfo {
+  name: string
+  updated_at: number
+  size: number
+  summary: ProfileSummary
+}
+
+export interface ProfilesResponse {
+  ok: boolean
+  profiles: ProfileInfo[]
+  active: string
+}
+
+/** 方案内容（后端不限制具体节，按 AppConfig 子集透传） */
+export type ProfileConfig = Record<string, unknown>
+
+export interface ProfileDetailResponse {
+  ok: boolean
+  name: string
+  config: ProfileConfig
+  summary: ProfileSummary
+}
+
+export interface ProfileSaveResponse {
+  ok: boolean
+  name: string
+  path: string
+}
+
+export interface ProfileApplyResponse {
+  ok: boolean
+  name: string
+  applied: string[]
 }
 
 // ── WebSocket ──────────────────────────────────────────────────────────
@@ -979,4 +1298,106 @@ export interface TestStatusResponse {
   ok: boolean
   running: boolean
   run: TestRun | null
+}
+
+// ── 对点 / 传动验收（WP2）────────────────────────────────────────────
+export type CommissionVerdict = 'pending' | 'pass' | 'fail' | 'manual'
+export type CommissionStatus = 'idle' | 'running' | 'done' | 'stopped'
+
+export interface CommissionItem {
+  ioa: number
+  name: string
+  kind: 'YX' | 'YC' | 'YK' | 'STEP'
+  group: number
+  command_ioa?: number | null
+  expected?: number | boolean | string | null
+  tolerance: number
+  actual?: number | boolean | string | null
+  quality: string
+  verdict: CommissionVerdict
+  note: string
+  operator: string
+  checked_at: number
+  tx_frame: string
+  rx_frame: string
+  tx_time: number
+  rx_time: number
+  reason: string
+}
+
+export interface CommissionSummary {
+  total: number
+  pending: number
+  pass: number
+  fail: number
+  manual: number
+  done: number
+}
+
+export interface CommissionSession {
+  id: string
+  name: string
+  created_at: number
+  operator: string
+  status: CommissionStatus
+  started_at: number
+  finished_at: number
+  cursor: number
+  note: string
+  summary: CommissionSummary
+  point_count: number
+  items: CommissionItem[]
+}
+
+export interface CommissionSessionSummary {
+  id: string
+  name: string
+  created_at: number
+  operator: string
+  status: CommissionStatus
+  started_at: number
+  finished_at: number
+  cursor: number
+  note: string
+  summary: CommissionSummary
+  point_count: number
+}
+
+export interface CommissionStatusResponse {
+  ok: boolean
+  running: boolean
+  session_id: string | null
+  cursor: number
+  total: number
+}
+
+export interface CommissionSessionsResponse {
+  ok: boolean
+  sessions: CommissionSessionSummary[]
+  status: CommissionStatusResponse
+}
+
+export interface CommissionSessionResponse {
+  ok: boolean
+  session: CommissionSession
+}
+
+export interface CommissionItemResponse {
+  ok: boolean
+  item: CommissionItem
+}
+
+export interface CommissionCreateRequest {
+  name?: string
+  operator?: string
+  ioas?: number[]
+  expected?: Record<string, number | boolean | string>
+  command_ioas?: Record<string, number>
+}
+
+export interface CommissionVerdictRequest {
+  ioa: number
+  verdict: CommissionVerdict
+  note?: string
+  operator?: string
 }

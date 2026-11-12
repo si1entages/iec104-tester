@@ -73,6 +73,13 @@ yc:
     max_value: 50.5
 
 yk:
+  # WP4b 防误操作闭锁：在命令点上声明 interlock 即可在下发前强制求值
+  # （条件不满足则一个帧都不发；详见 docs/interlock.md）。
+  # 默认不预置闭锁，避免演示时「点了遥控却被拒」造成困惑。示例：
+  #   interlock:
+  #     - ioa: 1001       # 引用遥信
+  #       value: false    # 须为分位
+  #       label: 刀闸位置
   - ioa: 2001
     name: "1#开关分闸"
     type: single

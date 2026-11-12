@@ -1,0 +1,48 @@
+# systemd 单元（WP10b）：无人值守长期运行
+#
+# 安装：
+#   sudo cp deploy/iec104-tester.service /etc/systemd/system/
+#   sudo mkdir -p /etc/iec104-tester && sudo cp deploy/.env.example /etc/iec104-tester/env
+#   sudo nano /etc/iec104-tester/env          # 设置 IEC104_AUTH_TOKEN
+#   sudo systemctl daemon-reload && sudo systemctl enable --now iec104-tester
+#   journalctl -u iec104-tester -f
+#
+# ⚠ 安全边界：本服务是协议调试工具，不是生产 SCADA 网关（见 SECURITY.md）。
+#   EnvironmentFile 里的令牌是唯一访问控制，务必改掉示例值。
+
+[Unit]
+Description=IEC 60870-5-104 Tester (Web 工作台)
+Documentation=file:///opt/iec104-tester/docs/user_guide.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=iec104
+Group=iec104
+WorkingDirectory=/opt/iec104-tester
+EnvironmentFile=/etc/iec104-tester/env
+Environment=PYTHONUNBUFFERED=1
+
+# 单进程双角色（一个端口一个工作台）；--no-browser 无桌面环境必需
+ExecStart=/opt/iec104-tester/venv/bin/python app.py \
+    --mode both --no-browser --http-host 0.0.0.0 --http-port 8765
+
+Restart=on-failure
+RestartSec=5
+# 日志进 journald（journalctl -u iec104-tester）
+StandardOutput=journal
+StandardError=journal
+
+# 基础加固：数据目录之外只读
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+ReadWritePaths=/opt/iec104-tester/data /opt/iec104-tester/logs
+# 旁路抓包需要 CAP_NET_RAW；不需要该功能时保持注释
+#AmbientCapabilities=CAP_NET_RAW
+#CapabilityBoundingSet=CAP_NET_RAW
+
+[Install]
+WantedBy=multi-user.target

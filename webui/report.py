@@ -33,7 +33,7 @@ def _frame_summary(frame_hex: str) -> dict:
             try:
                 from core.protocol.asdu import ASDU
 
-                asdu = ASDU.decode(data[6:], ca_length=2)
+                asdu = ASDU.decode(data[6:])
                 return {
                     "kind": kind,
                     "detail": f"{asdu.type_id.name} ca={asdu.common_addr} "

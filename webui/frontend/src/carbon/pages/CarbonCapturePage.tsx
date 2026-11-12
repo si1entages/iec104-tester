@@ -7,6 +7,7 @@ import { useCaptureFramesQuery, useCaptureStatusQuery } from '../../api/queries'
 import type { CaptureDiffResponse, CaptureFileInfo } from '../../api/types'
 import { useLocale, useT } from '../../i18n'
 import { formatDateTime, localeTag } from '../../lib/format'
+import { CarbonSniffCard } from '../components/CarbonSniffCard'
 import { Pager, Panel, SelectField, TableFrame, TextField } from '../components/ui'
 
 const PAGE_SIZE = 100
@@ -349,6 +350,7 @@ export function CarbonCapturePage() {
           </div>
         ) : null}
       </Panel>
+          <CarbonSniffCard />
     </div>
   )
 }

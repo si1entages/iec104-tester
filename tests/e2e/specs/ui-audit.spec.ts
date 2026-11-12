@@ -44,6 +44,8 @@ const PAGES = [
   { menu: /历史/, marker: null, key: 'history' },
   { menu: /报文抓包/, marker: null, key: 'capture' },
   { menu: /自动化测试/, marker: null, key: 'tests' },
+  { menu: /对点传动/, marker: null, key: 'commission' },
+  { menu: /操作审计/, marker: null, key: 'audit' },
 ] as const
 
 const VIEWPORTS = [
@@ -235,7 +237,7 @@ async function auditDom(page: Page): Promise<{
       }
 
       // 5) 漏出的 i18n key（只查 UI 文案容器，避免日志/报文正文误报）
-      const keyPattern = /\b(?:menu|pt|pt2|simPanel|slave|master|status|logs|history|cap|test|multi|scp|cmd|header|auth|common)\.[a-zA-Z][\w.]*/g
+      const keyPattern = /\b(?:menu|pt|pt2|simPanel|slave|master|status|logs|history|cap|test|multi|scp|cmd|header|auth|common|commission|audit)\.[a-zA-Z][\w.]*/g
       for (const selector of rawKeySelectors) {
         for (const el of document.querySelectorAll(selector)) {
           if (!visible(el)) continue
@@ -544,11 +546,11 @@ for (const kit of GATE_KITS) {
     const deployments = [
       {
         base: MASTER,
-        menus: [/主站工作台/, /多站/, /状态总览/, /日志/, /历史/, /报文抓包/, /自动化测试/],
+        menus: [/主站工作台/, /多站/, /状态总览/, /日志/, /历史/, /报文抓包/, /自动化测试/, /对点传动/, /操作审计/],
       },
       {
         base: SLAVE,
-        menus: [/子站工作台/, /多站/, /状态总览/, /日志/, /历史/, /报文抓包/, /自动化测试/],
+        menus: [/子站工作台/, /多站/, /状态总览/, /日志/, /历史/, /报文抓包/, /自动化测试/, /对点传动/, /操作审计/],
       },
     ]
     for (const deployment of deployments) {

@@ -10,9 +10,12 @@ from typing import Any
 from core.config import AppConfig
 from core.data.point_table import PointTable
 from core.engine.compliance_monitor import ComplianceMonitor
+from core.engine.interlock import evaluate
 from core.engine.tcp_bridge import BridgeConfig, TcpBridge
 from core.logging_manager import LogManager
 
+from .audit import current_identity as _current_identity
+from .audit import current_intent as _current_intent
 from .capture import CaptureService
 from .events import EventBus
 from .points import PointService
@@ -61,7 +64,13 @@ class EngineBridge:
 
     def __init__(self, role: str = "master", point_table: PointTable | None = None,
                  connection: dict | None = None, history_db=None,
-                 app_config: AppConfig | None = None):
+                 app_config: AppConfig | None = None,
+                 data_dir: str | Path | None = None):
+        """构造引擎桥.
+
+        ``data_dir``（WP3 测试隔离用）：覆盖验收/审计/方案等运行时库的根目录；
+        None = 沿用 ``config.history.dir`` 或 ``data/``（产品默认，行为不变）。
+        """
         assert role in ("master", "slave", "bridge")
         self.role = role
         # D3 接线：CLI/`--config` 解析出的 AppConfig 经 app.py → run_server 传入。
@@ -124,6 +133,34 @@ class EngineBridge:
         # 注入时间线（T97）：步骤编排 + 逐窗自动判定（仅 bridge 角色可运行）
         self.timeline = TimelineService(self)
 
+        # 对点/传动验收（WP2）：会话持久化 + 批量编排；与历史库同根目录。
+        # 桥角色无 104 引擎，仍创建 service 以便 API 返回干净的角色错误。
+        from core.data.audit import AuditStore
+        from core.data.commission_store import CommissionStore
+        from webui.audit import AuditService
+        from webui.commissioning import CommissioningService
+
+        store_dir = (Path(data_dir) if data_dir is not None else
+                     Path(self.config.history.dir) if self.config.history.dir
+                     else Path("data"))
+        self.commission_store = CommissionStore(store_dir / "commissioning.db")
+        self.commission_store.open()
+        self.commission = CommissioningService(self, self.commission_store)
+
+        # 操作审计（WP4a）：哈希链流水，与验收会话同根目录；三角色通用。
+        self.audit_store = AuditStore(store_dir / "audit.db")
+        self.audit = AuditService(self.audit_store)
+
+        # 旁路真实网卡抓包（WP9）：独立于引擎录制；能力不足时明确降级。
+        from core.capture.sniffer import Sniffer
+
+        self.sniffer = Sniffer()
+
+        # 工程配置方案（WP5）：命名方案的存取与应用；文本 YAML，可由用户直接编辑。
+        from .profiles import ProfileService
+
+        self.profiles = ProfileService(self)
+
     def _on_log_entry(self, entry) -> None:
         self.bus.publish("log", {
             "ts": entry.ts, "level": entry.level, "source": entry.source,
@@ -170,6 +207,10 @@ class EngineBridge:
         self.bus.unsubscribe(q)
 
     def _publish(self, kind: str, data: dict) -> None:
+        self.bus.publish(kind, data)
+
+    def publish(self, kind: str, data: dict) -> None:
+        """公开的事件广播入口（WP2 编排服务复用现有 event kind 推进度）。"""
         self.bus.publish(kind, data)
 
     def recent(self, kind: str, limit: int = 100) -> list[dict]:
@@ -243,6 +284,13 @@ class EngineBridge:
         st.setdefault("host", self.config.connection.host)
         st.setdefault("port", self.config.connection.port)
         st.setdefault("addr", self.config.connection.common_addr)
+        # WP1：暴露生效的 ASDU 地址字段长度，供前端显示当前链路口径。
+        # 只新增键，旧消费者忽略即可。
+        st["asdu_address"] = {
+            "ca_length": self.config.asdu_address.ca_length,
+            "ioa_length": self.config.asdu_address.ioa_length,
+            "cot_length": self.config.asdu_address.cot_length,
+        }
         st["points"] = self.points.count
         st["dropped"] = self.bus.dropped
         return st
@@ -307,17 +355,32 @@ class EngineBridge:
     # ── 透明桥（T73/T74）──────────────────────────────────────────
 
     async def start_bridge(self, listen_host: str, listen_port: int,
-                           upstream_host: str, upstream_port: int) -> dict:
-        """启动透明桥（幂等保护：运行中再启动返回错误，与引擎行为一致）."""
+                           upstream_host: str, upstream_port: int,
+                           listen_address: dict | None = None,
+                           upstream_address: dict | None = None) -> dict:
+        """启动透明桥（幂等保护：运行中再启动返回错误，与引擎行为一致）。
+
+        ``listen_address`` / ``upstream_address``（WP1）可选，形如
+        ``{"ca_length":1,"ioa_length":2,"cot_length":2}``；None = 沿用进程级
+        默认，即 ``--config`` / CLI 的 ``asdu_address``。两侧独立，互不串味。
+        """
+        from core.protocol.address import AsduAddressConfig
+
+        def _addr(d: dict | None):
+            return AsduAddressConfig(**d) if d else None
+
         if self.tcp_bridge is not None:
             self._notify_ui("桥已在运行")
             return {"ok": False, "error": "bridge already running"}
         bridge = TcpBridge(
             BridgeConfig(listen_host=listen_host, listen_port=listen_port,
-                         upstream_host=upstream_host, upstream_port=upstream_port),
+                         upstream_host=upstream_host, upstream_port=upstream_port,
+                         listen_address=_addr(listen_address),
+                         upstream_address=_addr(upstream_address)),
             on_frame=self._on_raw_frame,
         )
-        self.compliance = ComplianceMonitor()
+        self.compliance = ComplianceMonitor(
+            max_time_skew_s=self.config.compliance.max_time_skew_s)
         try:
             await bridge.start()
         except OSError as e:
@@ -383,14 +446,26 @@ class EngineBridge:
 
     async def send_yk(self, ioa: int, state: int | bool, select: bool = False,
                       double: bool = False, with_time: bool = False,
-                      deactivate: bool = False) -> dict:
+                      deactivate: bool = False, force: bool = False) -> dict:
+        # DEACT（撤销选择）是安全清理动作，不受闭锁限制，必须始终可发
+        if not deactivate:
+            gate = self._interlock_gate(ioa, "yk", force=force)
+            if gate is not None:
+                return gate
         return await self._cmd(self.session.send_yk(ioa, state, select, double,
                                                     with_time, deactivate))
 
-    async def send_step_command(self, ioa: int, state: int, select: bool = False) -> dict:
+    async def send_step_command(self, ioa: int, state: int, select: bool = False,
+                                force: bool = False) -> dict:
+        gate = self._interlock_gate(ioa, "step", force=force)
+        if gate is not None:
+            return gate
         return await self._cmd(self.session.send_step_command(ioa, state, select))
 
-    async def send_bitstring(self, ioa: int, value: int) -> dict:
+    async def send_bitstring(self, ioa: int, value: int, force: bool = False) -> dict:
+        gate = self._interlock_gate(ioa, "bitstring", force=force)
+        if gate is not None:
+            return gate
         return await self._cmd(self.session.send_bitstring(ioa, value))
 
     async def send_delay_request(self, delay_ms: int) -> dict:
@@ -398,7 +473,12 @@ class EngineBridge:
 
     async def send_setpoint(self, ioa: int, value: float, select: bool = False,
                              kind: str = "short_float", with_time: bool = False,
-                             deactivate: bool = False) -> dict:
+                             deactivate: bool = False, force: bool = False) -> dict:
+        # 同 send_yk：DEACT 撤销帧不受闭锁限制
+        if not deactivate:
+            gate = self._interlock_gate(ioa, "setpoint", force=force)
+            if gate is not None:
+                return gate
         return await self._cmd(self.session.send_setpoint(ioa, value, select,
                                                           kind, with_time,
                                                           deactivate))
@@ -407,9 +487,11 @@ class EngineBridge:
         return await self._cmd(self.session.parameter_command(kind, ioa, value, qualifier))
 
     async def file_action(self, action: str, ioa: int = 0, file_name: int = 0,
-                          cot: int | None = None, qualifier: int | None = None) -> dict:
-        return await self._cmd(self.session.file_action(action, ioa, file_name,
-                                                        cot=cot, qualifier=qualifier))
+                          cot: int | None = None, qualifier: int | None = None,
+                          data: str = "", segment_size: int = 200) -> dict:
+        return await self._cmd(self.session.file_action(
+            action, ioa, file_name, cot=cot, qualifier=qualifier,
+            data=data, segment_size=segment_size))
 
     async def set_response(self, cfg: dict) -> dict:
         return await self._cmd(self.session.set_response(cfg))
@@ -569,6 +651,21 @@ class EngineBridge:
                 await self.testcenter.shutdown()
             except Exception as e:  # noqa: BLE001
                 logger.warning("test center shutdown: %s", e)
+            # 1.5) 对点/传动验收编排（WP2）：先停后台任务再关库
+            try:
+                await self.commission.shutdown()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("commission shutdown: %s", e)
+            # 1.55) 旁路抓包（WP9）：停线程、释放原始套接字
+            try:
+                self.sniffer.stop()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("sniffer stop: %s", e)
+            # 1.6) 操作审计（WP4a）：关库（WAL 落盘）
+            try:
+                self.audit.shutdown()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("audit shutdown: %s", e)
             # 2) 引擎与会话资源
             await self.session.shutdown()
         except Exception as e:
@@ -587,8 +684,122 @@ class EngineBridge:
                 except Exception:
                     pass
 
-    async def _cmd(self, coro) -> dict:
+    # ── 防误操作闭锁（WP4b）───────────────────────────────────────
+
+    def _interlock_conditions(self, ioa: int) -> tuple:
+        """取该 IOA 命令点声明的闭锁条件（YK → YC → STEP 依序命中）."""
         try:
-            return await coro
+            table = getattr(self.session.engine, "_point_table", None)
+        except Exception:  # noqa: BLE001 — 引擎未就绪
+            return ()
+        if table is None:
+            return ()
+        for getter in (table.get_yk, table.get_yc, table.get_step):
+            try:
+                point = getter(int(ioa))
+            except Exception:  # noqa: BLE001 — 查询失败按"无定义"处理
+                point = None
+            if point is not None:
+                return tuple(getattr(point, "interlock", ()) or ())
+        return ()
+
+    def _read_yx_value(self, ioa: int) -> bool | None:
+        """读当前遥信值；引擎未运行/点未上送返回 None（闭锁按不满足处理）."""
+        try:
+            store = getattr(self.session.engine, "data_store", None)
+        except Exception:  # noqa: BLE001
+            return None
+        if store is None:
+            return None
+        try:
+            d = store.get_yx(int(ioa))
+        except Exception:  # noqa: BLE001
+            return None
+        if d is None:
+            return None
+        return bool(d.value)
+
+    def _interlock_gate(self, ioa: int, kind: str, *, force: bool = False) -> dict | None:
+        """下发前闭锁求值：``None`` = 放行；字典 = 拒绝响应（调用方直接返回）.
+
+        - 未配置闭锁 → 直接放行（默认零开销、行为与历史一致）；
+        - 条件不满足且 ``force=False`` → 返回 ``{ok: False, ...}``，
+          **不发任何帧**，并把拒绝原因写入审计链（WP4a 同一条链）；
+        - ``force=True`` → 需 admin 角色（未启用认证时为全权，与兼容模式一致；
+          启发式见 ``webui/audit.py`` 的 `role_allowed`），写"强制解锁"审计记录后放行。
+        """
+        conds = self._interlock_conditions(ioa)
+        if not conds:
+            return None
+        result = evaluate(conds, self._read_yx_value)
+        if not result.blocked:
+            return None
+        ident = _current_identity()
+        role = ident.role if ident is not None else "admin"
+        if force:
+            if role != "admin":
+                return {
+                    "ok": False,
+                    "error": f"强制解锁需 admin 角色（当前 {role}）",
+                    "interlock": result.as_dict(),
+                }
+            self.audit.record(
+                f"{kind}/force-unlock", "ok",
+                operator=ident.name if ident else "", role=role,
+                source_ip=ident.source_ip if ident else "",
+                target=str(ioa), reason=f"强制解锁：{result.reason}",
+            )
+            self._notify_ui(f"闭锁强制解锁：{kind} IOA {ioa}")
+            return None
+        self.audit.record(
+            f"{kind}/interlock-blocked", "fail",
+            operator=ident.name if ident else "", role=role,
+            source_ip=ident.source_ip if ident else "",
+            target=str(ioa), reason=result.reason,
+        )
+        return {
+            "ok": False,
+            "error": f"联锁不满足，命令未下发：{result.reason}",
+            "interlock": result.as_dict(),
+        }
+
+    async def _cmd(self, coro) -> dict:
+        started = time.time()
+        try:
+            result = await coro
         except (RuntimeError, ValueError, KeyError, TypeError, ConnectionError) as e:
-            return {"ok": False, "error": str(e)}
+            result = {"ok": False, "error": str(e)}
+        self._audit_command(result, started)
+        return result
+
+    def _audit_command(self, result: dict, started: float) -> None:
+        """命令汇聚点写审计（WP4a）：无身份上下文（--demo/内部任务）不记.
+
+        帧证据从 EventBus recent 抓 started 之后的 tx/rx 首帧；rx 应答若
+        在命令返回后才到则留空（下发帧已足够归因，ACK 可从 recent 追溯）。
+        """
+        intent = _current_intent()
+        ident = _current_identity()
+        if intent is None or ident is None:
+            return
+        tx = rx = ""
+        for msg in self.recent("frame", 80):
+            d = msg.get("data", msg) if isinstance(msg, dict) else {}
+            ts = msg.get("ts", 0) if isinstance(msg, dict) else 0
+            if ts and ts < started - 0.001:
+                continue
+            direction = d.get("direction")
+            if not tx and direction == "tx":
+                tx = str(d.get("hex", ""))
+            elif not rx and direction == "rx":
+                rx = str(d.get("hex", ""))
+            if tx and rx:
+                break
+        ok = bool(result.get("ok"))
+        self.audit.record(
+            intent.action, "ok" if ok else "fail",
+            operator=ident.name, role=ident.role, source_ip=ident.source_ip,
+            target=intent.target,
+            reason="" if ok else str(result.get("error", "")),
+            tx_frame=tx, rx_frame=rx, ts=started,
+        )

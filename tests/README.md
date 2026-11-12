@@ -43,13 +43,13 @@ coverage report --include="webui/*" --fail-under=85
 - **注意：总数字会掩盖分布问题**，下列单模块仍低于 85%，作为后续补测清单
   （精确行号见 `--cov-report=term-missing` 的 `Missing` 列）。
 
-#### 待后续补测清单（单模块 < 85%，尚未完成）
+#### 单模块覆盖缺口清单（WP11a 按新口径以离线向量 + 表驱动用例收口）
 
 | 模块 | 覆盖率 | 缺口性质 | 补测落点 |
 |---|---|---|---|
 | `core/engine/scheduler.py` | 97% ✅ | 定时任务管理 API（`add_task`/`remove_task`/`enable`/`disable`）与**主调度循环**几乎未覆盖：到期分派（协程 vs 同步回调）、`run_count`/`error_count` 统计、`auto_restart=False` 时出错自动禁用 | 注入受控时钟 + 直接驱动调度循环一轮，断言到期分派与异常计数/禁用行为 |
 | `core/engine/slave_session.py` | 64% | 子站会话的收发/超时/重连分支大量未覆盖（缺口行见 `Missing` 列） | 参照 `tests/test_slave_engine.py` 的 Mock 传输层手法补会话级用例 |
-| `core/engine/master_protocol.py` | 75% | 总召唤响应的**多类型分支**（`process_interrogation_response` 按数据类型逐分支）、文件传输收发分支、其余按 TypeID 的解析分支 | 按 TypeID 表驱动构造 ASDU，逐类型断言入库结果 |
+| `core/engine/master_protocol.py` | ✅ 已补（WP11a） | 总召唤响应 9 类信息对象逐分支、COT 42/43/44 标准错误应答、空 ASDU 降级 | `tests/test_wp11a_coverage.py` 表驱动 17 例，逐类型断言点值/品质/事件 |
 | `core/engine/master_session.py` | 97% ✅ | 定时器超时处置与连接生命周期分支未覆盖（缺口行见 `Missing` 列） | 显式驱动定时器回调与状态机迁移，Mock 传输层 |
 | `core/engine/slave_sim.py` | 71% | 自发上送仿真的周期 tick / 品质位组合分支覆盖不足 | 显式驱动 tick，断言上送报文内容 |
 | `core/engine/multi_station.py` | 98% ✅ | 聚合只读接口（`get_all_station_status` / `get_summary`）与 `start_simulation` 的多站分支未覆盖 | Mock 子引擎，断言聚合与多站启停/隔离行为 |
@@ -204,3 +204,10 @@ CI 已默认带上 `--basetemp=.pytest-tmp`（见 `.github/workflows/ci.yml`）�
 > **注意**：在多人共享的脏工作区上跑全量并据此下结论本身也不可靠——其他人在跑的过程中
 > 半写 `core/**`、`tests/**` 会导致收集期 ImportError，同样表现为「全量偶发失败、单测通过」。
 > 判定性验证请用干净 worktree / 独立检出。
+
+> **WP11a（2026-11-12）**：按新口径，型式试验/单模块覆盖以本仓离线向量 +
+> 表驱动用例自证，不再等检测机构清单。`master_protocol` 多类型 GI 响应分支已由
+> `tests/test_wp11a_coverage.py` 补齐；`slave_session`(64%) / `slave_sim`(72%)
+> 属会话级超时/重连与周期 tick 分支，保留为增强项（不设门禁），不编造无行为
+> 断言的用例刷数字。`core/transport/client.py` / `server.py` 的 0% 是兼容性
+> re-export 垫片，属预期（见上文）。

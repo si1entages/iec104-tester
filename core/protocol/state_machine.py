@@ -24,6 +24,7 @@ from __future__ import annotations
 import enum
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -98,6 +99,10 @@ class ConnectionStateMachine:
         # 回调
         self._on_state_change = on_state_change
         self._on_timer_expired = on_timer_expired
+
+        # WP6：链路可观测——状态保持时长 + 状态变迁时间线（环形，只读快照用）
+        self._since = time.monotonic()
+        self._history: deque[tuple[float, str, str]] = deque(maxlen=20)
 
     # ── 属性 ──────────────────────────────────────────────────────
 
@@ -242,11 +247,43 @@ class ConnectionStateMachine:
             timer.active = False
 
     def _notify_state_change(self, old_state: str, new_state: str) -> None:
+        if old_state != new_state:
+            # WP6：记录变迁时刻（墙钟，供界面时间线显示）与状态起始时刻
+            self._history.append((time.time(), old_state, new_state))
+            self._since = time.monotonic()
         if self._on_state_change and old_state != new_state:
             try:
                 self._on_state_change(old_state, new_state)
             except Exception:
                 pass
+
+    def snapshot(self) -> dict:
+        """只读快照（WP6）：状态、已保持时长、四个定时器剩余、状态变迁时间线.
+
+        ``timers`` 每项含 ``timeout/active/elapsed/remaining``；未激活的定时器
+        ``remaining`` 为 0（与 ``TimerInfo`` 语义一致，表示"没在计时"而不是
+        "还剩 0 秒可用"，界面据此显示 "—"）。
+        """
+        with self._lock:
+            timers = {
+                ttype.value: {
+                    "timeout": timer.timeout,
+                    "active": timer.active,
+                    "elapsed": round(timer.elapsed, 3),
+                    "remaining": round(timer.remaining, 3),
+                }
+                for ttype, timer in self._timers.items()
+            }
+            history = [
+                {"ts": ts, "from": old, "to": new}
+                for ts, old, new in self._history
+            ]
+            return {
+                "state": self._state.value,
+                "since_seconds": round(time.monotonic() - self._since, 3),
+                "timers": timers,
+                "history": history,
+            }
 
     def reset(self) -> None:
         """重置状态机."""

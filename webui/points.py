@@ -15,6 +15,27 @@ from core.data.point_table import (
     YxPointDef,
 )
 
+#: 类型 → PointTable 的 add_* 方法（PointTable 无通用 add()）
+_ADDERS = {
+    "YX": lambda t, p: t.add_yx(p),
+    "YC": lambda t, p: t.add_yc(p),
+    "YK": lambda t, p: t.add_yk(p),
+    "YM": lambda t, p: t.add_ym(p),
+    "STEP": lambda t, p: t.add_step(p),
+}
+
+
+def _interlock_summary(point: Any) -> list[dict]:
+    """点表快照里的闭锁摘要（WP4b）：前端据此显示「联锁」标记与条件提示.
+
+    只读投影，不含运行时实测值——实测值随 /api/points 的 YX 行给出。
+    """
+    conds = getattr(point, "interlock", ()) or ()
+    return [
+        {"ioa": c.ioa, "value": bool(c.value), "label": getattr(c, "label", "")}
+        for c in conds
+    ]
+
 
 class PointService:
     """PointTable 的应用层封装；变更后调用 sync_to_engine.
@@ -82,18 +103,21 @@ class PointService:
                         "subtype": p.data_type.value,
                         # 设计规范 §5.3：界面按声明的小数位与单位显示遥测值
                         "unit": p.unit, "decimal_places": p.decimal_places, "ts": 0,
-                        "min_value": p.min_value, "max_value": p.max_value})
+                        "min_value": p.min_value, "max_value": p.max_value,
+                        "interlock": _interlock_summary(p)})
         for p in self.table.get_all_yk():
             out.append({"ioa": p.ioa, "type": "YK", "name": p.name, "group": p.group,
                         "enabled": p.enabled, "value": "—",
                         "subtype": str(p.command_type),
-                        "sbo": bool(p.select_before_execute), "ts": 0})
+                        "sbo": bool(p.select_before_execute), "ts": 0,
+                        "interlock": _interlock_summary(p)})
         for p in self.table.get_all_ym():
             out.append({"ioa": p.ioa, "type": "YM", "name": p.name, "group": p.group,
                         "enabled": p.enabled, "value": 0, "ts": 0})
         for p in self.table.get_all_step():
             out.append({"ioa": p.ioa, "type": "STEP", "name": p.name, "group": p.group,
-                        "enabled": p.enabled, "value": 0, "ts": 0})
+                        "enabled": p.enabled, "value": 0, "ts": 0,
+                        "interlock": _interlock_summary(p)})
         if engine is not None:
             store = getattr(engine, "data_store", None)
             if store is not None:
@@ -158,6 +182,112 @@ class PointService:
         if engine is not None:
             self.sync_to_engine(engine)
         return {"ok": True, "changed": changed}
+
+    # ── 在线编辑（WP10a）──────────────────────────────────────────
+
+    def upsert(self, ptype: str, fields: dict, engine: Any = None) -> dict:
+        """新增或更新一个点定义（按 IOA 匹配）；返回 ``{ok, created, point}``.
+
+        **不重置设计基准**：``design`` 是「导入时的设计快照」，在线改点属于
+        现场调整，若顺手重置基准就再也看不出"现场改了什么"。要更新基准请显式
+        调 ``set_design("set")``（界面上的「重设基准」按钮）。
+        """
+        ptype = (ptype or "").upper()
+        if ptype not in ("YX", "YC", "YK", "YM", "STEP"):
+            return {"ok": False, "error": "type 须为 YX|YC|YK|YM|STEP"}
+        ioa = fields.get("ioa")
+        if not isinstance(ioa, int) or isinstance(ioa, bool) or ioa < 0:
+            return {"ok": False, "error": "ioa 须为非负整数"}
+        try:
+            point, created = self._build_point(ptype, fields)
+        except (ValueError, TypeError, KeyError) as e:
+            return {"ok": False, "error": f"字段非法：{e}"}
+        _ADDERS[ptype](self.table, point)
+        self.refresh_count()
+        self.sync_to_engine(engine)
+        return {
+            "ok": True, "created": created,
+            "point": {"ioa": point.ioa, "type": ptype, "name": point.name,
+                      "group": point.group, "enabled": point.enabled},
+        }
+
+    def _build_point(self, ptype: str, f: dict):
+        """按类型构造点定义；已存在则复用对象就地改字段（保持引用稳定）."""
+        from core.data.point_table import (
+            StepPointDef,
+            YcPointDef,
+            YcType,
+            YkPointDef,
+            YmPointDef,
+            YxPointDef,
+            YxType,
+        )
+
+        ioa = int(f["ioa"])
+        name = str(f.get("name", ""))
+        group = int(f.get("group", 1))
+        enabled = bool(f.get("enabled", True))
+
+        if ptype == "YX":
+            existing = self.table.get_yx(ioa)
+            pt = existing or YxPointDef(ioa=ioa)
+            pt.name, pt.group, pt.enabled = name, group, enabled
+            if "subtype" in f:
+                pt.point_type = YxType(str(f["subtype"]))
+            if "inverted" in f:
+                pt.inverted = bool(f["inverted"])
+        elif ptype == "YC":
+            existing = self.table.get_yc(ioa)
+            pt = existing or YcPointDef(ioa=ioa)
+            pt.name, pt.group, pt.enabled = name, group, enabled
+            if "subtype" in f:
+                pt.data_type = YcType(str(f["subtype"]))
+            for key in ("min_value", "max_value", "dead_band", "scale", "offset"):
+                if key in f:
+                    setattr(pt, key, float(f[key]))
+            for key in ("unit",):
+                if key in f:
+                    setattr(pt, key, str(f[key]))
+            for key in ("decimal_places",):
+                if key in f:
+                    setattr(pt, key, int(f[key]))
+        elif ptype == "YK":
+            existing = self.table.get_yk(ioa)
+            pt = existing or YkPointDef(ioa=ioa)
+            pt.name, pt.group, pt.enabled = name, group, enabled
+            if "command_type" in f:
+                pt.command_type = str(f["command_type"])
+            if "sbo" in f:
+                pt.select_before_execute = bool(f["sbo"])
+            if "timeout_ms" in f:
+                pt.timeout_ms = int(f["timeout_ms"])
+        elif ptype == "YM":
+            existing = self.table.get_ym(ioa)
+            pt = existing or YmPointDef(ioa=ioa)
+            pt.name, pt.group, pt.enabled = name, group, enabled
+        else:  # STEP
+            existing = self.table.get_step(ioa)
+            pt = existing or StepPointDef(ioa=ioa)
+            pt.name, pt.group, pt.enabled = name, group, enabled
+            for key in ("min_value", "max_value", "step_size"):
+                if key in f:
+                    setattr(pt, key, int(f[key]))
+        return pt, existing is None
+
+    def delete_point(self, ptype: str, ioa: int, engine: Any = None) -> dict:
+        """删除一个点定义；**不重置设计基准**（同 ``upsert``）."""
+        from core.data.point_table import PointType
+
+        ptype = (ptype or "").upper()
+        try:
+            pt_enum = PointType(ptype.lower())
+        except ValueError:
+            return {"ok": False, "error": "type 须为 YX|YC|YK|YM|STEP"}
+        removed = self.table.remove_point(pt_enum, int(ioa))
+        if removed:
+            self.refresh_count()
+            self.sync_to_engine(engine)
+        return {"ok": removed, "deleted": removed}
 
     def export_yaml(self) -> str:
         with tempfile.TemporaryDirectory() as td:

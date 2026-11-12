@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..data.point_table import YxType
 from ..protocol.asdu import ASDU, ASDUBuilder, InformationObject
+from ..protocol.file_transfer import FileTransferState
 from ..protocol.types import (
     COT,
     AckFileSection,
@@ -680,15 +681,24 @@ class SlaveResponseBuilder:
             if isinstance(obj.data, AckFileSection):
                 e._file_transfer.handle_ack(obj.ioa, obj.data)
 
-        # 段
+        # 段：下载方向（本子站发给主站）走管理器；上传方向（主站发给本子站）
+        # 由 start_upload 触发，这里按「是否已收到过 F_SG」区分接收态。
         elif type_id == TypeID.F_SG_NA_1:
             if isinstance(obj.data, FileSegment):
-                e._file_transfer.handle_file_segment(obj.data)
+                if e._file_transfer.context.state == FileTransferState.FILE_READY:
+                    e._file_transfer.handle_incoming_file_segment(obj.data)
+                else:
+                    e._file_transfer.handle_file_segment(obj.data)
 
         # 最后的节/段
         elif type_id == TypeID.F_LS_NA_1:
             if isinstance(obj.data, LastSection):
-                e._file_transfer.handle_last_section(obj.data)
+                if e._file_transfer.context.state == FileTransferState.TRANSFERRING                         and obj.data.lsq in (1, 2):
+                    # 上传方向：本子站刚收完主站发来的段 → 回 F_AF 落盘
+                    ack = e._file_transfer.handle_incoming_last_section(obj.ioa, obj.data)
+                    e._spawn(e._broadcast_i_frame(ack))
+                else:
+                    e._file_transfer.handle_last_section(obj.data)
 
         else:
             logger.debug(f"Unhandled file transfer type: {type_id}")

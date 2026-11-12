@@ -28,6 +28,8 @@ import { useUiStore } from '../store/uiStore'
 import type { PageKey } from '../store/uiStore'
 import { PfBridgePage } from './pages/PfBridgePage'
 import { PfCapturePage } from './pages/PfCapturePage'
+import { PfAuditPage } from './pages/PfAuditPage'
+import { PfCommissionPage } from './pages/PfCommissionPage'
 import { PfHistoryPage } from './pages/PfHistoryPage'
 import { PfLogsPage } from './pages/PfLogsPage'
 import { PfMasterPage } from './pages/PfMasterPage'
@@ -47,6 +49,8 @@ const PAGES: { key: PageKey; labelKey: MessageKey }[] = [
   { key: 'bridge', labelKey: 'menu.bridge' },
   { key: 'capture', labelKey: 'menu.capture' },
   { key: 'tests', labelKey: 'menu.tests' },
+  { key: 'commission', labelKey: 'menu.commission' },
+  { key: 'audit', labelKey: 'menu.audit' },
 ]
 
 function isPageKey(value: string): value is PageKey {
@@ -170,6 +174,10 @@ export function PfApp() {
                 const rs = availableRoles.length > 0 ? availableRoles : status?.role ? [status.role] : []
                 return rs.includes('bridge')
               }
+              if (key === 'audit' || key === 'commission') {
+                const rs = availableRoles.length > 0 ? availableRoles : status?.role ? [status.role] : []
+                return !rs.includes('bridge')
+              }
               if (key !== 'master' && key !== 'slave') return true
               const roles = availableRoles.length > 0 ? availableRoles : status?.role ? [status.role] : []
               return roles.includes(key)
@@ -202,6 +210,8 @@ export function PfApp() {
   else if (page === 'capture') content = <PfCapturePage />
   else if (page === 'tests') content = <PfTestCenterPage />
   else if (page === 'multi') content = <PfMultiPage />
+  else if (page === 'commission') content = <PfCommissionPage />
+  else if (page === 'audit') content = <PfAuditPage />
   else if (page === 'bridge') content = <PfBridgePage />
   else content = <PfPlaceholder />
 

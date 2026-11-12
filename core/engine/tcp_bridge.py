@@ -33,6 +33,7 @@ from core.engine.condition_injector import (
     DeliverAction,
     _delayed_write,
 )
+from core.protocol.address import AsduAddressConfig, use_default
 from core.protocol.apci import APCICodec
 from core.simulation.conditions import NetworkCondition
 
@@ -64,6 +65,10 @@ class BridgeConfig:
     upstream_ssl: ssl.SSLContext | None = None  # 上游侧 TLS（None=明文）
     upstream_hostname: str = ""      # 上游证书主机名校验（空=不校验名）
     condition: NetworkCondition | None = None  # 网络条件注入（T85；None/无异常=直通）
+    # WP1：两侧 ASDU 地址长度可独立配置。None = 沿用进程级默认（set_default），
+    # 因此不配置时行为与 v1.10 完全一致。两侧各包 use_default，互不串味。
+    listen_address: AsduAddressConfig | None = None   # 监听侧（面向真实主站）
+    upstream_address: AsduAddressConfig | None = None  # 上游侧（面向真实子站）
 
 
 @dataclass
@@ -153,7 +158,7 @@ def describe_frame(frame: bytes) -> str:
                 from core.protocol.asdu import ASDU
 
                 if len(frame) > 6:
-                    asdu = ASDU.decode(frame[6:], ca_length=2)
+                    asdu = ASDU.decode(frame[6:])
                     base += f" {asdu.type_id.name} ca={asdu.common_addr} cot={asdu.cot}"
             except Exception:  # noqa: BLE001 — 旁路摘要，解析失败无所谓
                 pass
@@ -273,10 +278,14 @@ class TcpBridge:
         # 每条链路一个注入器（T85）：断线状态按连接隔离
         injector = ConditionInjector(self.config.condition)
         self._injectors[client_id] = injector
-        dn_task = asyncio.create_task(
-            self._pump(reader, writer, up_writer, "tx", client_id, injector))
-        up_task = asyncio.create_task(
-            self._pump(up_reader, up_writer, writer, "rx", client_id, injector))
+        # WP1：两条转发任务各自绑定所属侧的 ASDU 地址长度。use_default 是
+        # 任务级 ContextVar 覆盖，退出自动还原；None 表示沿用进程默认（零回归）。
+        dn_task = asyncio.create_task(self._pump_with_address(
+            reader, writer, up_writer, "tx", client_id, injector,
+            self.config.listen_address))
+        up_task = asyncio.create_task(self._pump_with_address(
+            up_reader, up_writer, writer, "rx", client_id, injector,
+            self.config.upstream_address))
         try:
             # 任一方向断开即结束（对端关闭/异常）；另一方向由 finally 收口
             done, _ = await asyncio.wait({dn_task, up_task},
@@ -296,6 +305,20 @@ class TcpBridge:
                 except Exception:  # noqa: BLE001
                     pass
             logger.info("[%s] client disconnected", client_id)
+
+    async def _pump_with_address(self, reader: asyncio.StreamReader,
+                                 writer: asyncio.StreamWriter,
+                                 peer_writer: asyncio.StreamWriter,
+                                 direction: str, client_id: str,
+                                 injector: ConditionInjector | None,
+                                 address: AsduAddressConfig | None) -> None:
+        """给单方向泵绑定所属侧的 ASDU 地址配置（WP1）。
+
+        用 ``use_default(None)`` 包住时等价于不覆盖，行为与 v1.10 一致。
+        """
+        with use_default(address):
+            await self._pump(reader, writer, peer_writer, direction,
+                             client_id, injector)
 
     async def _pump(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
                     peer_writer: asyncio.StreamWriter, direction: str,

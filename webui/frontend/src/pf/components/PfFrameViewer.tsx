@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   Button,
@@ -20,6 +20,7 @@ import { clearFrames, replaceFrames, useLiveFrames } from '../../api/queries'
 import type { Frame, FrameTranslation } from '../../api/types'
 import { useT } from '../../i18n'
 import { formatClock, groupHex } from '../../lib/format'
+import { FrameExpandButton, FrameObjectsRow } from '../../carbon/components/FrameObjectTable'
 import { parseFrame } from '../../lib/frame'
 import type { ParsedFrame } from '../../lib/frame'
 import { normalizeFrames } from '../../lib/records'
@@ -135,6 +136,8 @@ export function PfFrameViewer() {
   const [format, setFormat] = useState('')
   const [minLen, setMinLen] = useState('')
   const [keyword, setKeyword] = useState('')
+  // WP7：展开值域子表的报文 key（同一时刻只展开一行）
+  const [expandedKey, setExpandedKey] = useState<string | null>(null)
 
   // 首屏预热：WS 只推增量，用 /api/recent 补齐历史
   useEffect(() => {
@@ -268,18 +271,22 @@ export function PfFrameViewer() {
                 <th className="pf-v6-c-table__th">{t('frameViewer.col.cot')}</th>
                 <th className="pf-v6-c-table__th">{t('frameViewer.col.seq')}</th>
                 <th className="pf-v6-c-table__th">{t('frameViewer.col.hex')}</th>
+                <th className="pf-v6-c-table__th" style={{ width: 96 }}>
+                  {t('frameTree.col.objects')}
+                </th>
               </tr>
             </thead>
             <tbody className="pf-v6-c-table__tbody">
               {rows.length === 0 ? (
                 <tr className="pf-v6-c-table__tr">
-                  <td className="pf-v6-c-table__td" colSpan={8} style={{ textAlign: 'center', padding: 24, opacity: 0.7 }}>
+                  <td className="pf-v6-c-table__td" colSpan={9} style={{ textAlign: 'center', padding: 24, opacity: 0.7 }}>
                     {t('frameViewer.empty')}
                   </td>
                 </tr>
               ) : (
                 rows.map((row) => (
-                  <tr key={row.key} className="pf-v6-c-table__tr" data-testid="frame-row">
+                  <Fragment key={row.key}>
+                  <tr className="pf-v6-c-table__tr" data-testid="frame-row">
                     <td className="pf-v6-c-table__td mono">{formatClock(row.frame.ts ?? 0)}</td>
                     <td className="pf-v6-c-table__td">
                       <Label isCompact color={row.frame.direction === 'rx' ? 'blue' : 'green'}>
@@ -303,7 +310,17 @@ export function PfFrameViewer() {
                         </span>
                       </TranslateHover>
                     </td>
+                    <td className="pf-v6-c-table__td">
+                      <FrameExpandButton kit="pf"
+                        open={expandedKey === row.key}
+                        onToggle={() => setExpandedKey(
+                          expandedKey === row.key ? null : row.key)} />
+                    </td>
                   </tr>
+                  {expandedKey === row.key ? (
+                    <FrameObjectsRow hex={row.frame.hex} kit="pf" />
+                  ) : null}
+                  </Fragment>
                 ))
               )}
             </tbody>

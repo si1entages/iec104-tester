@@ -225,3 +225,23 @@ openssl verify -CAfile ca.pem server.pem client.pem
 ```bash
 ./venv/Scripts/python.exe -m pytest tests/test_tls_transport.py -q
 ```
+
+## 附：WP11a 合规结论（2026-11-12，按新口径）
+
+> 验收口径（用户 2026-11-12 明确指令，与 WP3/T50 一致）：**本仓真实 TCP 互测 +
+> 多独立开源实现交叉证据**即可判定，不再要求 IEC 标准原文、厂商样本或检测机构清单。
+
+**已验证（可复现证据）**：
+
+- TLS 1.2+ 传输层加密、证书/CA 校验、mTLS：本仓 `--tls*` 双端互测 +
+  `otfabric/iec104-interop v0.6.0` 5 栈矩阵 `TLS(62351-3)` 与 `62351-5`
+  应用层安全向量（25 配对 3071 passed / 0 failed，见
+  [`docs/file_transfer_open_items.md`](file_transfer_open_items.md) 的矩阵记录）。
+- WP4a 审计链：每条命令可归因到操作人、哈希链防篡改（`docs/interlock.md`、
+  契约 §2.4d），补齐「谁发了什么命令」的本地举证能力。
+
+**结论（诚实边界，勿夸大）**：本仓具备 **IEC 62351-3 方向的 TLS 传输层保护 +
+  WP4 操作审计**，并按新口径以多实现交叉证据验证通过。
+**但 IEC 62351-4/-6 应用层报文认证、SA 管理、RBAC、CRL/OCSP、密钥轮换、
+  重放防护仍未实现**，因此**不宣称「支持 IEC 62351」或「62351 合规」**。
+上述边界是标准事实，不因验收口径反转而改变；对外表述请沿用本段措辞。

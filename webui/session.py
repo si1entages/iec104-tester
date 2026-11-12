@@ -319,6 +319,7 @@ class EngineSession:
         eng = MasterEngine(
             host=host, port=port, common_addr=addr,
             auto_start=True, auto_gi=False, reconnect=reconnect,
+            auto_clock_sync=self.config.master.auto_clock_sync,
             # 计时器/流控/重连间隔来自会话配置（CLI --config / config.tls 同源），
             # 默认值与引擎构造默认一致（k=12,w=8,t0=30,t1=15,t2=10,t3=20,ri=5.0）
             reconnect_interval=self.config.connection.reconnect_interval,
@@ -334,6 +335,8 @@ class EngineSession:
             # D4 修复：CLI/--config 启用的冗余双通道配置经会话配置传入；
             # 默认 enabled=False 时引擎行为与单通道完全一致（无回归）。
             redundancy=red_cfg,
+            # WP3a：文件传输语义档位（默认 ed1，历史行为逐字节不变）
+            file_semantics=self.config.file_transfer.resolve(),
         )
         eng.set_event_callback(self._hook_master)
         eng.set_raw_frame_callback(self._hook_frame_master)
@@ -391,6 +394,8 @@ class EngineSession:
             spontaneous_enabled=(self.config.slave.spontaneous_enabled
                                  if spontaneous is None else spontaneous),
             ssl_context=ssl_context,
+            # WP3a：从站多节分包与语义档位
+            file_semantics=self.config.file_transfer.resolve(),
         )
         eng.data_store.init_from_point_table(points.table)
         eng.set_event_callback(self._hook_slave)
@@ -468,6 +473,42 @@ class EngineSession:
         finally:
             await self._shutdown_multi_station()
 
+    def link_fields(self) -> dict | None:
+        """链路可观测字段（WP6）：引擎聚合快照；无引擎/不支持时返回 None.
+
+        只读、叠在既有键之外（``status`` 只增键，见 `webui/api_contract.md` §1.3）。
+        """
+        eng = self.engine
+        if eng is None:
+            # WP6：没有引擎时也要能回答"链路为什么起不来"。给出与
+            # EngineBridge.status() 一致的连接目标（配置值），避免界面出现空白面板。
+            return {
+                "role": self.role,
+                "state": None,
+                "sequence": None,
+                "transport": {
+                    "target": f"{self.config.connection.host}:{self.config.connection.port}",
+                    "connected": False,
+                    "tls": bool(getattr(self.config.tls, "enabled", False)),
+                    "reconnect_count": 0,
+                    "max_reconnects": 0,
+                    "reconnect_interval": float(
+                        getattr(self.config.connection, "reconnect_interval", 0.0)),
+                    "reconnect_in_seconds": None,
+                    "ever_connected": False,
+                    "last_error": "",
+                    "last_error_at": 0.0,
+                },
+            }
+        fn = getattr(eng, "link_snapshot", None)
+        if not callable(fn):
+            return None
+        try:
+            return fn()
+        except Exception as e:  # noqa: BLE001 — 观测失败不得影响状态上报
+            logger.warning("link snapshot failed: %s", e)
+            return None
+
     def status_fields(self) -> dict:
         """状态字段.
 
@@ -482,6 +523,11 @@ class EngineSession:
             # 产生 running=true + started=false 的矛盾快照——
             # 前端状态栏显示"运行中"，按钮却按"未启动"渲染。
             st["running"] = False
+            # WP6：没有引擎时也给链路段（配置目标 + 未连接），否则"为什么连不上"
+            # 恰恰在最需要看的时候没有面板。
+            link = self.link_fields()
+            if link is not None:
+                st["link"] = link
             return st
         if self.role == "master":
             st["state"] = str(self.engine.state)
@@ -515,6 +561,10 @@ class EngineSession:
                 }
             if red is not None:
                 st["redundancy"] = red
+        # WP6：链路可观测（未确认 I 帧 / t1 剩余 / 重连原因 / 状态时间线）
+        link = self.link_fields()
+        if link is not None:
+            st["link"] = link
         return st
 
     # ── 命令 ──────────────────────────────────────────────────────
@@ -633,9 +683,32 @@ class EngineSession:
         return {"ok": True}
 
     async def file_action(self, action: str, ioa: int = 0, file_name: int = 0,
-                          cot: int | None = None, qualifier: int | None = None) -> dict:
-        eng = self.require_master()
+                          cot: int | None = None, qualifier: int | None = None,
+                          data: str = "", segment_size: int = 200) -> dict:
         action = (action or "").lower()
+        # WP3c：upload 的参数校验放在 require_master() 之前——参数错误应精确报出，
+        # 不要被「未连接」掩盖。
+        payload = b""
+        seg = 200
+        if action == "upload":
+            import binascii
+
+            if not isinstance(data, str) or not data:
+                return {"ok": False, "error": "upload 需要 data(hex)"}
+            if len(data) > 131072:
+                return {"ok": False, "error": "data 过长（上限 64 KiB）"}
+            try:
+                payload = binascii.unhexlify(data.replace(" ", ""))
+            except (binascii.Error, ValueError) as e:
+                return {"ok": False, "error": f"data 非法 hex: {e}"}
+            if not payload:
+                return {"ok": False, "error": "data 不能为空"}
+            try:
+                seg = max(1, min(int(segment_size), 255))
+            except (TypeError, ValueError):
+                return {"ok": False, "error": "segment_size 须为 1~255"}
+
+        eng = self.require_master()
         if action in ("directory", "dir"):
             # cot/qualifier 为可选覆盖（T50/C4 §2 组合矩阵探测用）；默认值 = 项目约定
             if cot is not None and int(cot) not in (5, 6, 13):
@@ -647,6 +720,9 @@ class EngineSession:
             await eng.file_select(int(ioa), int(file_name))
         elif action in ("request", "call"):
             await eng.file_request(int(ioa), int(file_name))
+        elif action == "upload":
+            # WP3c：上传方向（主站→子站），data 为 hex（与报文查看器一致）
+            await eng.upload_file(int(ioa), int(file_name), payload, seg)
         else:
             return {"ok": False, "error": "bad action"}
         return {"ok": True}

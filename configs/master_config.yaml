@@ -53,6 +53,17 @@ tls:
   verify_client: false  # 主站此字段不生效（仅供子站）
   server_hostname: ""   # 按 IP 连接而证书只签域名时必填，如 "iec104.local"
 
+# ASDU 地址字段字节数（WP1）。IEC 104 未强制规定，现场部分装置/规约转换器
+# 使用 1 字节公共地址(CA) 或 2 字节信息对象地址(IOA)；默认 2/3/2 为标准常用值。
+# 三个值同时作用于发送(ASDUBuilder)与接收(引擎/桥/离线解析)，只需配置一处。
+# 命令行 --ca-length / --ioa-length / --cot-length 可覆盖本节。
+# 说明：cot_length=1 时不传送源发地址字节；ioa_length 小于点表地址位宽时，
+# 编码会直接报错而不是静默截断（防止遥控打到错误对象）。
+asdu_address:
+  ca_length: 2          # 公共地址字节数：1 或 2
+  ioa_length: 3         # 信息对象地址字节数：1 / 2 / 3
+  cot_length: 2         # 传送原因字节数：1 或 2
+
 # 冗余双通道（T21，仅主站生效）：主/备两条 TCP 连接指向两个冗余前置机，
 # 同一时刻仅一条活动收发；主用断开 → 切换备用并重走 STARTDT+总召唤。
 # 模型与局限详见 docs/redundancy.md。
@@ -70,3 +81,22 @@ redundancy:
 #     fields:
 #       - {name: level, type: u8}
 #       - {name: value, type: i16}
+
+# 文件传输语义档位（WP3a）：把多实现歧义做成显式配置
+# profile: ed1(默认，历史行为) | ed2(lib60870.NET + otfabric 共识) | project(同 ed1)
+# section_size: 从站分包最大节字节数；0=单节（历史行为），>0 启用多节逐节 CHS
+# nof_enum: 覆盖档位的 NOF 枚举校验（true/false）；省略=跟随档位
+file_transfer:
+  profile: ed1
+  section_size: 0
+
+# 合规监视与时标阈值（WP11a）：把硬编码提升为显式配置
+# max_time_skew_s: CP56 时标与观察时刻最大允许偏差（秒），超出记 time-skew 违规
+# time_tag_format: auto(按 TypeID 判定) | cp24 | cp56
+compliance:
+  max_time_skew_s: 300.0
+  time_tag_format: auto
+
+# 建链后自动时钟同步（WP11a）：STARTDT CON 后自动发 C_CS_NA_1
+# 默认 false = 仅手动 /api/master/clock，行为与 v1.10.0 一致
+master_autoclock: false

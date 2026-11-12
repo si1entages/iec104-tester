@@ -9,20 +9,21 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.10.0-blue.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.11.0-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/WebUI-aiohttp%20%2B%20React19-41CD52" alt="Web UI">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/IEC--104-72%20TypeIDs-brightgreen.svg" alt="IEC 104">
-  <img src="https://img.shields.io/badge/Tests-1711%20passed-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-2121%20passed-brightgreen.svg" alt="Tests">
 </p>
 
 ---
 
 工业级 IEC 60870-5-104 协议测试工具：主站/子站**单页浏览器工作台**（浏览器为唯一界面，同一进程、同一端口内切换主站/子站），协议引擎完整；附三套可即时切换的 UI、SCD 点表导入、透明桥与旁路合规监视、报文录制回放、YAML 自动化测试、压测编排、测试报告导出、TLS 传输加密与历史库。
 
-> 版本说明：当前发布基线 **v1.10.0**（2026-11-10）——Excel 点表导入与设计 vs
-> 实测比对、离线报文对比（升级前后 diff）、桥场景化注入时间线 + 自动判定。逐版特性见
+> 版本说明：当前发布基线 **v1.11.0**（2026-11-12）——现场工程可用：对点/传动验收闭环（可签字导出）、
+> ASDU 地址长度可配、操作审计 + 防误操作闭锁、文件传输多节/上传方向、工程配置方案、链路参数可观测、
+> 原生 Excel/PDF 报告。逐版特性见
 > [`CHANGELOG.md`](CHANGELOG.md)；已交付能力与后续计划见 [`PROJECT.md`](PROJECT.md)。
 
 ### 界面预览
@@ -47,12 +48,24 @@
 - CP24Time2a / CP56Time2a；品质描述词按 **IEC 60870-5-101** 标准化（`IV/NT/SB/BL/OV` 五位置）
 - **文件传输**（F_FR/F_SR/F_SC/F_LS/F_AF/F_SG/F_DR 及 F_*_NB 确认）字节级语义已按多个独立参考实现逐字节核实（详见 [`docs/file_transfer_fls.md`](docs/file_transfer_fls.md)），并经 lib60870-C v2.4.1 第三方从站实测互操作
 - **TLS 传输层加密**（证书/CA 校验、双向认证 mTLS；⚠ 仅传输层加密，**不等于 IEC 62351 合规**，边界见 [`docs/tls.md`](docs/tls.md)）
+- **ASDU 地址字段长度可配**（CA 1/2 字节、IOA 1/2/3 字节、COT 1/2 字节）：YAML `asdu_address` 节或 `--ca-length/--ioa-length/--cot-length` 一处配置，发送/接收/桥/离线解析共用同一真值源，对接 1 字节 CA / 2 字节 IOA 的非标装置不再整帧错位；默认 2/3/2 与历史行为逐字节一致，详见 [`docs/asdu_address_config.md`](docs/asdu_address_config.md)
 
 ### Web UI（三套界面共存，深色/浅色双主题）
 
 - **三套 UI 同地址即时切换**：`Carbon`（IBM Carbon Design System，默认）/ `PatternFly 6` / `经典版`（antd 6，v1.3.1 冻结快照）在 `/app/` 同一文档内切换——不刷新、不改 URL、不断 WS/连接，页面/深浅主题/语言保持；详见 [`docs/ui_kits.md`](docs/ui_kits.md)
 - **主站工作台**：十万行点表虚拟滚动（只渲染可视窗口）、命令面板（系统命令/遥控/设点/步/比特串/延时/参数/文件命令）、实时报文查看器（悬停 HEX 逐段翻译）、点位趋势图（只采样被订阅点位）、**测量时钟偏差**（按子站确认帧携带的子站时钟计算 ms 偏差）、**设计 vs 实测比对卡**（导入 xlsx 自动建设计基准，输出缺/多/值域三类差异——真机 IOA 与演示表对不上一眼可见）
 - **子站工作台**：点表编辑与手动置数、**应答行为配置**（延迟/丢帧/损坏/不响应/品质/错误 COT）、数据模拟（手动/自动、YX/YC 独立开关）、**SCD/CID/ICD 点表导入**（IEC 61850-80-1 精确映射优先 + 无映射按 CDC 推断，先预览再应用）、**Excel(xlsx) 点表导入**（中英列头/中文类型别名兼容、行级错误收集、预览后应用）
+- **对点/传动验收**（master/slave 角色）：点表勾选 + 期望值/回读异址 → 一键批量传动（SBO 两段式/设点/步命令）→ 自动判定（品质异常/值不符/超时/SBO 否定确认一律 FAIL、无期望值判 MANUAL 待人工）→ 人工改判 → 导出 **xlsx/json/html** 可签字交付物（逐点带下发/回读帧 hex 与时间）；会话落 SQLite 刷新可恢复，执行期间自动暂停周期总召并在中止时补发 DEACT 清理
+- **原生 Excel / PDF 报告**（master/slave 角色）：状态页一键导出可归档报告（摘要 + 逐点证据 + 审计流水），三种格式逐点条数一致；PDF 需 `report[pdf]` 可选依赖，未装时可用 Excel 或浏览器打印
+- **旁路真实网卡抓包**：抓包页可挂在真实网卡抓第三方主站 ↔ 装置的原始报文（Linux AF_PACKET / Windows Npcap），导出 pcap 直接复用回放/diff；权限不足时明确提示降级；详见 [`docs/deploy.md`](docs/deploy.md)
+- **点表在线编辑 / 服务化交付**：点表工具栏可新增/编辑/删除点（不重置设计基准）；提供 `Dockerfile`、`docker-compose.yml`、systemd 单元、Windows 服务安装脚本与离线部署文档；详见 [`docs/deploy.md`](docs/deploy.md)
+- **合规边界与配置化**：TLS 传输层（62351-3 方向）+ 操作审计已由多开源实现交叉验证，**明确不宣称 62351 应用层合规**；合规时标偏差阈值/时标格式/建链自动对时/文件语义档位均可 YAML 配置；冗余双通道切换在链路面板可观测；详见 [`docs/tls.md`](docs/tls.md)
+- **文件传输完整闭环**（master/slave 角色）：目录/选择/请求/上传双向；从站**多节分包（≥3 节）+ 逐节 CHS 校验**；主站上传 `POST /api/master/file {action:"upload", data:hex}`；语义档位 `ed1/ed2/project` 显式配置；5 项 T50 开放项按「本仓真实 TCP 互测 + 多开源实现交叉证据」结案，详见 [`docs/file_transfer_open_items.md`](docs/file_transfer_open_items.md)
+- **报文值域解码树**（master/slave 角色）：报文查看器「对象」列一点展开——每个 IOA 的值、五位品质位（IV/NT/SB/BL/OV）、时标、原始字节；**SQ=1 连续帧展开成 N 行 `base+i`**，品质异常标色
+- **链路参数面板**（master/slave 角色）：状态总览页实时显示连接状态机、**t0~t3 各定时器剩余**、**未确认 I 帧 / k**、VS/VR、重连计数与**最近失败原因（含从未建连时）**、最近 8 次状态变迁时间线；未确认 I 帧与 t1 剩余并排——t1 超时的两个前因同屏，不必来回对照
+- **工程配置方案**（master/slave 角色）：把连接 / t0~t3 / k-w / ASDU 地址长度 / 点表引用 / 告警阈值存成命名方案（纯文本 `configs/profiles/`），换现场一键切换，**刷新后自动恢复上次方案**；支持另存/覆盖/导出/导入，无浏览器场景用 `--profile <名称>`；方案文件本身可直接当 `--config` 用；详见 [`docs/profiles.md`](docs/profiles.md)
+- **防误操作闭锁**（master/slave 角色）：点表命令点可声明 `interlock`（引用遥信期望位置，多条件 AND），遥控/设点/升降/比特串在**下发前求值**——不满足则**一个帧都不发**并给出条件明细与实测值；越过闭锁需 admin 强制解锁（写审计留痕），DEACT 撤销帧不受限；详见 [`docs/interlock.md`](docs/interlock.md)
+- **操作审计**（master/slave 角色）：每条命令/置数/传动自动追加 **SHA-256 哈希链**（操作人/角色/来源 IP/目标/结果/下发与回读帧 hex），「校验链」一键检测事后删改并报断点，导出 JSON/CSV 归档；`--auth-config` 多用户三角色（viewer 只读 / operator 可操作 / admin 全权），兼容模式（未配置认证）行为与历史版本完全一致
 - **多站页**：多子站卡片管理与聚合状态
 - **桥接观察页**（`--mode bridge`，8767）：**透明桥 / 旁路监听**真实主站 ↔ 测试器 ↔ 真实子站；字节级透传（转发优先于观察）、双向帧/字节/客户端/重同步统计、实时报文；**协议合规监视**（传输层序号/确认/U 时序/k/t1/t2/t3 + 应用层方向错位/无请求响应/总召唤未终止/非召唤期数据/COT=0/公共地址不符/重复自发帧/时标偏离，合计 28 项规则），违规实时进页面与测试报告；**网络条件注入（混沌验收）**：丢帧/重复/损坏/延迟/乱序/断线率作用于转发路径，旁路观察与合规监视始终看**干扰前**的原始帧，注入统计进报告；**注入时间线 + 自动判定**：场景化步骤编排（丢帧/延迟/期望）→ 逐窗采集证据 → 自动判定「丢包→k 超窗」闭环并进测试报告；**TLS 透传桥**双侧独立 TLS（明文↔TLS 混合桥接，TLS 终结在桥、帧内容解密可见）
 - **报文抓包页**：录制启停/暂停、文件列表与下载、一键导出 pcap/pcapng（Wireshark 可打开）、离线回放（播放/暂停/单步/倍速）、**离线报文对比**（升级前后两段录制规格化 diff，忽略序号/时标等会话易变字段）
@@ -61,7 +74,7 @@
 - **历史页**：按时间/类型/IOA/方向查询数据与报文并导出 CSV；**「曲线」页签**按类型 + IOA 添加 1~8 个序列回放历史趋势（遥信/遥脉阶梯、遥测折线）
 - **日志页**：结构化日志分级/分类/来源过滤、关键字搜索、暂停/清空、JSONL 导出
 - 深色/浅色主题切换（首次跟随系统偏好，手动切换后记忆）；**中/英界面切换**（头部「中 / EN」，全站双语，`npm run i18n:inventory` 迁移清单为 0）
-- 安全：`--auth-token` 访问令牌、`--web-tls-cert/--web-tls-key` HTTPS、CSP/X-Frame-Options/Referrer-Policy 安全头；WCAG AA 文本/非文本对比度门禁、UI 自动巡检与视觉回归基线
+- 安全：`--auth-token` 访问令牌、`--auth-config` 多用户三角色（viewer/operator/admin）+ 操作审计哈希链、`--web-tls-cert/--web-tls-key` HTTPS、CSP/X-Frame-Options/Referrer-Policy 安全头；WCAG AA 文本/非文本对比度门禁、UI 自动巡检与视觉回归基线
 - 点值经 WebSocket 实时刷新；按钮可用性由服务端状态驱动；API 响应契约单一源（每次响应强制 schema 校验）
 
 ### 主站（`core/engine/master.py`）
@@ -220,6 +233,8 @@ python sim_tool.py --preset poor_wifi --mode master --host 127.0.0.1
 | `--http-port` | Web UI HTTP 端口 | both/master 8765；单独 `--mode slave` 8766；bridge 8767 |
 | `--http-host` | Web UI 监听地址（0.0.0.0 会暴露到局域网） | 127.0.0.1 |
 | `--auth-token` | Web API 访问令牌（可选；亦可读环境变量 `IEC104_AUTH_TOKEN`） | — |
+| `--profile` | 工程配置方案名（WP5）：从 `configs/profiles/<名称>.yaml` 叠加连接/t0~t3/k-w/ASDU 地址长度/点表引用 | — |
+| `--auth-config` | 多用户三角色表 YAML：`{"users": [{name, token, role}]}`，role ∈ viewer/operator/admin；未命中回落 `--auth-token` | — |
 | `--web-tls-cert` / `--web-tls-key` | Web UI HTTPS 证书 / 私钥 (PEM)；设置后 Web 服务走 HTTPS | — |
 | `--version` | 打印版本号并退出 | — |
 | `--no-browser` | 启动 Web 服务时不自动打开浏览器 | false |
@@ -237,9 +252,12 @@ python sim_tool.py --preset poor_wifi --mode master --host 127.0.0.1
 | `--bridge-listen-tls-cert` / `-key` | **[bridge]** 监听侧证书/私钥：桥对主站扮演 TLS 子站 | — |
 | `--bridge-upstream-tls-ca` | **[bridge]** 上游受信 CA：桥以 TLS 接入真实子站 | — |
 | `--bridge-upstream-tls-cert` / `-key` / `-hostname` | **[bridge]** 上游 mTLS 客户端证书 / 私钥 / 主机名校验 | — |
+| `--ca-length` / `--ioa-length` / `--cot-length` | ASDU 公共地址 / 信息对象地址 / 传送原因字节数（覆盖 `asdu_address` 配置节） | 2 / 3 / 2 |
+| `--bridge-listen-ca-length` / `-ioa-length` | **[bridge]** 监听侧 ASDU 地址长度（独立于上游侧） | 同通用配置 |
+| `--bridge-upstream-ca-length` / `-ioa-length` | **[bridge]** 上游侧 ASDU 地址长度（独立于监听侧） | 同通用配置 |
 
-> 共 **39** 个参数，与 `python app.py --help` 一致。`--no-browser` / `--demo` 仅 Web UI 入口生效；bridge 专属参数见 [`docs/user_guide.md`](docs/user_guide.md)。
-> 监听非回环地址（`--http-host 0.0.0.0`）时请同时设置 `--auth-token`；未设置会打印醒目告警。
+> 共 **48** 个参数，与 `python app.py --help` 一致。`--no-browser` / `--demo` 仅 Web UI 入口生效；bridge 专属参数见 [`docs/user_guide.md`](docs/user_guide.md)；ASDU 地址长度见 [`docs/asdu_address_config.md`](docs/asdu_address_config.md)。
+> 监听非回环地址（`--http-host 0.0.0.0`）时请同时设置 `--auth-token` 或 `--auth-config`；均未设置会打印醒目告警。
 
 ## ⚙️ 配置
 
@@ -262,7 +280,7 @@ custom_types: []   # 非标厂商私有 TypeID 注册
 ## 🧪 测试
 
 ```bash
-python -m pytest tests/ -q              # 单元 + 集成（1711 例；性能基准默认排除）
+python -m pytest tests/ -q              # 单元 + 集成（2121 例；性能基准默认排除）
 python -m pytest tests/ -q --cov=core --cov-branch --cov-report=term-missing --cov-fail-under=91
 python -m pytest tests/ -m perf -q      # 性能基准（解码/10 万点/20 客户端并发/环回 soak）
 IEC104_SOAK_SECONDS=7200 python -m pytest tests/perf/test_soak_loopback.py -m perf -q
@@ -272,7 +290,7 @@ python tests/e2e/qa_full_flow.py        # 全流程验收（12 阶段；CI job e
 python tools/mutation_smoke.py          # 协议层变异冒烟（12/12 必须被杀死）
 ```
 
-- 当前基线：**1711 passed，4 deselected**（v1.10.0）+ 前端单测 **133 passed** + Playwright e2e **61 passed**（页级门禁：巡检/对比度/非文本对比在 **Carbon 与 PatternFly 上各跑一遍**、桥接页走 8769 专项巡检，`E2E_KITS=pf,carbon` 可裁剪）；CI 口径 `--cov=core --cov=webui --cov-branch --cov-fail-under=91` 合并 **91.11%**（门禁 91%，webui 独立门禁 85%）
+- 当前基线：**2121 passed，4 deselected**（v1.11.0 已发布）+ 前端单测 **179 passed** + Playwright e2e **63 passed**（页级门禁：巡检/对比度/非文本对比在 **Carbon 与 PatternFly 上各跑一遍**、桥接页走 8769 专项巡检，`E2E_KITS=pf,carbon` 可裁剪）；CI 口径 `--cov=core --cov=webui --cov-branch --cov-fail-under=91` 合并 **91.49%**（门禁 91%，webui 独立门禁 85%）
 - 20 客户端并发实测约 **2.9k 帧/秒**；2h soak 实测 **7200s / 34,765 次 GI / 内存 +0.64 MB**
 - 互操作语料库：`tests/fixtures/frames/`（合成基线 + `real/` 真机目录），
   `tests/test_frame_corpus_replay.py` 做 golden 解码与主站回放回归；
@@ -321,6 +339,11 @@ iec104-tester/
 - 界面设计规范：[`docs/design_guidelines.md`](docs/design_guidelines.md)（组件模式/颜色语义/点表/告警/IEC104 语义映射/命令安全/无障碍/评审清单）
 - 三套 UI 共存与切换：[`docs/ui_kits.md`](docs/ui_kits.md)
 - TLS 边界与排查：[`docs/tls.md`](docs/tls.md)
+- ASDU 地址字段长度配置：[`docs/asdu_address_config.md`](docs/asdu_address_config.md)
+- 防误操作闭锁：[`docs/interlock.md`](docs/interlock.md)
+- 工程配置方案：[`docs/profiles.md`](docs/profiles.md)
+- 部署 / 离线交付：[`docs/deploy.md`](docs/deploy.md)
+- 现场工程可用优化方案：[`docs/optimization_plan_v111.md`](docs/optimization_plan_v111.md)（P0/P1/P2 共 11 个工作包）
 - 文件传输字节语义核实：[`docs/file_transfer_fls.md`](docs/file_transfer_fls.md)
 - 文件传输真机核实清单/探针：[`docs/file_transfer_open_items.md`](docs/file_transfer_open_items.md)
 - pcap 导出：[`docs/pcap_export.md`](docs/pcap_export.md)
@@ -343,7 +366,7 @@ iec104-tester/
   各厂商对 104 的**私有映射扩展**需 ≥2 份真实 SCD 样本才能归纳规则，当前按 DOType `cdc` 推断兜底
   （见 [`docs/user_guide.md`](docs/user_guide.md) 第 11 节）。
 
-> 已交付能力（v1.10.0）与后续计划见 [`PROJECT.md`](PROJECT.md)、[`docs/architecture_plan.md`](docs/architecture_plan.md)。
+> 已交付能力（v1.11.0）与后续计划见 [`PROJECT.md`](PROJECT.md)、[`docs/architecture_plan.md`](docs/architecture_plan.md)。
 
 ## 🤝 贡献 / 许可
 

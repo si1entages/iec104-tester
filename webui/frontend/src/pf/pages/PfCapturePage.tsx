@@ -16,6 +16,7 @@ import {
 import { api, captureDownloadUrl } from '../../api/endpoints'
 import { useCaptureFramesQuery, useCaptureStatusQuery } from '../../api/queries'
 import type { CaptureDiffResponse, CaptureFileInfo } from '../../api/types'
+import { PfSniffCard } from '../components/PfSniffCard'
 import { useLocale, useT } from '../../i18n'
 import { formatDateTime, localeTag } from '../../lib/format'
 
@@ -391,6 +392,7 @@ export function PfCapturePage() {
           </CardBody>
         </Card>
       </div>
+          <PfSniffCard />
     </>
   )
 }

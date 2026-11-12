@@ -141,6 +141,21 @@ def main() -> int:
 
     results = []
     results.append(build_one(ROOT / "app.py", "iec104-tester", args.onefile))
+    # WP10b：CLI 工具随包发布（离线机器上没有 Python 也能用这些工具）。
+    # 任一失败不阻断主产物——主产物可用性优先。
+    for entry, name in (
+        (ROOT / "capture_tool.py", "iec104-capture"),
+        (ROOT / "sim_tool.py", "iec104-sim"),
+        (ROOT / "run_multi_station.py", "iec104-multi"),
+        (ROOT / "run_tests.py", "iec104-runtests"),
+    ):
+        if not entry.is_file():
+            print(f"[warn] 跳过 {name}：找不到 {entry}")
+            continue
+        try:
+            results.append(build_one(entry, name, args.onefile))
+        except Exception as exc:  # noqa: BLE001 — CLI 工具失败不阻断主产物
+            print(f"[warn] {name} 打包失败：{exc}")
     print("全部完成:")
     for r in results:
         print(" -", r)

@@ -7,9 +7,23 @@
  * 真实响应，返回类型也由 schema 推断——新增端点漏挂 schema 会直接 `tsc` 报错。
  */
 
-import { apiGet, apiGetText, apiPost, apiPostBytes, apiPostText, apiUrl } from './client'
+import { apiDelete, apiGet, apiGetText, apiPost, apiPostBytes, apiPostText, apiUrl } from './client'
 import {
   authProbeResponseSchema,
+  auditRecordsResponseSchema,
+  profileApplyResponseSchema,
+  profileDetailResponseSchema,
+  profileSaveResponseSchema,
+  pointDeleteResponseSchema,
+  pointUpsertResponseSchema,
+  profilesResponseSchema,
+  sniffStatusSchema,
+  auditUsersResponseSchema,
+  auditVerifyResponseSchema,
+  commissionItemResponseSchema,
+  commissionSessionResponseSchema,
+  commissionSessionsResponseSchema,
+  commissionStatusResponseSchema,
   captureActionResultSchema,
   captureExportResponseSchema,
   captureFilesResponseSchema,
@@ -55,6 +69,8 @@ import {
 import type {
   BatchPointsRequest,
   BitstringRequest,
+  CommissionCreateRequest,
+  CommissionVerdictRequest,
   DelayRequest,
   EpRequest,
   FileRequest,
@@ -67,6 +83,7 @@ import type {
   MasterStartRequest,
   MultiStartRequest,
   ParamRequest,
+  PointUpsertRequest,
   PsRequest,
   ReadRequest,
   ResponseBehavior,
@@ -91,6 +108,38 @@ export const HISTORY_EXPORT_URL = '/api/history/export'
 export const CAPTURE_FILES_URL = '/api/capture/files'
 export const CAPTURE_DOWNLOAD_PATH = '/api/capture/download/{name}'
 export const TEST_REPORT_PATH = '/api/tests/reports/{run_id}/{name}'
+/** 对点/传动验收记录导出（WP2）：xlsx / json / html 三种格式 */
+export const COMMISSION_EXPORT_PATH = '/api/commission/sessions/{id}/export'
+export const COMMISSION_GET_PATH = '/api/commission/sessions/{id}'
+export const COMMISSION_RUN_PATH = '/api/commission/sessions/{id}/run'
+export const COMMISSION_STOP_PATH = '/api/commission/sessions/{id}/stop'
+export const COMMISSION_VERDICT_PATH = '/api/commission/sessions/{id}/verdict'
+/** 路径模板（供文档驱动端点自检定位字面量；实际调用用已编码的 id 替换） */
+const commissionPath = (template: string, id: string) =>
+  template.replace('{id}', encodeURIComponent(id))
+export const commissionExportUrl = (id: string, format: 'xlsx' | 'json' | 'html') =>
+  apiUrl(`${commissionPath(COMMISSION_EXPORT_PATH, id)}?format=${format}`)
+export const PROFILES_PATH = '/api/profiles'
+export const PROFILE_GET_PATH = '/api/profiles/{name}'
+export const PROFILE_APPLY_PATH = '/api/profiles/{name}/apply'
+export const PROFILE_EXPORT_PATH = '/api/profiles/{name}/export'
+export const PROFILE_RESTORE_PATH = '/api/profiles/restore'
+export const PROFILE_IMPORT_PATH = '/api/profiles/import'
+const profilePath = (template: string, name: string) =>
+  template.replace('{name}', encodeURIComponent(name))
+/** 方案 YAML 下载（WP5） */
+export const profileExportUrl = (name: string) =>
+  apiUrl(profilePath(PROFILE_EXPORT_PATH, name))
+export const REPORT_EXPORT_PATH = '/api/export/report'
+/** 多格式报告下载（WP8）：html | xlsx | pdf（含逐点证据 + 审计流水） */
+export const reportDownloadUrl = (format: 'html' | 'xlsx' | 'pdf', title?: string) => {
+  const q = new URLSearchParams({ format })
+  if (title) q.set('title', title)
+  return apiUrl(`${REPORT_EXPORT_PATH}?${q.toString()}`)
+}
+/** 操作审计导出（WP4a）：json / csv */
+export const auditExportUrl = (format: 'json' | 'csv') =>
+  apiUrl(`/api/audit/export?format=${format}`)
 export const captureDownloadUrl = (name: string) =>
   apiUrl(CAPTURE_DOWNLOAD_PATH.replace('{name}', encodeURIComponent(name)))
 export const testReportUrl = (runId: string, name: string) =>
@@ -329,5 +378,85 @@ export const api = {
     stop: () => apiPost('/api/tests/stop', okSchema),
     status: () => apiGet('/api/tests/status', testStatusResponseSchema),
     reportUrl: testReportUrl,
+  },
+
+  // ── 对点 / 传动验收（WP2，契约 §2.4c）────────────────────────────
+  commission: {
+    sessions: () => apiGet('/api/commission/sessions', commissionSessionsResponseSchema),
+    create: (body: CommissionCreateRequest) =>
+      apiPost('/api/commission/sessions', commissionSessionResponseSchema, body),
+    get: (id: string) =>
+      apiGet(commissionPath(COMMISSION_GET_PATH, id), commissionSessionResponseSchema),
+    run: (id: string, operator = '') =>
+      apiPost(commissionPath(COMMISSION_RUN_PATH, id),
+        commissionStatusResponseSchema, { operator }),
+    stop: (id: string) =>
+      apiPost(commissionPath(COMMISSION_STOP_PATH, id), commissionStatusResponseSchema),
+    verdict: (id: string, body: CommissionVerdictRequest) =>
+      apiPost(commissionPath(COMMISSION_VERDICT_PATH, id),
+        commissionItemResponseSchema, body),
+    delete: (id: string) =>
+      apiDelete(commissionPath(COMMISSION_GET_PATH, id), okSchema),
+    exportUrl: commissionExportUrl,
+  },
+
+  // ── 操作审计（WP4a，契约 §2.4d）────────────────────────────────────
+  audit: {
+    records: (params?: {
+      limit?: number
+      operator?: string
+      action?: string
+      result?: string
+      since?: number
+    }) => {
+      const q: Record<string, string | number | undefined> = {
+        limit: params?.limit,
+        operator: params?.operator || undefined,
+        action: params?.action || undefined,
+        result: params?.result || undefined,
+        since: params?.since,
+      }
+      return apiGet('/api/audit/records', auditRecordsResponseSchema, q)
+    },
+    verify: () => apiGet('/api/audit/verify', auditVerifyResponseSchema),
+    exportUrl: auditExportUrl,
+    users: () => apiGet('/api/auth/users', auditUsersResponseSchema),
+  },
+
+  // ── 工程配置方案（WP5，契约 §2.4f）──────────────────────────────────
+  profiles: {
+    list: () => apiGet(PROFILES_PATH, profilesResponseSchema),
+    get: (name: string) =>
+      apiGet(profilePath(PROFILE_GET_PATH, name), profileDetailResponseSchema),
+    save: (name: string, config?: Record<string, unknown>) =>
+      apiPost(profilePath(PROFILE_GET_PATH, name), profileSaveResponseSchema,
+        config ? { config } : {}),
+    apply: (name: string) =>
+      apiPost(profilePath(PROFILE_APPLY_PATH, name), profileApplyResponseSchema),
+    restore: () => apiPost(PROFILE_RESTORE_PATH, profileApplyResponseSchema),
+    remove: (name: string) => apiDelete(profilePath(PROFILE_GET_PATH, name), okSchema),
+    importYaml: (name: string, text: string) =>
+      apiPostText(`${PROFILE_IMPORT_PATH}?name=${encodeURIComponent(name)}`,
+        profileSaveResponseSchema, text),
+    exportUrl: profileExportUrl,
+  },
+
+  // ── 点表在线编辑（WP10a）──────────────────────────────────────────
+  pointEdit: {
+    upsert: (body: PointUpsertRequest) =>
+      apiPost('/api/points/upsert', pointUpsertResponseSchema, body),
+    remove: (ptype: string, ioa: number) =>
+      apiDelete(`/api/points/delete?type=${encodeURIComponent(ptype)}&ioa=${ioa}`,
+        pointDeleteResponseSchema),
+  },
+
+  // ── 旁路真实网卡抓包（WP9，契约 §2.14b）────────────────────────────
+  sniff: {
+    status: () => apiGet('/api/sniff/status', sniffStatusSchema),
+    start: (body: { port?: number; iface?: string } = {}) =>
+      apiPost('/api/sniff/start', looseOkSchema, body),
+    stop: () => apiPost('/api/sniff/stop', looseOkSchema),
+    exportUrl: (raw = false) =>
+      apiUrl(`/api/sniff/export${raw ? '?raw=1' : ''}`),
   },
 }

@@ -43,7 +43,6 @@ from ..protocol.file_transfer import (
     AFQ_NOT_USED,
     AFQ_POS_ACK_FILE,
     AFQ_POS_ACK_SECTION,
-    SCQ_REQUEST_DIRECTORY,
     SCQ_REQUEST_FILE,
     SCQ_REQUEST_SECTION,
     SCQ_SELECT_FILE,
@@ -114,14 +113,16 @@ class MasterProtocolHandler:
             qualifier: SCQ 覆盖（None=默认 5 项目约定值）
         """
         e = self._engine
+        # WP3a：目录 COT/SCQ 的默认值取自语义档位（ed1=13/5 项目约定；
+        # ed2=5/0 = lib60870.NET + otfabric 共识）。显式入参仍优先，便于探测矩阵。
+        sem = e.file_semantics
+        eff_cot = sem.directory_cot if cot is None else int(cot)
+        eff_scq = sem.directory_scq if qualifier is None else int(qualifier)
         asdu_data = ASDUBuilder.build_call_directory(
             e._common_addr, ioa,
-            qualifier=SCQ_REQUEST_DIRECTORY if qualifier is None else int(qualifier),
-            cot=COT.FILE if cot is None else int(cot),
+            qualifier=eff_scq,
+            cot=eff_cot,
         )
-        # SCQ_REQUEST_DIRECTORY=5 是**项目约定值**（标准表中 5=SELECT_SECTION）：
-        # 主站发 5 → 子站 handle_file_request 按约定回目录，本仓库内闭环；
-        # 该组合与标准表可能冲突，待真机核实（见 docs/file_transfer_fls.md §4.4）。
         # 与非文件传输命令一致：窗口满时等待至多 t1（文件传输会产生大量 I 帧，
         # 是最容易打满 k 窗口的场景）。
         await e._send_command_asdu(asdu_data)
@@ -599,6 +600,10 @@ class MasterProtocolHandler:
             logger.info(f"File Ready ACK: file_name={obj.data.file_name if hasattr(obj.data, 'file_name') else 'N/A'}")
         elif type_id == TypeID.F_SR_NB_1:
             logger.info(f"Section Ready ACK: file_name={obj.data.file_name if hasattr(obj.data, 'file_name') else 'N/A'}")
+        elif type_id == TypeID.F_AF_NA_1:
+            # WP3c：上传方向（主站→子站）子站回的肯定/否定文件确认。
+            # 下载方向主站是发 F_AF 的一方，这里收到只可能是上传的应答。
+            e._file_transfer.handle_upload_ack(obj.data)
 
         logger.info(f"File Transfer: type={type_id}, state={e._file_transfer.state}")
 

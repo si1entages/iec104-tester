@@ -162,14 +162,15 @@ def test_web_start_slave_spontaneous_explicit_overrides(monkeypatch):
     assert capture["kwargs"]["spontaneous_enabled"] is True
 
 
-# ── auto_clock_sync 死字段移除：旧配置文件兼容 ────────────────────
+# ── auto_clock_sync 旧配置兼容（WP11a 已恢复该字段）───────────────
 
 
 def test_legacy_config_with_auto_clock_sync_still_loads(tmp_path):
-    """含已移除的 master.auto_clock_sync 键的旧配置文件仍能正常加载.
+    """旧配置里的 master.auto_clock_sync 键仍能正常加载并生效.
 
-    load_config 对未知键用 .get 模式逐项读取 → 多余键被忽略，不报错、
-    不影响其它字段；MasterConfig 亦不再有该属性（死字段已删）。
+    WP11a 前该字段是死配置（MasterConfig 无此属性、旧键被忽略）；
+    本版在 master_session 的 STARTDT_CON 分支真实接线，故旧键现在会被
+    读取为 True 并在建链后自动发时钟同步命令。语义按现行实现更新。
     """
     from core.config import load_config
 
@@ -193,7 +194,7 @@ def test_legacy_config_with_auto_clock_sync_still_loads(tmp_path):
     assert cfg.connection.port == 25000
     assert cfg.master.auto_start is True
     assert cfg.master.auto_gi is False
-    assert not hasattr(cfg.master, "auto_clock_sync")
+    assert cfg.master.auto_clock_sync is True  # WP11a：旧键现在真实生效
 
 
 # ── CLI no-gui 子站：config.slave.simulation_* 接线 ───────────────

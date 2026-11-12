@@ -9,7 +9,7 @@
  * 人工 review diff 后提交 `specs/__screenshots__/<platform>/`。
  *
  * 复现条件：专用单角色服务 8768（无引擎、无历史、无帧），页面内容稳定。
- * 仅截“浅色/深色主站工作台 + 状态总览”三张整页基线。
+ * 截“浅色/深色主站工作台 + 状态总览 + 对点传动 + 操作审计”五张整页基线。
  */
 import { existsSync } from 'node:fs'
 import path from 'node:path'
@@ -80,6 +80,34 @@ test('视觉基线：状态总览（浅色）', async ({ page }) => {
   await expect(page.getByText('运行状态')).toBeVisible({ timeout: 15_000 })
   await page.waitForTimeout(700)
   await expect(page).toHaveScreenshot('status-light.png', {
+    fullPage: true,
+    animations: 'disabled',
+    caret: 'hide',
+    maxDiffPixelRatio: 0.01,
+  })
+})
+
+test('视觉基线：对点传动（浅色）', async ({ page }) => {
+  test.setTimeout(120_000)
+  await openWorkbench(page, 'light')
+  await clickNav(page, /对点传动/)
+  await expect(page.getByText('对点 / 传动验收')).toBeVisible({ timeout: 15_000 })
+  await page.waitForTimeout(700)
+  await expect(page).toHaveScreenshot('commission-light.png', {
+    fullPage: true,
+    animations: 'disabled',
+    caret: 'hide',
+    maxDiffPixelRatio: 0.01,
+  })
+})
+
+test('视觉基线：操作审计（浅色）', async ({ page }) => {
+  test.setTimeout(120_000)
+  await openWorkbench(page, 'light')
+  await clickNav(page, /操作审计/)
+  await expect(page.getByText('自动追加到 SHA-256 哈希链')).toBeVisible({ timeout: 15_000 })
+  await page.waitForTimeout(700)
+  await expect(page).toHaveScreenshot('audit-light.png', {
     fullPage: true,
     animations: 'disabled',
     caret: 'hide',

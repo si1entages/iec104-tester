@@ -1,0 +1,42 @@
+# IEC104 Tester —— 单机部署（WP10b）
+#
+#   docker compose up -d
+#   浏览器打开 http://<主机IP>:8765/
+#
+# ⚠ 默认强制带访问令牌：容器监听 0.0.0.0，无令牌等于把「遥控下发」能力
+#   暴露给同网段任何人。修改 .env 里的 IEC104_AUTH_TOKEN 后再启动。
+#
+# 数据持久化：命名卷 iec104-data 挂到 /data（历史库/审计库/验收库都在这里），
+# 容器重建不丢记录。
+
+services:
+  iec104-tester:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: iec104-tester:latest
+    container_name: iec104-tester
+    restart: unless-stopped
+    ports:
+      # 只绑到需要的网卡；公网/办公网环境请改成 "127.0.0.1:8765:8765" 并前置反代
+      - "${IEC104_HTTP_BIND:-0.0.0.0}:8765:8765"
+    environment:
+      # 访问令牌（必填）：不设置或留空则拒绝启动（见下方 command 保护）
+      IEC104_AUTH_TOKEN: "${IEC104_AUTH_TOKEN:?请先在 .env 中设置 IEC104_AUTH_TOKEN}"
+      # 需要设备连接时可覆盖默认连接参数
+      IEC104_HOST: "${IEC104_HOST:-127.0.0.1}"
+      IEC104_PORT: "${IEC104_PORT:-2404}"
+    volumes:
+      - iec104-data:/data
+      # 方案目录（configs/profiles）常由现场维护，可挂载进容器
+      - ./configs:/app/configs:ro
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8765/api/status', timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  iec104-data:

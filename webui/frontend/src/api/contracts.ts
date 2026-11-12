@@ -38,6 +38,34 @@ import {
 } from './contract'
 import type {
   AuthProbeResponse,
+  FrameApciTree,
+  FrameAsduTree,
+  FrameObject,
+  FrameTree,
+  QualityBits,
+  InterlockCondition,
+  LinkSequenceSnapshot,
+  LinkSnapshot,
+  LinkStateSnapshot,
+  LinkStateTransition,
+  LinkTimerInfo,
+  LinkTransportSnapshot,
+  PointDeleteResponse,
+  PointUpsertResponse,
+  SniffCapability,
+  SniffStats,
+  SniffStatus,
+  ProfileApplyResponse,
+  ProfileInfo,
+  ProfileSaveResponse,
+  ProfileSummary,
+  ProfilesResponse,
+  AuditRecord,
+  AuditRecordsResponse,
+  AuditStats,
+  AuditUser,
+  AuditUsersResponse,
+  AuditVerifyResponse,
   CaptureActionResult,
   CaptureDiffResponse,
   CaptureFileInfo,
@@ -45,6 +73,14 @@ import type {
   CaptureFramesResponse,
   CapturePlayback,
   CaptureStatus,
+  CommissionItem,
+  CommissionItemResponse,
+  CommissionSession,
+  CommissionSessionResponse,
+  CommissionSessionSummary,
+  CommissionSessionsResponse,
+  CommissionStatusResponse,
+  CommissionSummary,
   EngineEvent,
   Frame,
   Alarm,
@@ -122,6 +158,106 @@ const redundancyStatusSchema = obj({
   failovers: num(),
 })
 
+// ── 点表在线编辑（WP10a）─────────────────────────────────────────────
+
+export const pointUpsertResponseSchema = obj({
+  ok: bool(),
+  created: bool(),
+  error: optional(str()),
+  point: optional(obj({
+    ioa: num(), type: str(), name: str(), group: num(), enabled: bool(),
+  })),
+})
+
+export const pointDeleteResponseSchema = obj({
+  ok: bool(),
+  deleted: bool(),
+  error: optional(str()),
+})
+
+// ── 旁路真实网卡抓包（WP9，契约 §2.14b）──────────────────────────────
+
+export const sniffCapabilitySchema = obj({
+  available: bool(),
+  backend: str(),
+  reason: str(),
+  requires_root: bool(),
+})
+
+export const sniffStatsSchema = obj({
+  packets: num(),
+  apdus: num(),
+  bytes: num(),
+  dropped: num(),
+  errors: num(),
+  last_error: str(),
+})
+
+export const sniffStatusSchema = obj({
+  ok: bool(),
+  running: bool(),
+  capability: sniffCapabilitySchema,
+  stats: sniffStatsSchema,
+  frames: num(),
+  port: num(),
+})
+
+// ── 链路可观测（WP6，契约 §2.4g）────────────────────────────────────
+
+export const linkTimerInfoSchema = obj({
+  timeout: num(),
+  active: bool(),
+  elapsed: num(),
+  remaining: num(),
+})
+
+export const linkStateTransitionSchema = obj({
+  ts: num(),
+  from: str(),
+  to: str(),
+})
+
+export const linkStateSnapshotSchema = obj({
+  state: str(),
+  since_seconds: num(),
+  timers: dict(linkTimerInfoSchema),
+  history: arr(linkStateTransitionSchema),
+})
+
+export const linkSequenceSnapshotSchema = obj({
+  k: num(),
+  w: num(),
+  send_seq: num(),
+  recv_seq: num(),
+  last_ack_rx: num(),
+  unacked: num(),
+  window_available: bool(),
+  i_frame_count: num(),
+})
+
+export const linkTransportSnapshotSchema = obj({
+  target: str(),
+  connected: bool(),
+  tls: bool(),
+  reconnect_count: num(),
+  max_reconnects: num(),
+  reconnect_interval: num(),
+  reconnect_in_seconds: nullable(num()),
+  ever_connected: bool(),
+  last_error: str(),
+  last_error_at: num(),
+})
+
+export const linkSnapshotSchema = obj({
+  role: roleSchema,
+  state: nullable(linkStateSnapshotSchema),
+  sequence: nullable(linkSequenceSnapshotSchema),
+  transport: nullable(linkTransportSnapshotSchema),
+  redundancy: optional(nullable(redundancyStatusSchema)),
+  clients: optional(num()),
+  client_id: optional(str()),
+})
+
 export const statusSchema = obj({
   role: roleSchema,
   started: optional(bool()),
@@ -143,6 +279,14 @@ export const statusSchema = obj({
   simulation_yx: optional(bool()),
   simulation_yc: optional(bool()),
   redundancy: optional(redundancyStatusSchema),
+  // WP6：链路可观测（后端只增键；无引擎时 state/sequence 为 null）
+  link: optional(linkSnapshotSchema),
+  // WP1：生效的 ASDU 地址字段字节数（后端只增键，旧消费者忽略）
+  asdu_address: optional(obj({
+    ca_length: num(),
+    ioa_length: num(),
+    cot_length: num(),
+  })),
   schemaVersion: optional(num()),
   // 桥角色（T74）：running 时存在
   bridge_stats: optional(dict(num())),
@@ -171,6 +315,12 @@ export const statusSchema = obj({
   condition_active: optional(bool()),
 })
 
+export const interlockConditionSchema = obj({
+  ioa: num(),
+  value: bool(),
+  label: optional(str()),
+})
+
 export const pointSchema = obj({
   ioa: num(),
   type: str(),
@@ -187,6 +337,8 @@ export const pointSchema = obj({
   ts: optional(num()),
   min_value: optional(num()),
   max_value: optional(num()),
+  // WP4b：命令点的防误操作闭锁条件
+  interlock: optional(arr(interlockConditionSchema)),
 })
 
 export const pointsResponseSchema = obj({ points: arr(pointSchema) })
@@ -321,12 +473,66 @@ export const frameTranslationSchema = obj({
 })
 
 /** `GET /api/frames/decode`：扁平结构；ok=true 必须带 format + segments。 */
+// ── 报文值域解码树（WP7，契约 §2.9）──────────────────────────────────
+
+export const qualityBitsSchema = obj({
+  iv: bool(), nt: bool(), sb: bool(), bl: bool(), ov: bool(),
+})
+
+export const frameObjectSchema = obj({
+  index: num(),
+  ioa: num(),
+  sq_index: optional(num()),
+  value_display: str(),
+  value: nullable(unionOf(num(), bool(), str())),
+  quality: str(),
+  quality_bits: nullable(qualityBitsSchema),
+  quality_raw: nullable(num()),
+  timestamp: nullable(str()),
+  raw_hex: nullable(str()),
+})
+
+export const frameApciTreeSchema = obj({
+  length: num(),
+  asdu_length: num(),
+  frame_type: str(),
+  tx_seq: nullable(num()),
+  rx_seq: nullable(num()),
+  u_func: nullable(num()),
+  u_func_name: nullable(str()),
+})
+
+export const frameAsduTreeSchema = obj({
+  type_id: num(),
+  type_name: str(),
+  sq: bool(),
+  num: num(),
+  cot: num(),
+  cot_name: str(),
+  pn: bool(),
+  test: bool(),
+  origin_addr: num(),
+  common_addr: num(),
+  object_count: num(),
+})
+
+export const frameTreeSchema = obj({
+  ok: bool(),
+  error: optional(str()),
+  format: enumOf('I', 'S', 'U', '?'),
+  apci: nullable(frameApciTreeSchema),
+  asdu: nullable(frameAsduTreeSchema),
+  objects: arr(frameObjectSchema),
+})
+
 export const frameDecodeSchema = refined(
   obj({
     ok: bool(),
     error: optional(str()),
     format: optional(enumOf('I', 'S', 'U', '?')),
     segments: optional(arr(frameSegmentSchema)),
+    // WP7：结构化树（纯新增；可为 null——后端解析树失败时不影响 segments）
+    tree: optional(nullable(frameTreeSchema)),
   }),
   (value, path) => {
     if (value.ok) {
@@ -574,6 +780,109 @@ export const authProbeResponseSchema = obj({
   ok: bool(),
   required: bool(),
   valid: bool(),
+  // WP4a 纯新增：旧消费方可忽略（schemaVersion 不递增）
+  mode: optional(enumOf('none', 'token', 'users')),
+  operator: optional(str()),
+  role: optional(str()),
+})
+
+// ── 操作审计（WP4a，契约 §2.4d）───────────────────────────────────────
+
+export const auditRecordSchema = obj({
+  id: num(),
+  ts: num(),
+  operator: str(),
+  role: str(),
+  source_ip: str(),
+  action: str(),
+  target: str(),
+  result: enumOf('ok', 'fail'),
+  reason: str(),
+  tx_frame: str(),
+  rx_frame: str(),
+  prev_hash: str(),
+  hash: str(),
+})
+
+export const auditStatsSchema = obj({
+  total: num(),
+  operators: num(),
+  fails: num(),
+  last_ts: nullable(num()),
+})
+
+export const auditRecordsResponseSchema = obj({
+  ok: bool(),
+  records: arr(auditRecordSchema),
+  stats: auditStatsSchema,
+})
+
+export const auditVerifyResponseSchema = obj({
+  ok: bool(),
+  valid: bool(),
+  total: num(),
+  broken_at: nullable(num()),
+  reason: str(),
+})
+
+export const auditUserSchema = obj({
+  name: str(),
+  role: str(),
+})
+
+export const auditUsersResponseSchema = obj({
+  ok: bool(),
+  users: arr(auditUserSchema),
+})
+
+// ── 工程配置方案（WP5，契约 §2.4f）───────────────────────────────────
+
+const numberMap = dict(nullable(num()))
+
+export const profileSummarySchema = obj({
+  mode: str(),
+  host: str(),
+  port: nullable(num()),
+  common_addr: nullable(num()),
+  ca_length: nullable(num()),
+  ioa_length: nullable(num()),
+  cot_length: nullable(num()),
+  point_table: str(),
+  note: str(),
+  timers: numberMap,
+  flow_control: numberMap,
+})
+
+export const profileInfoSchema = obj({
+  name: str(),
+  updated_at: num(),
+  size: num(),
+  summary: profileSummarySchema,
+})
+
+export const profilesResponseSchema = obj({
+  ok: bool(),
+  profiles: arr(profileInfoSchema),
+  active: str(),
+})
+
+export const profileDetailResponseSchema = obj({
+  ok: bool(),
+  name: str(),
+  config: unknown(),
+  summary: profileSummarySchema,
+})
+
+export const profileSaveResponseSchema = obj({
+  ok: bool(),
+  name: str(),
+  path: str(),
+})
+
+export const profileApplyResponseSchema = obj({
+  ok: bool(),
+  name: str(),
+  applied: arr(str()),
 })
 
 // ── 报文录制/回放 ──────────────────────────────────────────────────────
@@ -793,11 +1102,89 @@ export const alarmsHistorySchema = obj({
 })
 
 // ── 编译期契约检查（导出以避免 noUnusedLocals；不参与运行时）───────────
+// ── 对点 / 传动验收（WP2）─────────────────────────────────────────
+const commissionItemSchema = obj({
+  ioa: num(),
+  name: str(),
+  kind: enumOf('YX', 'YC', 'YK', 'STEP'),
+  group: num(),
+  command_ioa: optional(nullable(num())),
+  expected: optional(nullable(unionOf(num(), bool(), str()))),
+  tolerance: num(),
+  actual: optional(nullable(unionOf(num(), bool(), str()))),
+  quality: str(),
+  verdict: enumOf('pending', 'pass', 'fail', 'manual'),
+  note: str(),
+  operator: str(),
+  checked_at: num(),
+  tx_frame: str(),
+  rx_frame: str(),
+  tx_time: num(),
+  rx_time: num(),
+  reason: str(),
+})
+
+const commissionSummarySchema = obj({
+  total: num(),
+  pending: num(),
+  pass: num(),
+  fail: num(),
+  manual: num(),
+  done: num(),
+})
+
+// obj() 不暴露 .shape，公共字段用显式 shape 常量复用
+const commissionSessionBaseShape = {
+  id: str(),
+  name: str(),
+  created_at: num(),
+  operator: str(),
+  status: enumOf('idle', 'running', 'done', 'stopped'),
+  started_at: num(),
+  finished_at: num(),
+  cursor: num(),
+  note: str(),
+  summary: commissionSummarySchema,
+  point_count: num(),
+}
+
+export const commissionSessionSummarySchema = obj(commissionSessionBaseShape)
+
+export const commissionSessionSchema = obj({
+  ...commissionSessionBaseShape,
+  items: arr(commissionItemSchema),
+})
+
+export const commissionStatusResponseSchema = obj({
+  ok: bool(),
+  running: bool(),
+  session_id: nullable(str()),
+  cursor: num(),
+  total: num(),
+})
+
+export const commissionSessionsResponseSchema = obj({
+  ok: bool(),
+  sessions: arr(commissionSessionSummarySchema),
+  status: commissionStatusResponseSchema,
+})
+
+export const commissionSessionResponseSchema = obj({
+  ok: bool(),
+  session: commissionSessionSchema,
+})
+
+export const commissionItemResponseSchema = obj({
+  ok: bool(),
+  item: commissionItemSchema,
+})
+
 export type ContractKeyChecks = [
   Assert<Equal<SchemaKeys<typeof okSchema>, keyof OkResponse>>,
   Assert<Equal<SchemaKeys<typeof statusSchema>, keyof Status>>,
   Assert<Equal<SchemaKeys<typeof redundancyStatusSchema>, keyof RedundancyStatus>>,
   Assert<Equal<SchemaKeys<typeof pointSchema>, keyof Point>>,
+  Assert<Equal<SchemaKeys<typeof interlockConditionSchema>, keyof InterlockCondition>>,
   Assert<Equal<SchemaKeys<typeof pointsResponseSchema>, keyof PointsResponse>>,
   Assert<Equal<SchemaKeys<typeof scdPreviewSchema>, keyof ScdPreviewResponse>>,
   Assert<Equal<SchemaKeys<typeof xlsxPreviewSchema>, keyof XlsxPreviewResponse>>,
@@ -813,6 +1200,11 @@ export type ContractKeyChecks = [
   Assert<Equal<SchemaKeys<typeof frameSegmentSchema>, keyof FrameSegment>>,
   Assert<Equal<SchemaKeys<typeof frameTranslationSchema>, keyof FrameTranslation>>,
   Assert<Equal<SchemaKeys<typeof frameDecodeSchema>, keyof FrameDecodeResponse>>,
+  Assert<Equal<SchemaKeys<typeof frameObjectSchema>, keyof FrameObject>>,
+  Assert<Equal<SchemaKeys<typeof frameApciTreeSchema>, keyof FrameApciTree>>,
+  Assert<Equal<SchemaKeys<typeof frameAsduTreeSchema>, keyof FrameAsduTree>>,
+  Assert<Equal<SchemaKeys<typeof frameTreeSchema>, keyof FrameTree>>,
+  Assert<Equal<SchemaKeys<typeof qualityBitsSchema>, keyof QualityBits>>,
   Assert<Equal<SchemaKeys<typeof doctorStepSchema>, keyof DoctorStep>>,
   Assert<Equal<SchemaKeys<typeof doctorReportSchema>, keyof DoctorReport>>,
   Assert<Equal<SchemaKeys<typeof doctorResponseSchema>, keyof DoctorResponse>>,
@@ -849,4 +1241,34 @@ export type ContractKeyChecks = [
   Assert<Equal<SchemaKeys<typeof testScriptInfoSchema>, keyof TestScriptInfo>>,
   Assert<Equal<SchemaKeys<typeof testRunSchema>, keyof TestRun>>,
   Assert<Equal<SchemaKeys<typeof testStatusResponseSchema>, keyof TestStatusResponse>>,
+  Assert<Equal<SchemaKeys<typeof commissionItemSchema>, keyof CommissionItem>>,
+  Assert<Equal<SchemaKeys<typeof commissionSummarySchema>, keyof CommissionSummary>>,
+  Assert<Equal<SchemaKeys<typeof commissionSessionSummarySchema>, keyof CommissionSessionSummary>>,
+  Assert<Equal<SchemaKeys<typeof commissionSessionSchema>, keyof CommissionSession>>,
+  Assert<Equal<SchemaKeys<typeof commissionStatusResponseSchema>, keyof CommissionStatusResponse>>,
+  Assert<Equal<SchemaKeys<typeof commissionSessionsResponseSchema>, keyof CommissionSessionsResponse>>,
+  Assert<Equal<SchemaKeys<typeof commissionSessionResponseSchema>, keyof CommissionSessionResponse>>,
+  Assert<Equal<SchemaKeys<typeof commissionItemResponseSchema>, keyof CommissionItemResponse>>,
+  Assert<Equal<SchemaKeys<typeof auditRecordSchema>, keyof AuditRecord>>,
+  Assert<Equal<SchemaKeys<typeof auditStatsSchema>, keyof AuditStats>>,
+  Assert<Equal<SchemaKeys<typeof auditRecordsResponseSchema>, keyof AuditRecordsResponse>>,
+  Assert<Equal<SchemaKeys<typeof auditVerifyResponseSchema>, keyof AuditVerifyResponse>>,
+  Assert<Equal<SchemaKeys<typeof auditUserSchema>, keyof AuditUser>>,
+  Assert<Equal<SchemaKeys<typeof auditUsersResponseSchema>, keyof AuditUsersResponse>>,
+  Assert<Equal<SchemaKeys<typeof profileInfoSchema>, keyof ProfileInfo>>,
+  Assert<Equal<SchemaKeys<typeof profileSummarySchema>, keyof ProfileSummary>>,
+  Assert<Equal<SchemaKeys<typeof profilesResponseSchema>, keyof ProfilesResponse>>,
+  Assert<Equal<SchemaKeys<typeof profileSaveResponseSchema>, keyof ProfileSaveResponse>>,
+  Assert<Equal<SchemaKeys<typeof profileApplyResponseSchema>, keyof ProfileApplyResponse>>,
+  Assert<Equal<SchemaKeys<typeof linkTimerInfoSchema>, keyof LinkTimerInfo>>,
+  Assert<Equal<SchemaKeys<typeof linkStateTransitionSchema>, keyof LinkStateTransition>>,
+  Assert<Equal<SchemaKeys<typeof linkStateSnapshotSchema>, keyof LinkStateSnapshot>>,
+  Assert<Equal<SchemaKeys<typeof linkSequenceSnapshotSchema>, keyof LinkSequenceSnapshot>>,
+  Assert<Equal<SchemaKeys<typeof linkTransportSnapshotSchema>, keyof LinkTransportSnapshot>>,
+  Assert<Equal<SchemaKeys<typeof linkSnapshotSchema>, keyof LinkSnapshot>>,
+  Assert<Equal<SchemaKeys<typeof sniffCapabilitySchema>, keyof SniffCapability>>,
+  Assert<Equal<SchemaKeys<typeof sniffStatsSchema>, keyof SniffStats>>,
+  Assert<Equal<SchemaKeys<typeof sniffStatusSchema>, keyof SniffStatus>>,
+  Assert<Equal<SchemaKeys<typeof pointUpsertResponseSchema>, keyof PointUpsertResponse>>,
+  Assert<Equal<SchemaKeys<typeof pointDeleteResponseSchema>, keyof PointDeleteResponse>>,
 ]

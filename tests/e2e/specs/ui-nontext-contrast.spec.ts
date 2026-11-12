@@ -505,6 +505,8 @@ for (const kit of GATE_KITS) {
       { menu: /历史/, key: 'history' },
       { menu: /报文抓包/, key: 'capture' },
       { menu: /自动化测试/, key: 'tests' },
+      { menu: /对点传动/, key: 'commission' },
+      { menu: /操作审计/, key: 'audit' },
     ]
 
     await page.goto(appUrl(COMBINED, '', kit), { waitUntil: 'domcontentloaded' })

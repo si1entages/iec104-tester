@@ -212,6 +212,11 @@ class MasterSession:
             if e._auto_gi:
                 e._spawn(self.auto_general_interrogation())
 
+            # WP11a：建链后自动时钟同步（默认关闭，行为与 v1.10.0 一致；
+            # 显式开启时在 STARTDT CON 后发 C_CS_NA_1）。
+            if getattr(e, "_auto_clock_sync", False):
+                e._spawn(e.clock_sync())
+
             # 周期总召唤（对"只在总召时才回遥测"的装置是必要手段）
             if e._gi_interval > 0 and not e._periodic_gi_task:
                 e._periodic_gi_task = e._spawn(self.periodic_gi_loop())

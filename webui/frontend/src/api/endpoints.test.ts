@@ -65,6 +65,13 @@ describe('REST 端点覆盖（与 api_contract.md 对齐）', () => {
     for (const fn of [api.history.stats, api.history.data, api.history.frames]) {
       expect(typeof fn).toBe('function')
     }
+    for (const fn of [
+      api.commission.sessions, api.commission.create, api.commission.get,
+      api.commission.run, api.commission.stop, api.commission.verdict,
+      api.commission.delete, api.commission.exportUrl,
+    ]) {
+      expect(typeof fn).toBe('function')
+    }
   })
 })
 

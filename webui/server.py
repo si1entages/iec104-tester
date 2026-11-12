@@ -16,8 +16,13 @@ from pathlib import Path
 import yaml
 from aiohttp import WSMsgType, web
 
+from core.data.profiles import ProfileNameError
 from core.data.scd_import import import_scd
 
+from .audit import AuditIntent, Identity, OperatorRegistry
+from .audit import role_allowed as _role_allowed
+from .audit import set_audit_intent as _set_intent
+from .audit import set_operator_context as _set_identity
 from .bridge import EngineBridge
 from .events import SCHEMA_VERSION
 from .frame_translate import translate_hex
@@ -151,12 +156,16 @@ def _validate_redundancy(cfg: dict) -> str | None:
 def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
                path_prefix: str = "",
                available_roles: list[str] | None = None,
-               slave_api_prefix: str | None = None) -> web.Application:
+               slave_api_prefix: str | None = None,
+               operators: OperatorRegistry | None = None) -> web.Application:
     """构造单个角色的 aiohttp 应用.
 
     单角色模式：``path_prefix=""``，API 在 ``/api/*``。
     合并模式：主站应用前缀为空；子站应用以 ``path_prefix="/slave"`` 挂到
     ``/slave/api/*``、``/slave/ws``（同一端口、同一进程，不再需要 8766）。
+
+    ``operators``（WP4a）：``--auth-config`` 的多用户三角色表；为 None 时
+    走单 token 兼容模式（行为与 v1.10.0 完全一致）。
     """
 
     def _local_path(path: str) -> str:
@@ -164,15 +173,51 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
             return path[len(path_prefix):] or "/"
         return path
 
+    def _make_compat_identity(request: web.Request) -> Identity:
+        """单 token 兼容模式的匿名 admin 身份；X-Operator 头补充操作人姓名."""
+        name = (request.headers.get("X-Operator") or "").strip()[:64]
+        return Identity(name=name, role="admin", source_ip=request.remote or "")
+
+    async def _build_intent(path: str, request: web.Request) -> AuditIntent:
+        """从路径 + JSON body 提取审计动作/目标（不触碰非 JSON body）.
+
+        ``request.text()`` 读取后由 aiohttp 缓存，handler 后续的
+        ``request.json()`` 照常工作；multipart/文本上传端点不预读。
+        """
+        action = path[5:] if path.startswith("/api/") else path
+        target = ""
+        ctype = (request.content_type or "").lower()
+        if ctype == "application/json" and (
+            path.startswith("/api/master/") or path.startswith("/api/slave/")
+            or path.startswith("/api/commission/")
+        ):
+            try:
+                parsed = json.loads(await request.text())
+                if isinstance(parsed, dict):
+                    for key in ("ioa", "name", "id"):
+                        v = parsed.get(key)
+                        if isinstance(v, (int, str)) and not isinstance(v, bool):
+                            target = str(v)
+                            break
+            except Exception:
+                target = ""
+        return AuditIntent(action=action, target=target)
+
     @web.middleware
     async def token_auth(request: web.Request, handler) -> web.Response:
-        """可选访问令牌（B7）：保护 /api/* 与 /ws；静态页放行供前端令牌提示.
+        """访问令牌（B7）+ 多用户三角色（WP4a）：保护 /api/* 与 /ws.
 
-        - 未配置 ``auth_token`` 时整体直通（默认行为，兼容旧用法）；
+        - ``operators`` 与 ``auth_token`` 均未配置 → 整体直通（兼容旧用法，
+          无认证也无审计身份，``--demo`` 等场景行为不变）；
         - ``GET /api/auth`` 公开，供前端探测「是否需要令牌 / 当前令牌是否有效」；
+        - ``operators`` 命中 → 身份写请求上下文（ContextVar）供审计归因，
+          并按三角色矩阵放行/拒绝；兼容单 token 命中 → 匿名 admin，
+          前端可用 ``X-Operator`` 头补充操作人姓名（多用户模式忽略该头，
+          以 token 映射为准防冒名）；
         - 令牌比较用 ``hmac.compare_digest``（常数时间）。
+        被拒（401/403）请求在权限检查处返回，不进入审计链。
         """
-        if not auth_token:
+        if not auth_token and operators is None:
             return await handler(request)
         path = _local_path(request.path)
         if not (path.startswith("/api/") or path == "/ws"):
@@ -180,9 +225,26 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
         if path == "/api/auth":
             return await handler(request)
         provided = _extract_token(request)
-        if provided and hmac.compare_digest(provided, auth_token):
+        identity = None
+        if operators is not None:
+            identity = operators.authenticate(provided)
+        if identity is None and auth_token and provided \
+                and hmac.compare_digest(provided, auth_token):
+            # 兼容模式：单 token = 匿名管理员；X-Operator 头补充操作人姓名
+            identity = _make_compat_identity(request)
+        if identity is None:
+            return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+        _set_identity(identity)
+        if not _role_allowed(identity.role, request.method, path):
+            return web.json_response(
+                {"ok": False, "error": f"forbidden: 角色 {identity.role} 无权执行 {request.method} {path}"},
+                status=403)
+        _set_intent(await _build_intent(path, request))
+        try:
             return await handler(request)
-        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+        finally:
+            _set_intent(None)
+            _set_identity(None)
 
     app = web.Application(middlewares=[security_headers, no_cache_pages, token_auth])
 
@@ -250,13 +312,162 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
         return web.json_response(body)
 
     async def api_auth(request: web.Request) -> web.Response:
-        """认证探测（公开）：是否需要令牌、本次请求携带的令牌是否有效（B7）."""
-        required = auth_token is not None
+        """认证探测（公开）：是否需要令牌、本次请求携带的令牌是否有效（B7）.
+
+        WP4a 扩展（纯新增字段）：``mode``（none|token|users）、命中身份时的
+        ``operator``/``role``；旧消费方只读 required/valid 不受影响。
+        """
+        required = auth_token is not None or operators is not None
         valid = True
+        operator_name = ""
+        role = ""
+        mode = "none" if (auth_token is None and operators is None) else "token"
+        if operators is not None:
+            mode = "users"
         if required:
             provided = _extract_token(request)
-            valid = bool(provided) and hmac.compare_digest(provided, auth_token)
-        return web.json_response({"ok": True, "required": required, "valid": valid})
+            if operators is not None:
+                ident = operators.authenticate(provided)
+                if ident is None and auth_token and provided \
+                        and hmac.compare_digest(provided, auth_token):
+                    ident = _make_compat_identity(request)
+                valid = ident is not None
+                if ident is not None:
+                    operator_name, role = ident.name, ident.role
+            elif auth_token is not None:
+                valid = bool(provided) and hmac.compare_digest(provided, auth_token)
+                if valid:
+                    ident = _make_compat_identity(request)
+                    operator_name, role = ident.name, ident.role
+        body: dict = {"ok": True, "required": required, "valid": valid, "mode": mode}
+        if valid and required:
+            body["operator"] = operator_name
+            body["role"] = role
+        return web.json_response(body)
+
+    async def api_auth_users(request: web.Request) -> web.Response:
+        """用户名与角色列表（admin only；不含任何 token 材料）."""
+        if operators is None:
+            return web.json_response({"ok": False, "error": "未启用多用户模式"}, status=404)
+        return web.json_response({"ok": True, "users": operators.roles()})
+
+    # ── 操作审计（WP4a）───────────────────────────────────────────
+
+    async def api_audit_records(request: web.Request) -> web.Response:
+        try:
+            limit = max(1, min(5000, int(request.query.get("limit", 200))))
+        except ValueError:
+            return web.json_response({"ok": False, "error": "invalid limit"}, status=400)
+        since_q = request.query.get("since")
+        since: float | None = None
+        if since_q:
+            try:
+                since = float(since_q)
+            except ValueError:
+                return web.json_response({"ok": False, "error": "invalid since"}, status=400)
+        rows = await asyncio.to_thread(
+            bridge.audit.list_records,
+            limit=limit,
+            operator=request.query.get("operator") or None,
+            action=request.query.get("action") or None,
+            result=request.query.get("result") or None,
+            since=since,
+        )
+        stats = await asyncio.to_thread(bridge.audit.stats)
+        return web.json_response({"ok": True, "records": rows, "stats": stats})
+
+    async def api_audit_verify(request: web.Request) -> web.Response:
+        out = await asyncio.to_thread(bridge.audit.verify)
+        return web.json_response(out)
+
+    async def api_audit_export(request: web.Request) -> web.Response:
+        fmt = request.query.get("format", "json")
+        if fmt not in ("json", "csv"):
+            return web.json_response(
+                {"ok": False, "error": "format 须为 json|csv"}, status=400)
+        try:
+            body, content_type, suffix = await asyncio.to_thread(bridge.audit.export, fmt)
+        except ValueError as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=400)
+        return web.Response(
+            body=body, content_type=content_type,
+            headers={"Content-Disposition": f'attachment; filename="audit_log.{suffix}"'},
+        )
+
+    # ── 工程配置方案（WP5，契约 §2.4f）────────────────────────────
+
+    async def api_profiles(request: web.Request) -> web.Response:
+        return web.json_response(bridge.profiles.list())
+
+    async def api_profile_get(request: web.Request) -> web.Response:
+        out = bridge.profiles.get(request.match_info["name"])
+        if out is None:
+            return web.json_response({"ok": False, "error": "方案不存在"}, status=404)
+        return web.json_response({"ok": True, **out})
+
+    async def api_profile_save(request: web.Request) -> web.Response:
+        """保存方案：body 为空 → 保存当前生效参数；否则以 body.config 为准."""
+        body: dict = {}
+        if request.can_read_body:
+            try:
+                raw = await request.json()
+                if isinstance(raw, dict):
+                    body = raw
+            except Exception:
+                body = {}
+        cfg = body.get("config")
+        if cfg is not None and not isinstance(cfg, dict):
+            return web.json_response({"ok": False, "error": "config 须为对象"}, status=400)
+        try:
+            return web.json_response(bridge.profiles.save(request.match_info["name"], cfg))
+        except ProfileNameError as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=400)
+
+    async def api_profile_apply(request: web.Request) -> web.Response:
+        try:
+            return web.json_response(bridge.profiles.apply(request.match_info["name"]))
+        except ProfileNameError as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=400)
+        except FileNotFoundError:
+            return web.json_response({"ok": False, "error": "方案不存在"}, status=404)
+        except (OSError, ValueError) as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=400)
+
+    async def api_profile_restore(request: web.Request) -> web.Response:
+        """恢复记录中的活动方案（前端 onMount 调用；无活动方案时 ok=false）."""
+        out = bridge.profiles.restore_active()
+        if out is None:
+            return web.json_response({"ok": False, "error": "无活动方案"})
+        return web.json_response(out)
+
+    async def api_profile_delete(request: web.Request) -> web.Response:
+        try:
+            ok = bridge.profiles.delete(request.match_info["name"])
+        except ProfileNameError as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=400)
+        return web.json_response({"ok": ok})
+
+    async def api_profile_export(request: web.Request) -> web.Response:
+        try:
+            body, content_type, suffix = bridge.profiles.export(request.match_info["name"])
+        except ProfileNameError as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=400)
+        except FileNotFoundError:
+            return web.json_response({"ok": False, "error": "方案不存在"}, status=404)
+        name = request.match_info["name"]
+        return web.Response(body=body, content_type=content_type, headers={
+            "Content-Disposition": f'attachment; filename="profile_{name}.{suffix}"'})
+
+    async def api_profile_import(request: web.Request) -> web.Response:
+        """导入方案：body 为 YAML 文本，``?name=`` 指定落盘名称."""
+        name = request.query.get("name", "")
+        try:
+            text = await request.text()
+            return web.json_response(bridge.profiles.import_yaml(name, text))
+        except ProfileNameError as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=400)
+        except ValueError as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=400)
 
     async def api_points(request: web.Request) -> web.Response:
         return web.json_response({"points": bridge.snapshot_points()})
@@ -345,6 +556,7 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
             ioa, body.get("state", 0),
             bool(body.get("select", False)), bool(body.get("double", False)),
             bool(body.get("with_time", False)), deactivate,
+            force=bool(body.get("force", False)),
         ))
 
     async def api_step(request: web.Request) -> web.Response:
@@ -359,7 +571,8 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
             return web.json_response(
                 {"ok": False, "error": "invalid ioa/state (state 须为 1 或 2)"}, status=400)
         return web.json_response(await bridge.send_step_command(
-            ioa, state, bool(body.get("select", False))))
+            ioa, state, bool(body.get("select", False)),
+            force=bool(body.get("force", False))))
 
     async def api_bitstring(request: web.Request) -> web.Response:
         """32 比特串命令 (C_BO_NA_1)."""
@@ -370,7 +583,8 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
         ioa, value = body.get("ioa"), body.get("value")
         if not isinstance(ioa, int) or ioa < 0 or not isinstance(value, int) or value < 0:
             return web.json_response({"ok": False, "error": "invalid ioa/value"}, status=400)
-        return web.json_response(await bridge.send_bitstring(ioa, value))
+        return web.json_response(await bridge.send_bitstring(
+            ioa, value, force=bool(body.get("force", False))))
 
     async def api_delay(request: web.Request) -> web.Response:
         """延时获得命令 (C_CD_NA_1)."""
@@ -404,6 +618,7 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
             ioa, value, bool(body.get("select", False)),
             str(body.get("kind", "short_float") or "short_float"),
             bool(body.get("with_time", False)), deactivate,
+            force=bool(body.get("force", False)),
         ))
 
     async def api_alarms(request: web.Request) -> web.Response:
@@ -546,8 +761,12 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
             return web.json_response({"ok": False, "error": "invalid cot"}, status=400)
         if qualifier is not None and (not isinstance(qualifier, int) or not 0 <= qualifier <= 255):
             return web.json_response({"ok": False, "error": "invalid qualifier"}, status=400)
-        return web.json_response(await bridge.file_action(action, ioa, file_name,
-                                                          cot=cot, qualifier=qualifier))
+        data = body.get("data", "")
+        segment_size = body.get("segment_size", 200)
+        return web.json_response(await bridge.file_action(
+            action, ioa, file_name, cot=cot, qualifier=qualifier,
+            data=data if isinstance(data, str) else "",
+            segment_size=segment_size if isinstance(segment_size, int) else 200))
 
     async def api_points_yaml_get(request: web.Request) -> web.Response:
         try:
@@ -562,6 +781,37 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
                 })
         except Exception as e:
             return web.json_response({"ok": False, "error": str(e)})
+
+    async def api_points_upsert(request: web.Request) -> web.Response:
+        """新增/更新一个点定义（WP10a，契约 §2.4 扩展）.
+
+        body: ``{type: "YX|YC|YK|YM|STEP", point: {ioa, name?, group?, enabled?, ...}}``。
+        **不重置设计基准**——在线改点属现场调整，基准要用 /api/points/design 显式重设。
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"ok": False, "error": "invalid body"}, status=400)
+        ptype = str(body.get("type", ""))
+        fields = body.get("point")
+        if not isinstance(fields, dict):
+            return web.json_response({"ok": False, "error": "point 须为对象"}, status=400)
+        out = await asyncio.to_thread(
+            bridge.points.upsert, ptype, fields, bridge.session.engine)
+        return web.json_response(out, status=200 if out.get("ok") else 400)
+
+    async def api_points_delete(request: web.Request) -> web.Response:
+        """删除一个点定义（WP10a）：``?type=YK&ioa=2001``；不重置设计基准."""
+        ptype = request.query.get("type", "")
+        try:
+            ioa = int(request.query.get("ioa", ""))
+        except (TypeError, ValueError):
+            return web.json_response({"ok": False, "error": "ioa 须为整数"}, status=400)
+        out = await asyncio.to_thread(
+            bridge.points.delete_point, ptype, ioa, bridge.session.engine)
+        return web.json_response(out, status=200 if out.get("ok") else 404)
 
     async def api_points_yaml_put(request: web.Request) -> web.Response:
         try:
@@ -739,6 +989,101 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
             text=html_text, content_type="text/html",
             headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 
+    async def api_export_report_multi(request: web.Request) -> web.Response:
+        """多格式报告导出（WP8）：``?format=html|xlsx|pdf``.
+
+        与 ``/api/export/report.html`` 同一份数据源（会话 + 帧 + 事件 + 告警 +
+        结论 + 曲线），另加 **WP2 逐点证据** 与 **WP4 审计流水**——
+        三种格式共用同一 ``Evidence``，逐点条数必然一致。
+
+        ``?session=<id>`` 指定把哪次传动会话的逐点证据并入报告（缺省取最近
+        一次会话）；PDF 需可选依赖 reportlab，未安装时返回 400 + 安装提示，
+        不返回 500（onefile 包在未装 extra 时仍可正常提供 html/xlsx）。
+        """
+        from core.export import Evidence, export_report, pdf_available, points_from_session
+
+        fmt = (request.query.get("format") or "html").lower()
+        if fmt not in ("html", "xlsx", "pdf"):
+            return web.json_response(
+                {"ok": False, "error": "format 须为 html|xlsx|pdf"}, status=400)
+        if fmt == "pdf" and not pdf_available():
+            return web.json_response({
+                "ok": False,
+                "error": "PDF 导出需要可选依赖 reportlab（pip install iec104-tester[pdf]）；"
+                         "可改用 format=xlsx 或 format=html（浏览器打印为 PDF）",
+            }, status=400)
+
+        title = request.query.get("title") or ""
+        notes = request.query.get("notes") or ""
+        conclusion = request.query.get("conclusion") or ""
+        conclusion_kind = request.query.get("conclusion_kind") or ""
+        session_id = request.query.get("session") or ""
+        audit_limit = request.query.get("audit_limit") or "200"
+        try:
+            audit_limit = max(0, min(int(audit_limit), 2000))
+        except (TypeError, ValueError):
+            audit_limit = 200
+
+        points = []
+        session_meta: dict = {}
+        comm = getattr(bridge, "commission", None)
+        if comm is not None:
+            sid = session_id
+            if not sid:
+                try:
+                    rows = await asyncio.to_thread(comm.list_sessions, 1)
+                    sid = rows[0]["id"] if rows else ""
+                except Exception:  # noqa: BLE001 — 无会话不影响报告生成
+                    sid = ""
+            if sid:
+                try:
+                    sess = await asyncio.to_thread(comm.get_session, sid)
+                except Exception:  # noqa: BLE001
+                    sess = None
+                if sess:
+                    points = points_from_session(sess)
+                    session_meta = {
+                        "id": sess.get("id", ""),
+                        "name": sess.get("name", ""),
+                        "operator": sess.get("operator", ""),
+                        "status": sess.get("status", ""),
+                        "summary": sess.get("summary", {}),
+                    }
+
+        audit_rows: list[dict] = []
+        if audit_limit and getattr(bridge, "audit", None) is not None:
+            try:
+                audit_rows = await asyncio.to_thread(
+                    bridge.audit.list_records, limit=audit_limit)
+            except Exception:  # noqa: BLE001
+                audit_rows = []
+
+        ev = Evidence(
+            role=bridge.role,
+            title=title or f"IEC 60870-5-104 测试报告（{bridge.role}）",
+            session={"status": bridge.status(), "commission": session_meta},
+            points=points,
+            audit=audit_rows,
+            frames=bridge.recent("frame", 5000),
+            events=bridge.recent("event", 2000),
+            alarms=(bridge.alarms.history_records(100)
+                    if getattr(bridge, "alarms", None) is not None else []),
+            conclusion=conclusion,
+            conclusion_kind=conclusion_kind,
+            notes=notes,
+        )
+        try:
+            body, content_type, suffix = await asyncio.to_thread(export_report, ev, fmt)
+        except ValueError as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=400)
+        except Exception as e:  # noqa: BLE001 — 导出失败给可读错误，不抛 500 裸栈
+            logger.warning("export report failed: %s", e)
+            return web.json_response(
+                {"ok": False, "error": f"报告生成失败：{e}"}, status=400)
+        fname = time.strftime(f"iec104_report_%Y%m%d_%H%M%S.{suffix}")
+        return web.Response(body=body, content_type=content_type, headers={
+            "Content-Disposition": f'attachment; filename="{fname}"'})
+
     async def api_export_session(request: web.Request) -> web.Response:
         return web.json_response(
             bridge.export_session_json(),
@@ -746,6 +1091,117 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
                 "Content-Disposition":
                     f'attachment; filename="iec104_{bridge.role}_session.json"',
             })
+
+    # ── 对点 / 传动验收（WP2）───────────────────────────────────
+    # DB 操作走 to_thread，避免同步 sqlite 阻塞事件循环；编排服务本身是
+    # 异步的（run/stop 只创建/取消后台任务）。
+    async def _commission_error(exc: Exception) -> web.Response:
+        return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    async def api_commission_sessions(request: web.Request) -> web.Response:
+        try:
+            limit = max(1, min(500, int(request.query.get("limit", 100))))
+            rows = await asyncio.to_thread(bridge.commission.list_sessions, limit)
+            return web.json_response({"ok": True, "sessions": rows,
+                                      "status": bridge.commission.status()})
+        except Exception as e:  # noqa: BLE001
+            return await _commission_error(e)
+
+    async def api_commission_create(request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"ok": False, "error": "invalid body"}, status=400)
+        ioas = body.get("ioas")
+        if ioas is not None and (not isinstance(ioas, list)
+                                 or any(not isinstance(i, int) for i in ioas)):
+            return web.json_response({"ok": False, "error": "ioas 须为 int 数组"}, status=400)
+        expected = body.get("expected")
+        if expected is not None and not isinstance(expected, dict):
+            return web.json_response({"ok": False, "error": "expected 须为对象"}, status=400)
+        command_ioas = body.get("command_ioas")
+        if command_ioas is not None and not isinstance(command_ioas, dict):
+            return web.json_response({"ok": False, "error": "command_ioas 须为对象"}, status=400)
+        try:
+            out = await asyncio.to_thread(
+                bridge.commission.create_session,
+                str(body.get("name", "")), str(body.get("operator", "")),
+                ioas, expected, command_ioas)
+            return web.json_response({"ok": True, "session": out})
+        except Exception as e:  # noqa: BLE001
+            return await _commission_error(e)
+
+    async def api_commission_get(request: web.Request) -> web.Response:
+        sid = request.match_info["id"]
+        out = await asyncio.to_thread(bridge.commission.get_session, sid)
+        if out is None:
+            return web.json_response({"ok": False, "error": "session not found"}, status=404)
+        return web.json_response({"ok": True, "session": out})
+
+    async def api_commission_run(request: web.Request) -> web.Response:
+        sid = request.match_info["id"]
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        try:
+            out = bridge.commission.run(sid, str(body.get("operator", "")))
+            return web.json_response(out)
+        except (RuntimeError, KeyError, ValueError) as e:
+            return await _commission_error(e)
+
+    async def api_commission_stop(request: web.Request) -> web.Response:
+        return web.json_response(bridge.commission.stop())
+
+    async def api_commission_verdict(request: web.Request) -> web.Response:
+        sid = request.match_info["id"]
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"ok": False, "error": "invalid body"}, status=400)
+        ioa = body.get("ioa")
+        verdict = body.get("verdict")
+        if not isinstance(ioa, int) or not isinstance(verdict, str):
+            return web.json_response({"ok": False, "error": "需要 ioa(int) / verdict(str)"},
+                                     status=400)
+        try:
+            item = await asyncio.to_thread(
+                bridge.commission.set_verdict, sid, ioa, verdict,
+                str(body.get("note", "")), str(body.get("operator", "")))
+        except ValueError as e:
+            return await _commission_error(e)
+        if item is None:
+            return web.json_response({"ok": False, "error": "session/ioa not found"}, status=404)
+        return web.json_response({"ok": True, "item": item})
+
+    async def api_commission_delete(request: web.Request) -> web.Response:
+        sid = request.match_info["id"]
+        try:
+            ok = await asyncio.to_thread(bridge.commission.delete_session, sid)
+        except RuntimeError as e:
+            return await _commission_error(e)
+        return web.json_response({"ok": ok})
+
+    async def api_commission_export(request: web.Request) -> web.Response:
+        sid = request.match_info["id"]
+        fmt = request.query.get("format", "xlsx")
+        session = await asyncio.to_thread(bridge.commission.get_session, sid)
+        if session is None:
+            return web.json_response({"ok": False, "error": "session not found"}, status=404)
+        try:
+            from webui.commission_export import export
+            body, content_type, suffix = export(session, fmt)
+        except (ValueError, ImportError) as e:
+            return await _commission_error(e)
+        fname = f"commission_{sid}.{suffix}"
+        return web.Response(body=body, content_type=content_type, headers={
+            "Content-Disposition": f'attachment; filename="{fname}"'})
 
     async def api_scd_preview(request: web.Request) -> web.Response:
         """SCD/CID/ICD（IEC 61850-6 SCL + 80-1 映射）→ 104 点表预览（无副作用）.
@@ -809,7 +1265,9 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
         if not (0 < listen_port < 65536 and 0 < upstream_port < 65536):
             return web.json_response({"ok": False, "error": "端口超出范围 1-65535"}, status=400)
         return web.json_response(await bridge.start_bridge(
-            listen_host, listen_port, upstream_host, upstream_port))
+            listen_host, listen_port, upstream_host, upstream_port,
+            listen_address=body.get("listen_address"),
+            upstream_address=body.get("upstream_address")))
 
     async def api_bridge_stop(request: web.Request) -> web.Response:
         if bridge.role != "bridge":
@@ -1317,6 +1775,67 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
 
     # ── 报文录制/回放（E2）───────────────────────────────────────────
 
+    # ── 旁路真实网卡抓包（WP9，契约 §2.14b）─────────────────────
+
+    async def api_sniff_status(request: web.Request) -> web.Response:
+        sn = bridge.sniffer
+        return web.json_response({
+            "ok": True,
+            "running": sn.running,
+            "capability": sn.capability().as_dict(),
+            "stats": sn.stats.as_dict(),
+            "frames": len(sn.frames()),
+            "port": sn.port,
+        })
+
+    async def api_sniff_start(request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        sn = bridge.sniffer
+        if body.get("port"):
+            try:
+                sn.port = max(1, min(int(body["port"]), 65535))
+            except (TypeError, ValueError):
+                return web.json_response({"ok": False, "error": "invalid port"}, status=400)
+        if body.get("iface") is not None:
+            sn.iface = str(body["iface"])
+        out = sn.start()
+        if not out.get("ok"):
+            # 能力不足/权限不足：200 + ok=false（业务错误），并附 capability 供界面提示
+            return web.json_response(out)
+        bridge._notify_ui("旁路抓包已启动")  # noqa: SLF001 — 同模块内的状态广播
+        return web.json_response(out)
+
+    async def api_sniff_stop(request: web.Request) -> web.Response:
+        out = bridge.sniffer.stop()
+        bridge._notify_ui("旁路抓包已停止")  # noqa: SLF001
+        return web.json_response(out)
+
+    async def api_sniff_export(request: web.Request) -> web.Response:
+        """把已抓到的帧导出为 pcap（复用既有 pcap 写入；回放/diff 直接可用）."""
+        sn = bridge.sniffer
+        frames = sn.frames()
+        if not frames:
+            return web.json_response(
+                {"ok": False, "error": "尚无旁路抓包数据"}, status=400)
+        raw = request.query.get("raw") in ("1", "true", "yes")
+        import tempfile
+
+        tmp = Path(tempfile.mkdtemp()) / "sniff.pcap"
+        try:
+            await asyncio.to_thread(sn.save_pcap, tmp, raw=raw)
+            body = await asyncio.to_thread(tmp.read_bytes)
+        finally:
+            tmp.unlink(missing_ok=True)
+        fname = time.strftime("iec104_sniff_%Y%m%d_%H%M%S.pcap")
+        return web.Response(body=body, content_type="application/vnd.tcpdump.pcap",
+                            headers={"Content-Disposition":
+                                     f'attachment; filename="{fname}"'})
+
     async def api_capture_status(request: web.Request) -> web.Response:
         return web.json_response(bridge.captures.status())
 
@@ -1578,6 +2097,32 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
         app.router.add_post("/api/points/design", api_points_design)
         app.router.add_get("/api/points/design-diff", api_points_design_diff)
         app.router.add_post("/api/points/batch", api_points_batch)
+        # WP10a：点表在线编辑（不重置设计基准）
+        app.router.add_post("/api/points/upsert", api_points_upsert)
+        app.router.add_delete("/api/points/delete", api_points_delete)
+        # 对点 / 传动验收（WP2）：需要引擎下发命令，bridge 角色不注册
+        app.router.add_get("/api/commission/sessions", api_commission_sessions)
+        app.router.add_post("/api/commission/sessions", api_commission_create)
+        app.router.add_get("/api/commission/sessions/{id}", api_commission_get)
+        app.router.add_post("/api/commission/sessions/{id}/run", api_commission_run)
+        app.router.add_post("/api/commission/sessions/{id}/stop", api_commission_stop)
+        app.router.add_post("/api/commission/sessions/{id}/verdict", api_commission_verdict)
+        app.router.add_delete("/api/commission/sessions/{id}", api_commission_delete)
+        app.router.add_get("/api/commission/sessions/{id}/export", api_commission_export)
+        # 操作审计（WP4a）：三角色可查（viewer 只读），写动作由 _cmd 落链
+        app.router.add_get("/api/audit/records", api_audit_records)
+        app.router.add_get("/api/audit/verify", api_audit_verify)
+        app.router.add_get("/api/audit/export", api_audit_export)
+        app.router.add_get("/api/auth/users", api_auth_users)
+        # 工程配置方案（WP5，契约 §2.4f）：管理动作，operator 只读（见 role_allowed）
+        app.router.add_get("/api/profiles", api_profiles)
+        app.router.add_get("/api/profiles/{name}", api_profile_get)
+        app.router.add_post("/api/profiles/{name}", api_profile_save)
+        app.router.add_post("/api/profiles/{name}/apply", api_profile_apply)
+        app.router.add_post("/api/profiles/restore", api_profile_restore)
+        app.router.add_post("/api/profiles/import", api_profile_import)
+        app.router.add_delete("/api/profiles/{name}", api_profile_delete)
+        app.router.add_get("/api/profiles/{name}/export", api_profile_export)
         app.router.add_post("/api/slave/start", api_slave_start)
         app.router.add_post("/api/slave/stop", api_slave_stop)
         app.router.add_post("/api/slave/yx", api_slave_yx)
@@ -1598,6 +2143,8 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
     app.router.add_get("/api/export/session.json", api_export_session)
     app.router.add_get("/api/export/report.html", api_export_report)
     app.router.add_post("/api/export/report.html", api_export_report)
+    # WP8：多格式报告（html|xlsx|pdf，含逐点证据 + 审计流水）
+    app.router.add_get("/api/export/report", api_export_report_multi)
     app.router.add_get("/api/logs", api_logs)
     app.router.add_get("/api/logs/export", api_logs_export)
     app.router.add_get("/api/diagnostics/export", api_diagnostics_export)
@@ -1618,6 +2165,11 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
     app.router.add_get("/api/capture/files", api_capture_files)
     app.router.add_get("/api/capture/download/{name}", api_capture_download)
     app.router.add_post("/api/capture/export", api_capture_export)
+    # WP9：旁路真实网卡抓包（与引擎录制独立）
+    app.router.add_get("/api/sniff/status", api_sniff_status)
+    app.router.add_post("/api/sniff/start", api_sniff_start)
+    app.router.add_post("/api/sniff/stop", api_sniff_stop)
+    app.router.add_get("/api/sniff/export", api_sniff_export)
     app.router.add_post("/api/capture/load", api_capture_load)
     app.router.add_get("/api/capture/frames", api_capture_frames)
     app.router.add_post("/api/capture/diff", api_capture_diff)
@@ -1667,17 +2219,20 @@ async def _run(role: str, host: str = "127.0.0.1", port: int = 8765,
                point_table=None, connection: dict | None = None,
                history_db=None, app_config=None,
                auth_token: str | None = None,
+               auth_config: str | None = None,
                ssl_context: ssl.SSLContext | None = None) -> None:
-    if auth_token is None and host not in ("127.0.0.1", "localhost", "::1"):
+    operators = _load_operators(auth_config)
+    if auth_token is None and operators is None \
+            and host not in ("127.0.0.1", "localhost", "::1"):
         logger.warning(
             "Web UI 监听 %s 且未启用访问令牌：局域网内任何主机都可能调用 REST/WS"
-            "（含遥控、点表下发）。请用 --auth-token <token> 启用认证，"
-            "或改回 --http-host 127.0.0.1。", host)
+            "（含遥控、点表下发）。请用 --auth-token <token> 或 --auth-config <yaml>"
+            " 启用认证，或改回 --http-host 127.0.0.1。", host)
     bridge = EngineBridge(role, point_table=point_table, connection=connection,
                           history_db=history_db, app_config=app_config)
     if role != "bridge":
         bridge.ensure_demo_points()
-    app = create_app(bridge, auth_token=auth_token)
+    app = create_app(bridge, auth_token=auth_token, operators=operators)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, host, port, ssl_context=ssl_context)
@@ -1694,12 +2249,15 @@ async def _run_dual(host: str = "127.0.0.1", port: int = 8765,
                     point_table=None, connection: dict | None = None,
                     history_dbs: dict | None = None, app_config=None,
                     auth_token: str | None = None,
+                    auth_config: str | None = None,
                     ssl_context: ssl.SSLContext | None = None) -> None:
     """单进程双角色：同一端口托管主站 + 子站（子站 API/WS 在 /slave 前缀）.
 
     两个角色的引擎、历史库、日志仍相互独立；普通用户只接触一个 HTTP 端口。
     """
-    if auth_token is None and host not in ("127.0.0.1", "localhost", "::1"):
+    operators = _load_operators(auth_config)
+    if auth_token is None and operators is None \
+            and host not in ("127.0.0.1", "localhost", "::1"):
         logger.warning(
             "Web UI 监听 %s 且未启用访问令牌：局域网内任何主机都可能调用 REST/WS"
             "（含遥控、点表下发）。请用 --auth-token <token> 启用认证，"
@@ -1731,11 +2289,12 @@ async def _run_dual(host: str = "127.0.0.1", port: int = 8765,
 
     schema_roles = ["master", "slave"]
     master_app = create_app(
-        master_bridge, auth_token=auth_token,
+        master_bridge, auth_token=auth_token, operators=operators,
         available_roles=schema_roles, slave_api_prefix="/slave",
     )
     slave_app = create_app(
-        slave_bridge, auth_token=auth_token, path_prefix="/slave",
+        slave_bridge, auth_token=auth_token, operators=operators,
+        path_prefix="/slave",
         available_roles=schema_roles, slave_api_prefix="/slave",
     )
     master_app.add_subapp("/slave", slave_app)
@@ -1753,10 +2312,21 @@ async def _run_dual(host: str = "127.0.0.1", port: int = 8765,
         await runner.cleanup()
 
 
+def _load_operators(auth_config: str | None) -> OperatorRegistry | None:
+    """加载 ``--auth-config`` 用户表；路径无效时拒绝启动（安全配置错误不能静默）."""
+    if not auth_config:
+        return None
+    try:
+        return OperatorRegistry.from_yaml(auth_config)
+    except (OSError, ValueError) as e:
+        raise SystemExit(f"--auth-config 加载失败: {e}") from e
+
+
 def run_server(role: str, host: str = "127.0.0.1", port: int = 8765,
                point_table=None, connection: dict | None = None,
                history_db=None, app_config=None,
                auth_token: str | None = None,
+               auth_config: str | None = None,
                ssl_context: ssl.SSLContext | None = None,
                history_dbs: dict | None = None) -> None:
     """启动 Web 服务（阻塞）.
@@ -1773,6 +2343,8 @@ def run_server(role: str, host: str = "127.0.0.1", port: int = 8765,
             None 时使用默认配置（与改动前行为一致）。
         auth_token: 可选访问令牌；设置后 /api/* 与 /ws 需携带
             ``Authorization: Bearer <token>`` / ``X-Auth-Token`` / ``?token=``。
+        auth_config: 多用户三角色表 YAML（WP4a）；优先于 auth_token 匹配，
+            未命中再回落单 token。
     """
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     try:
@@ -1780,12 +2352,14 @@ def run_server(role: str, host: str = "127.0.0.1", port: int = 8765,
             asyncio.run(_run_dual(
                 host, port, point_table=point_table, connection=connection,
                 history_dbs=history_dbs, app_config=app_config,
-                auth_token=auth_token, ssl_context=ssl_context,
+                auth_token=auth_token, auth_config=auth_config,
+                ssl_context=ssl_context,
             ))
         else:
             asyncio.run(_run(role, host, port, point_table=point_table,
                              connection=connection, history_db=history_db,
                              app_config=app_config, auth_token=auth_token,
+                             auth_config=auth_config,
                              ssl_context=ssl_context))
     except KeyboardInterrupt:
         pass

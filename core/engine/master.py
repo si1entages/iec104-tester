@@ -79,6 +79,7 @@ class MasterEngine(EngineBase):
         t3: float = 20,
         auto_start: bool = True,        # 连接后自动发送STARTDT
         auto_gi: bool = False,           # STARTDT后自动总召唤
+        auto_clock_sync: bool = False,   # WP11a: STARTDT CON 后自动时钟同步
         auto_gi_on_init_end: bool = False,  # 收到初始化结束(COT=4)后自动重总召唤
         # 默认关闭：实测部分真机在收到主站 I 帧后会断开或停摆数据流，
         # 自动重 GI 会造成「重连→EI→GI→被断开」的无限循环。对这类装置请保持
@@ -92,8 +93,13 @@ class MasterEngine(EngineBase):
         ssl_context: ssl.SSLContext | None = None,
         server_hostname: str | None = None,
         redundancy: RedundancyConfig | None = None,
+        file_semantics: Any = None,  # WP3a: FileSemantics | None
     ):
         super().__init__()
+        # WP3a：文件传输语义档位（None=ed1，与历史行为逐字节一致）
+        from ..protocol.file_semantics import ED1
+
+        self._file_semantics = file_semantics if file_semantics is not None else ED1
 
         # 组合组件（构造期注入引擎引用；仅保存引用，不读取尚未初始化的状态）
         self._session = MasterSession(self)
@@ -106,6 +112,7 @@ class MasterEngine(EngineBase):
         self._common_addr = common_addr
         self._auto_start = auto_start
         self._auto_gi = auto_gi
+        self._auto_clock_sync = auto_clock_sync
         self._auto_gi_on_init_end = auto_gi_on_init_end
         self._auto_add_points = auto_add_points
         self._gi_interval = float(gi_interval or 0.0)
@@ -229,6 +236,38 @@ class MasterEngine(EngineBase):
     @property
     def scheduler(self) -> TaskScheduler:
         return self._scheduler
+
+    def link_snapshot(self) -> dict:
+        """链路可观测快照（WP6）：状态机 + 序列 + TCP 重连信息聚合.
+
+        只读、无副作用，供 ``/api/status`` 的 ``link`` 键使用。
+        三段来源不同（状态机/流控/TCP 传输），这里合成一份给界面，
+        避免前端为一次刷新打三个接口。
+        """
+        snap: dict = {"role": "master"}
+        try:
+            snap["state"] = self._state_machine.snapshot()
+        except Exception:  # noqa: BLE001 — 观测接口不得影响状态上报
+            snap["state"] = None
+        try:
+            snap["sequence"] = self._seq.snapshot()
+        except Exception:  # noqa: BLE001
+            snap["sequence"] = None
+        try:
+            snap["transport"] = self._client.link_stats()
+        except Exception:  # noqa: BLE001
+            snap["transport"] = None
+        snap["redundancy"] = self._redundancy_status()
+        return snap
+
+    def _redundancy_status(self) -> dict | None:
+        fn = getattr(self, "redundancy_status", None)
+        if not callable(fn):
+            return None
+        try:
+            return fn()
+        except Exception:  # noqa: BLE001
+            return None
 
     @property
     def history_db(self) -> HistoryDB | None:
@@ -642,6 +681,17 @@ class MasterEngine(EngineBase):
     async def request_file(self, ioa: int, file_name: int) -> None:
         """请求文件（使用文件传输管理器）."""
         await self._protocol.request_file(ioa, file_name)
+
+    async def upload_file(self, ioa: int, file_name: int, data: bytes,
+                          segment_size: int = 200) -> None:
+        """上传文件到子站（WP3c，方向 主站→子站）."""
+        self._file_transfer.start_upload(ioa, file_name, data,
+                                         segment_size=segment_size)
+
+    @property
+    def file_semantics(self):
+        """当前生效的文件传输语义档位（WP3a，只读）."""
+        return self._file_semantics
 
     @property
     def file_transfer_state(self) -> FileTransferState:

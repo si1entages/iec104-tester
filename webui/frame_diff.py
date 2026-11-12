@@ -30,7 +30,7 @@ _DIFF_CAP = 200
 def _sig_i(data: bytes, direction: str) -> str:
     """I 帧签名：APCI 序号剥掉，ASDU 解码（失败回退 undecoded+长度）."""
     try:
-        asdu = ASDU.decode(data[6:], ca_length=2)
+        asdu = ASDU.decode(data[6:])
     except Exception:  # noqa: BLE001 — 脏帧尽力而为
         return f"{direction}|I|undecoded|len={len(data)}"
     parts = [

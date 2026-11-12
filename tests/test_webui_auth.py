@@ -30,7 +30,7 @@ async def _client(auth_token: str | None, role: str = "master") -> TestClient:
 async def test_auth_disabled_passthrough():
     async with await _client(None) as client:
         r = await client.get("/api/auth")
-        assert await r.json() == {"ok": True, "required": False, "valid": True}
+        assert await r.json() == {"ok": True, "required": False, "valid": True, "mode": "none"}
         r = await client.get("/api/status")
         assert r.status == 200
 
@@ -40,7 +40,7 @@ async def test_auth_probe_reports_validity():
     async with await _client(TOKEN) as client:
         r = await client.get("/api/auth")
         body = await r.json()
-        assert body == {"ok": True, "required": True, "valid": False}
+        assert body == {"ok": True, "required": True, "valid": False, "mode": "token"}
 
         r = await client.get("/api/auth", headers={"Authorization": f"Bearer {TOKEN}"})
         assert (await r.json())["valid"] is True

@@ -116,3 +116,7 @@ webui/frontend/.vite/
 
 # ZCode 本地工具配置（会话产物，不入库）
 .zcode/
+.v2c/
+
+# WP5 工程配置方案的运行时状态（活动方案指针）；方案本体 *.yaml 要随仓管理
+configs/profiles/_active.yaml

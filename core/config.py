@@ -7,6 +7,8 @@ from pathlib import Path
 
 import yaml
 
+from core.protocol.address import DEFAULT_ASDU_ADDRESS, AsduAddressConfig
+
 
 @dataclass
 class TimerConfig:
@@ -36,9 +38,20 @@ class ConnectionConfig:
 class MasterConfig:
     auto_start: bool = True
     auto_gi: bool = True
-    # 注：历史上的 auto_clock_sync 字段已移除——引擎无「建链后自动时钟同步」
-    # 能力（时钟同步仅有手动 API），该字段为死配置。含该键的旧配置文件
-    # 仍能正常加载（未知键被 load_config 忽略）。
+    # WP11a：建链后（STARTDT CON）自动时钟同步。历史上该字段是「死配置」
+    # （引擎无自动触发能力），本版在 master_session 的 STARTDT_CON 分支真实接线。
+    # 默认 False = 行为与 v1.10.0 一致（仅手动 /api/master/clock）。
+    auto_clock_sync: bool = False
+
+
+@dataclass
+class ComplianceConfig:
+    """合规监视与解码的阈值（WP11a）：把硬编码提升为显式配置."""
+
+    #: CP56 时标与观察时刻的最大允许偏差（秒），超出记 time-skew 违规
+    max_time_skew_s: float = 300.0
+    #: ASDU 信息体时标格式：auto=按 TypeID 判定 / cp24 / cp56
+    time_tag_format: str = "auto"
 
 
 @dataclass
@@ -69,6 +82,27 @@ class PointTableConfig:
     yc_count: int = 0
     yk_count: int = 0
     ym_count: int = 0
+
+
+@dataclass
+class FileTransferConfig:
+    """文件传输语义档位（WP3a）：把多实现歧义做成显式配置.
+
+    Attributes:
+        profile: ``ed1``（历史默认 / 项目约定）、``ed2``（lib60870.NET +
+            otfabric 共识：目录 COT=REQ(5)、SCQ=0）、``project``（同 ed1，明确命名）。
+        section_size: 从站分包最大节字节数；0=单节（历史行为）。
+        nof_enum: 是否按 Ed.2 枚举校验 NOF；None=跟随档位。
+    """
+    profile: str = "ed1"
+    section_size: int = 0
+    nof_enum: bool | None = None
+
+    def resolve(self):
+        from core.protocol.file_semantics import resolve
+
+        return resolve(self.profile, section_size=self.section_size,
+                       nof_enum=self.nof_enum)
 
 
 @dataclass
@@ -155,9 +189,16 @@ class AppConfig:
     tls: TlsConfig = field(default_factory=TlsConfig)
     # 主站冗余双通道（T21）；仅主站生效，子站/多站 StationConfig 不适用
     redundancy: RedundancyConfig = field(default_factory=RedundancyConfig)
+    # ASDU 地址字段字节数（WP1）：对接 1 字节 CA / 2 字节 IOA 等非标装置。
+    # 默认 2/3/2 与历史硬编码一致；启动时经 set_default() 注入协议层。
+    asdu_address: AsduAddressConfig = field(default_factory=lambda: DEFAULT_ASDU_ADDRESS)
     # 自定义（非标准厂商私有）TypeID 结构定义（T22）：元素形如
     # ``{type_id: 128, name: VendorAlarm, fields: [{name: v, type: u8}]}``。
     custom_types: list = field(default_factory=list)
+    # 文件传输语义档位（WP3a）；默认 ed1 与历史行为逐字节一致。
+    file_transfer: FileTransferConfig = field(default_factory=FileTransferConfig)
+    # 合规监视/时标阈值（WP11a）
+    compliance: ComplianceConfig = field(default_factory=ComplianceConfig)
 
     def save(self, path: str | Path) -> None:
         """保存配置到 YAML."""
@@ -232,7 +273,22 @@ class AppConfig:
                 'switch_timeout': self.redundancy.switch_timeout,
                 'dedup_window': self.redundancy.dedup_window,
             },
+            'asdu_address': {
+                'ca_length': self.asdu_address.ca_length,
+                'ioa_length': self.asdu_address.ioa_length,
+                'cot_length': self.asdu_address.cot_length,
+            },
             'custom_types': list(self.custom_types),
+            'file_transfer': {
+                'profile': self.file_transfer.profile,
+                'section_size': self.file_transfer.section_size,
+                'nof_enum': self.file_transfer.nof_enum,
+            },
+            'compliance': {
+                'max_time_skew_s': self.compliance.max_time_skew_s,
+                'time_tag_format': self.compliance.time_tag_format,
+            },
+            'master_autoclock': self.master.auto_clock_sync,
         }
         with open(path, 'w', encoding='utf-8') as f:
             yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
@@ -320,6 +376,38 @@ def load_config(path: str | Path) -> AppConfig:
     cfg.redundancy.switch_timeout = red.get('switch_timeout', cfg.redundancy.switch_timeout)
     cfg.redundancy.dedup_window = red.get('dedup_window', cfg.redundancy.dedup_window)
 
+    # ASDU 地址字段长度（WP1）。非法值不静默吞掉：AsduAddressConfig 构造时
+    # 抛 ValueError，让错误配置在启动阶段就暴露，而不是在帧解析时错位。
+    aa = data.get('asdu_address', {}) or {}
+    cfg.asdu_address = AsduAddressConfig(
+        ca_length=aa.get('ca_length', DEFAULT_ASDU_ADDRESS.ca_length),
+        ioa_length=aa.get('ioa_length', DEFAULT_ASDU_ADDRESS.ioa_length),
+        cot_length=aa.get('cot_length', DEFAULT_ASDU_ADDRESS.cot_length),
+    )
+
+    ft = data.get('file_transfer', {}) or {}
+    cfg.file_transfer.profile = str(ft.get('profile', cfg.file_transfer.profile))
+    cfg.file_transfer.section_size = int(ft.get('section_size', cfg.file_transfer.section_size))
+    nof = ft.get('nof_enum', cfg.file_transfer.nof_enum)
+    cfg.file_transfer.nof_enum = None if nof is None else bool(nof)
+    # 非法档位名在加载期就报错，不静默退回默认（安全配置错误不能藏）
+    cfg.file_transfer.resolve()
+
+    comp = data.get('compliance', {}) or {}
+    cfg.compliance.max_time_skew_s = float(
+        comp.get('max_time_skew_s', cfg.compliance.max_time_skew_s))
+    cfg.compliance.time_tag_format = str(
+        comp.get('time_tag_format', cfg.compliance.time_tag_format))
+    if cfg.compliance.time_tag_format not in ("auto", "cp24", "cp56"):
+        raise ValueError(
+            f"compliance.time_tag_format 非法：{cfg.compliance.time_tag_format}")
+    # 兼容两种写法：master 节的 auto_clock_sync，或顶层 master_autoclock（save 输出）
+    master_cfg = data.get('master', {}) or {}
+    if 'auto_clock_sync' in master_cfg:
+        cfg.master.auto_clock_sync = bool(master_cfg['auto_clock_sync'])
+    elif 'master_autoclock' in data:
+        cfg.master.auto_clock_sync = bool(data['master_autoclock'])
+
     custom_types = data.get('custom_types', None)
     if isinstance(custom_types, list):
         cfg.custom_types = custom_types
@@ -331,3 +419,32 @@ def load_config(path: str | Path) -> AppConfig:
         ]
 
     return cfg
+
+
+# 方案（WP5）覆盖到 ``AppConfig`` 的节：方案文件本身就是合法 AppConfig YAML，
+# 但只允许覆盖「工程参数」——显示偏好（display）与 TLS/历史库留归 ``--config``，
+# 避免一份方案把证书路径或历史保留期悄悄改掉。
+_PROFILE_SECTIONS = ("connection", "timers", "flow_control", "asdu_address")
+
+
+def apply_profile(cfg: AppConfig, profile_path: str | Path) -> list[str]:
+    """把方案文件的工程参数叠加到 ``cfg`` 上，返回被覆盖的节名列表.
+
+    用于 ``--profile <名称>``：在 ``--config`` 之后、引擎构造之前应用，
+    因此点表文件、ASDU 地址长度（WP1）、t1~t3 等都会走既有加载路径生效。
+
+    只覆盖 :data:`_PROFILE_SECTIONS` 与 ``point_table.file``；文件不存在时
+    抛 ``FileNotFoundError``（显式指定了方案却读不到，不能静默继续）。
+    """
+    path = Path(profile_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"方案文件不存在：{path}")
+    prof = load_config(path)
+    applied: list[str] = []
+    for section in _PROFILE_SECTIONS:
+        setattr(cfg, section, getattr(prof, section))
+        applied.append(section)
+    if prof.point_table.file:
+        cfg.point_table.file = prof.point_table.file
+        applied.append("point_table.file")
+    return applied

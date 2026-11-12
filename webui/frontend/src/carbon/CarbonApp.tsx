@@ -21,6 +21,8 @@ import { useUiStore } from '../store/uiStore'
 import type { PageKey } from '../store/uiStore'
 import { CarbonBridgePage } from './pages/CarbonBridgePage'
 import { CarbonCapturePage } from './pages/CarbonCapturePage'
+import { CarbonAuditPage } from './pages/CarbonAuditPage'
+import { CarbonCommissionPage } from './pages/CarbonCommissionPage'
 import { CarbonHistoryPage } from './pages/CarbonHistoryPage'
 import { CarbonLogsPage } from './pages/CarbonLogsPage'
 import { CarbonMasterPage } from './pages/CarbonMasterPage'
@@ -39,6 +41,8 @@ const PAGES: { key: PageKey; labelKey: MessageKey }[] = [
   { key: 'bridge', labelKey: 'menu.bridge' },
   { key: 'capture', labelKey: 'menu.capture' },
   { key: 'tests', labelKey: 'menu.tests' },
+  { key: 'commission', labelKey: 'menu.commission' },
+  { key: 'audit', labelKey: 'menu.audit' },
 ]
 
 function isPageKey(value: string): value is PageKey {
@@ -147,6 +151,11 @@ export function CarbonApp() {
             const rs = availableRoles.length > 0 ? availableRoles : status?.role ? [status.role] : []
             return rs.includes('bridge')
           }
+          if (key === 'audit' || key === 'commission') {
+            // 对点页需要 104 引擎下发命令；bridge 角色无引擎，隐藏入口
+            const rs = availableRoles.length > 0 ? availableRoles : status?.role ? [status.role] : []
+            return !rs.includes('bridge')
+          }
           if (key !== 'master' && key !== 'slave') return true
           const roles = availableRoles.length > 0 ? availableRoles : status?.role ? [status.role] : []
           return roles.includes(key)
@@ -176,6 +185,8 @@ export function CarbonApp() {
   else if (page === 'capture') content = <CarbonCapturePage />
   else if (page === 'tests') content = <CarbonTestCenterPage />
   else if (page === 'multi') content = <CarbonMultiPage />
+  else if (page === 'commission') content = <CarbonCommissionPage />
+  else if (page === 'audit') content = <CarbonAuditPage />
   else if (page === 'bridge') content = <CarbonBridgePage />
   else content = null
 

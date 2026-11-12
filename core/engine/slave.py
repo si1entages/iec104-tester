@@ -105,6 +105,7 @@ class SlaveEngine(EngineBase):
         event_buffer_size: int = 10000,
         history_db: HistoryDB | None = None,
         ssl_context: ssl.SSLContext | None = None,
+        file_semantics: Any = None,  # WP3a: FileSemantics | None
     ):
         super().__init__()
 
@@ -179,7 +180,12 @@ class SlaveEngine(EngineBase):
         self._errors = 0
 
         # 文件传输管理器
-        self._file_transfer = FileTransferSlave(common_addr)
+        # WP3a：文件传输语义档位（None=ed1，历史单节行为）
+        from ..protocol.file_semantics import ED1
+
+        self._file_semantics = file_semantics if file_semantics is not None else ED1
+        self._file_transfer = FileTransferSlave(
+            common_addr, semantics=self._file_semantics)
         self._file_transfer.set_callbacks(
             on_send_asdu=lambda data: self._spawn(self._broadcast_i_frame(data)),
         )
@@ -234,6 +240,35 @@ class SlaveEngine(EngineBase):
             first_client = next(iter(self._client_states.values()))
             return first_client.seq
         return None
+
+    def link_snapshot(self) -> dict:
+        """链路可观测快照（WP6）：子站侧取**首个客户端的**状态机与序列.
+
+        子站可同时接受多个客户端，逐连接指标不适合塞进单一 status 快照；
+        这里给出首条连接的视图，并附 ``clients`` 计数，多连接场景下
+        精确定位请用桥接观察页或历史报文。
+        """
+        snap: dict = {"role": "slave", "clients": self.client_count}
+        first = next(iter(self._client_states.values()), None)
+        snap["client_id"] = next(iter(self._client_states.keys()), "")
+        if first is None:
+            snap["state"] = None
+            snap["sequence"] = None
+            snap["transport"] = None
+            return snap
+        try:
+            snap["state"] = first.state_machine.snapshot()
+        except Exception:  # noqa: BLE001 — 观测不得影响状态上报
+            snap["state"] = None
+        try:
+            snap["sequence"] = first.seq.snapshot()
+        except Exception:  # noqa: BLE001
+            snap["sequence"] = None
+        try:
+            snap["transport"] = _conn_transport_snapshot(first.conn)
+        except Exception:  # noqa: BLE001
+            snap["transport"] = None
+        return snap
 
     # ── 回调设置 ──────────────────────────────────────────────────
 
@@ -727,3 +762,26 @@ class SlaveEngine(EngineBase):
                                       with_time: bool = False) -> None:
         """成组单点上送（门面 → SlaveSimulator）."""
         await self._sim.send_group_single_point(ioa, points, with_time)
+
+
+def _conn_transport_snapshot(conn) -> dict | None:
+    """子站侧链路传输快照（WP6）：与主站 ``TCPClient.link_stats()`` 同形.
+
+    子站是被动接受连接，没有重连循环，因此 ``reconnect_*`` 恒为 0/None；
+    ``connected``/``last_error`` 取自连接自身统计，保证前端一套字段两处可用。
+    """
+    if conn is None:
+        return None
+    stats = getattr(conn, "stats", None)
+    return {
+        "target": getattr(conn, "name", "") or getattr(conn, "_remote_addr", ""),
+        "connected": bool(conn.is_connected),
+        "tls": False,
+        "reconnect_count": 0,
+        "max_reconnects": 0,
+        "reconnect_interval": 0.0,
+        "reconnect_in_seconds": None,
+        "ever_connected": True,
+        "last_error": getattr(stats, "last_error", "") if stats else "",
+        "last_error_at": getattr(stats, "last_error_at", 0.0) if stats else 0.0,
+    }

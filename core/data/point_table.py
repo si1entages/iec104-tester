@@ -14,6 +14,8 @@ from pathlib import Path
 
 import yaml
 
+from core.engine.interlock import dump_interlock, parse_interlock
+
 
 class PointType(enum.Enum):
     """信息类型."""
@@ -46,6 +48,10 @@ class PointDef:
     enabled: bool = True            # 是否启用
     initial_quality: int = 0        # 初始品质
     tags: dict[str, str] = field(default_factory=dict)  # 自定义标签
+    # 防误操作闭锁（WP4b）：YT/YC/STEP 命令下发前的前置条件（AND 关系）。
+    # 形如 ({ioa: 1001, value: False},) 表示"YX 1001 须为分位"。
+    # 空元组 = 未配置闭锁（默认，行为与历史一致）。
+    interlock: tuple = ()
 
 
 @dataclass
@@ -103,6 +109,12 @@ class StepPointDef(PointDef):
     max_value: int = 63             # 档位上限
     step_size: int = 1              # 单次升降步长
     transient: bool = False         # M_ST 暂态标志 (T 位)
+
+
+def _interlock_field(point: PointDef) -> dict:
+    """导出时写 ``interlock``（仅非空才写，避免污染既有 YAML/黄金文件）."""
+    il = dump_interlock(getattr(point, "interlock", ()) or ())
+    return {"interlock": il} if il else {}
 
 
 class PointTable:
@@ -308,6 +320,7 @@ class PointTable:
                     point_type=YxType(p.get('type', 'single')),
                     initial_value=p.get('initial_value', False),
                     inverted=p.get('inverted', False),
+                    interlock=parse_interlock(p.get('interlock')),
                 )
                 self._yx[point.ioa] = point
 
@@ -326,6 +339,7 @@ class PointTable:
                     scale=p.get('scale', 1.0),
                     offset=p.get('offset', 0.0),
                     decimal_places=p.get('decimal_places', 2),
+                    interlock=parse_interlock(p.get('interlock')),
                 )
                 self._yc[point.ioa] = point
 
@@ -338,6 +352,7 @@ class PointTable:
                     command_type=p.get('type', 'single'),
                     select_before_execute=p.get('sbo', True),
                     timeout_ms=p.get('timeout_ms', 10000),
+                    interlock=parse_interlock(p.get('interlock')),
                 )
                 self._yk[point.ioa] = point
 
@@ -362,6 +377,7 @@ class PointTable:
                     max_value=p.get('max_value', 63),
                     step_size=p.get('step_size', 1),
                     transient=p.get('transient', False),
+                    interlock=parse_interlock(p.get('interlock')),
                 )
                 self._step[point.ioa] = point
 
@@ -380,6 +396,7 @@ class PointTable:
                         'type': p.point_type.value,
                         'initial_value': p.initial_value,
                         'inverted': p.inverted,
+                        **_interlock_field(p),
                     }
                     for p in sorted(self._yx.values(), key=lambda x: x.ioa)
                 ],
@@ -398,6 +415,7 @@ class PointTable:
                         'scale': p.scale,
                         'offset': p.offset,
                         'decimal_places': p.decimal_places,
+                        **_interlock_field(p),
                     }
                     for p in sorted(self._yc.values(), key=lambda x: x.ioa)
                 ],
@@ -410,6 +428,7 @@ class PointTable:
                         'type': p.command_type,
                         'sbo': p.select_before_execute,
                         'timeout_ms': p.timeout_ms,
+                        **_interlock_field(p),
                     }
                     for p in sorted(self._yk.values(), key=lambda x: x.ioa)
                 ],
@@ -434,6 +453,7 @@ class PointTable:
                         'max_value': p.max_value,
                         'step_size': p.step_size,
                         'transient': p.transient,
+                        **_interlock_field(p),
                     }
                     for p in sorted(self._step.values(), key=lambda x: x.ioa)
                 ],

@@ -55,6 +55,10 @@ class ConnectionStats:
     u_frames_received: int = 0
     errors: int = 0
     reconnections: int = 0
+    # WP6 链路可观测：最近一次连接失败原因与时刻（现场排障第一问）
+    last_error: str = ""
+    last_error_at: float = 0.0
+    last_connected_at: float = 0.0
 
 
 class TCPConnection:
@@ -424,6 +428,10 @@ class TCPClient:
         self._running = False
         self._reconnect_task: asyncio.Task | None = None
         self._reconnect_count = 0
+        # WP6：最近一次连接失败原因/时刻（即使从未建连也有记录，供 /api/status 展示）
+        self._last_error = ""
+        self._last_error_at = 0.0
+        self._ever_connected = False
 
     def set_ssl_context(self, ssl_context: ssl.SSLContext | None,
                         server_hostname: str | None = None) -> None:
@@ -446,6 +454,28 @@ class TCPClient:
     @property
     def stats(self) -> ConnectionStats | None:
         return self._connection.stats if self._connection else None
+
+    def link_stats(self) -> dict:
+        """链路只读快照（WP6）：目标、连接态、重连计数与最近失败原因.
+
+        与 ``stats`` 不同，本方法在**未建立连接**时依然可用——正是"连不上"
+        的时候最需要看到原因。
+        """
+        conn = self._connection
+        return {
+            "target": f"{self._host}:{self._port}",
+            "connected": bool(conn is not None and conn.is_connected),
+            "tls": self._ssl_context is not None,
+            "reconnect_count": self._reconnect_count,
+            "max_reconnects": self._max_reconnects,
+            "reconnect_interval": self._reconnect_interval,
+            "reconnect_in_seconds": (
+                None if self._reconnect_count <= 0 else self._reconnect_interval
+            ),
+            "ever_connected": self._ever_connected,
+            "last_error": self._last_error,
+            "last_error_at": self._last_error_at,
+        }
 
     async def start(self) -> None:
         """启动客户端连接."""
@@ -521,6 +551,9 @@ class TCPClient:
 
                 await self._connection.start()
                 self._reconnect_count = 0
+                self._ever_connected = True
+                self._last_error = ""
+                self._connection.stats.last_connected_at = time.time()
                 established = True
 
                 if self._on_connected:
@@ -542,6 +575,12 @@ class TCPClient:
                     self._on_disconnected()
                 break
             except Exception as e:
+                # WP6：保留失败原因文本（类型 + 消息），供链路面板显示"为什么重连"
+                self._last_error = f"{type(e).__name__}: {e}"
+                self._last_error_at = time.time()
+                if self._connection is not None:
+                    self._connection.stats.last_error = self._last_error
+                    self._connection.stats.last_error_at = self._last_error_at
                 logger.error(f"Connection failed: {e}")
 
             # 正常断开路径：通知上层（取消路径已在 except 中通知并 break）

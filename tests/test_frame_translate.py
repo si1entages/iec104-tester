@@ -88,8 +88,11 @@ async def test_frames_decode_endpoint():
             body = await r.json()
             assert body["ok"] is True
             assert body["format"] == "I"
-            # 契约 §2.9 锁定为扁平结构：前端曾误读 r.translation 导致恒报「翻译失败」
-            assert set(body) == {"ok", "format", "segments"}
+            # 契约 §2.9 锁定为扁平结构：前端曾误读 r.translation 导致恒报「翻译失败」。
+            # WP7 起额外带 tree（结构化树），故断言「必含三键 + 无 translation 包裹」。
+            assert {"ok", "format", "segments"} <= set(body)
+            assert "translation" not in body
+            assert body.get("tree") is not None
 
             # 非法 hex → ok=false（HTTP 200，业务错误走 ok 字段）
             r = await client.get("/api/frames/decode", params={"hex": "zz"})
