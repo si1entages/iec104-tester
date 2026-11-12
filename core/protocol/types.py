@@ -5,6 +5,7 @@ from __future__ import annotations
 import enum
 import time
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 # ═══════════════════════════════════════════════════════════════════
 #  Type Identification (类型标识)
@@ -273,9 +274,12 @@ class CP24Time2a:
 
     @classmethod
     def now(cls) -> CP24Time2a:
-        t = time.localtime()
+        # P1-4：保留亚秒精度。旧实现 t.tm_sec * 1000 恒为整秒，丢掉 0-999ms；
+        # millisecond 是「分内毫秒」(0-59999)，秒×1000 的口径不变，只补余数。
+        wall = time.time()
+        t = time.localtime(wall)
         return cls(
-            millisecond=t.tm_sec * 1000,
+            millisecond=t.tm_sec * 1000 + int((wall % 1) * 1000),
             minute=t.tm_min,
         )
 
@@ -291,6 +295,10 @@ class CP56Time2a:
     year: int = 0           # 0-99 (年份后两位)
     weekday: int = 0        # 1-7 (1=周一), bit0-2 of month extra byte
     invalid: bool = False   # IV flag
+
+    # P1-4：年份 0-99 的世纪基准（默认 2000 → 2000-2099，历史行为不变）。
+    # 标准未规定 2 位年份的世纪，2099 后或对接其它约定的装置可类级覆盖。
+    century_base: ClassVar[int] = 2000
 
     @classmethod
     def from_bytes(cls, data: bytes, offset: int = 0) -> CP56Time2a:
@@ -331,9 +339,11 @@ class CP56Time2a:
 
     @classmethod
     def now(cls) -> CP56Time2a:
-        t = time.localtime()
+        # P1-4：保留亚秒精度（同 CP24Time2a.now）。
+        wall = time.time()
+        t = time.localtime(wall)
         return cls(
-            millisecond=t.tm_sec * 1000,
+            millisecond=t.tm_sec * 1000 + int((wall % 1) * 1000),
             minute=t.tm_min,
             hour=t.tm_hour,
             day=t.tm_mday,
@@ -343,16 +353,24 @@ class CP56Time2a:
         )
 
     def to_epoch(self) -> float:
-        """转 epoch 秒（时钟偏差测量 T80 用；年份 0-99 按 2000-2099 解析）."""
+        """转 epoch 秒（时钟偏差测量 T80 用）.
+
+        P1-4：年份 0-99 的世纪基准由类属性 ``century_base`` 决定，默认 2000
+        （即 2000-2099，与历史行为一致，零回归）。2099 年之后或对接使用其它
+        世纪约定的装置时，可设 ``CP56Time2a.century_base = 2100`` 等。
+        仍按本机时区解析（``datetime.timestamp()``），跨时区部署的残余限制
+        见 docs/user_guide.md。
+        """
         from datetime import datetime
 
-        dt = datetime(2000 + self.year, self.month, self.day,
+        dt = datetime(type(self).century_base + self.year, self.month, self.day,
                       self.hour, self.minute, self.millisecond // 1000,
                       self.millisecond % 1000 * 1000)
         return dt.timestamp()
 
     def to_datetime_str(self) -> str:
-        return (f"20{self.year:02d}-{self.month:02d}-{self.day:02d} "
+        # P1-4：年份显示跟随 century_base，不再硬编码 "20" 前缀。
+        return (f"{type(self).century_base + self.year:04d}-{self.month:02d}-{self.day:02d} "
                 f"{self.hour:02d}:{self.minute:02d}:{self.millisecond // 1000:02d}"
                 f".{self.millisecond % 1000:03d}")
 
