@@ -795,3 +795,37 @@ def test_export_json_and_html_with_special_chars():
     assert "&lt;标签&gt;" in export_html(s)
     _, ctype, suffix = export(s, "html")
     assert ctype == "text/html" and suffix == "html"
+
+
+# ── P1 收口：多进程共享库的 WAL 竞争（CI run 43203899666 实证） ──────────
+
+def test_two_stores_same_path_do_not_deadlock_on_wal(tmp_path):
+    """master/slave 两个进程打开同一 commissioning.db 不得抛 database is locked.
+
+    CI 的 e2e-full-flow 起两个真实进程；SQLite 切换 journal_mode=WAL 需要
+    短暂独占锁，旧实现先 WAL 后 busy_timeout，第二个进程直接崩。
+    """
+    from core.data.commission_store import CommissionStore
+
+    db = tmp_path / "commissioning.db"
+    a, b = CommissionStore(db), CommissionStore(db)
+    a.open()
+    b.open()  # 旧实现在此抛 sqlite3.OperationalError: database is locked
+    a.save(CommissionSession(id="s1", name="A"))
+    b.save(CommissionSession(id="s2", name="B"))
+    assert {s["id"] for s in a.list_sessions()} >= {"s1", "s2"}
+    a.close()
+    b.close()
+
+
+def test_audit_store_same_path_two_connections(tmp_path):
+    from core.data.audit import AuditRecord, AuditStore
+
+    db = tmp_path / "audit.db"
+    a, b = AuditStore(db), AuditStore(db)
+    a.open()
+    b.open()  # 同上：WAL 竞争不得让第二个连接崩
+    a.append(AuditRecord(ts=1.0, operator="op", action="gi", result="ok"))
+    assert b.verify()["valid"] is True
+    a.close()
+    b.close()

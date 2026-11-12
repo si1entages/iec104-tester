@@ -24,6 +24,8 @@ from core.data.commissioning import (
     Verdict,
 )
 
+from .sqlite_open import open_sqlite
+
 
 class CommissionStore:
     """验收会话的 SQLite 存储（会话整体 JSON 列，点数级规模，无需分表）."""
@@ -43,14 +45,7 @@ class CommissionStore:
         if path.parent != Path("") and str(path.parent) not in (".", ""):
             path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock:
-            self._conn = sqlite3.connect(
-                self._db_path,
-                check_same_thread=False,
-                detect_types=sqlite3.PARSE_DECLTYPES,
-            )
-            self._conn.execute("PRAGMA journal_mode=WAL")
-            self._conn.execute("PRAGMA synchronous=NORMAL")
-            self._conn.execute("PRAGMA busy_timeout=5000")
+            self._conn = open_sqlite(self._db_path, detect_types=True)
             self._conn.executescript("""
                 CREATE TABLE IF NOT EXISTS commission_sessions (
                     id TEXT PRIMARY KEY,

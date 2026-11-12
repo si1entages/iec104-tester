@@ -25,6 +25,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .sqlite_open import open_sqlite
+
 # 首条记录的 prev_hash（genesis）
 GENESIS_HASH = "0" * 64
 
@@ -125,13 +127,7 @@ class AuditStore:
         if path.parent != Path("") and str(path.parent) not in (".", ""):
             path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock:
-            self._conn = sqlite3.connect(
-                self._db_path,
-                check_same_thread=False,
-            )
-            self._conn.execute("PRAGMA journal_mode=WAL")
-            self._conn.execute("PRAGMA synchronous=NORMAL")
-            self._conn.execute("PRAGMA busy_timeout=5000")
+            self._conn = open_sqlite(self._db_path)
             self._conn.executescript("""
                 CREATE TABLE IF NOT EXISTS audit_records (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -14,7 +14,13 @@
 - P1-5：baseline.json 扩面（ci_jobs/覆盖率/e2e/SECURITY 版本表守卫）、
   4xx 错误响应新增 code/field/request_id。
 - CI 修复：mutation_smoke 适配 WP1 后的 CA 解码锚点（12/12 全杀死）。
-当前后端 2153 passed / 覆盖率 91.52%、前端 179 passed、ruff/版本守卫全绿。
+- P1 收口修复（CI run 43203899666 实证的现场缺陷）：e2e-full-flow 起
+  master/slave 两个进程时，`commissioning.db` / `audit.db` 的
+  `PRAGMA journal_mode=WAL` 互锁 → slave 崩 `database is locked`。
+  新增 `core/data/sqlite_open.py`：先 busy_timeout、WAL 竞争时安全降级
+  （WAL 只是性能优化），不改库文件名以免升级后旧数据丢失；
+  补 2 例同路径双连接 + 真实双进程复现测试。
+当前后端 2155 passed / 覆盖率 91.46%、前端 179 passed、ruff/版本守卫全绿。
 docs/baseline.json 仍记录 v1.11.0 发布基线（2121/91.49%），开发期不上移。 -->
 
 ## [1.11.0] — 2026-11-12
