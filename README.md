@@ -291,6 +291,7 @@ python tools/mutation_smoke.py          # 协议层变异冒烟（12/12 必须�
 ```
 
 - 当前基线：**2121 passed，4 deselected**（v1.11.0 已发布）+ 前端单测 **179 passed** + Playwright e2e **63 passed**（页级门禁：巡检/对比度/非文本对比在 **Carbon 与 PatternFly 上各跑一遍**、桥接页走 8769 专项巡检，`E2E_KITS=pf,carbon` 可裁剪）；CI 口径 `--cov=core --cov=webui --cov-branch --cov-fail-under=91` 合并 **91.49%**（门禁 91%，webui 独立门禁 85%）
+  - **覆盖率口径（P1-3 明确）**：91% 只统计 `core/` + `webui/` 两个包的**分支**覆盖；`app.py` 与 5 个顶层 CLI 不在该口径内（由 `tests/test_entrypoints.py` 单独做 `--help`/编译/import 冒烟），前端 `src/pf/**`、`src/carbon/**`、`src/kit/**` 共 71 个 UI 源文件按设计整目录排除（jsdom 无法验证真实渲染，交给 8 个 Playwright 页级门禁看护），前端单测阈值另设为 55/58/50/53。不要把 91% 读作「全仓行覆盖率」。
 - 20 客户端并发实测约 **2.9k 帧/秒**；2h soak 实测 **7200s / 34,765 次 GI / 内存 +0.64 MB**
 - 互操作语料库：`tests/fixtures/frames/`（合成基线 + `real/` 真机目录），
   `tests/test_frame_corpus_replay.py` 做 golden 解码与主站回放回归；

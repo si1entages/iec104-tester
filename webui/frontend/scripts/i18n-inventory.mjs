@@ -6,11 +6,12 @@
  *   npm run i18n:inventory
  *
  * 输出：仍含中文 UI 文案的文件与行数（升序排列），以及总数。
+ * 退出码：清单为 0 → 0；非 0 → 1（P1-3 起作为 CI 静态门禁，
+ *   防止新增硬编码中文回退；用 ``i18n-ignore`` / ``i18n-ignore-file`` 显式豁免）。
  * 说明：
  *  - i18n 目录自身与 *.test.* 不计入；
  *  - 注释（//、块注释、JSX {/* *\/}）不计入；
  *  - 行内标注 `i18n-ignore` 的行不计入（如语言切换的原生名称）。
- * 本脚本不失败退出——它是迁移看板，不是门禁。
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
@@ -85,4 +86,8 @@ for (const [count, file] of rows) {
   console.log(`${String(count).padStart(4)}  ${file}`)
 }
 console.log(`\n合计 ${rows.length} 个文件 / ${total} 行`)
-console.log('（全站 i18n 已完成：清单应为 0；新增硬编码文案会重新出现在上面）')
+if (total > 0) {
+  console.log('i18n 门禁失败：存在硬编码中文 UI 文案，请用 t() 或加 i18n-ignore 豁免。')
+  process.exit(1)
+}
+console.log('（全站 i18n 已完成：清单为 0；新增硬编码文案会让本门禁失败）')

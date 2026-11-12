@@ -120,7 +120,12 @@ CI（ubuntu runner）上每次 push/PR 自动运行，与既有 lint/test/fronte
 - 视觉回归：`visual.spec.ts` 用专用单角色服务 8768（无引擎/无帧/无历史）截
   浅/深主站工作台 + 状态总览整页基线；**当前平台有基线就会自动跑**（Windows 基线
   已入库，`windows-build` job 执行），没有基线的平台自动 skip。基线按平台存在
-  `specs/__screenshots__/<platform>/`：
+  `specs/__screenshots__/<platform>/`。
+  > **P1-3 已知缺口（如实标注）**：当前仅 `win32/` 有基线，
+  > Linux `frontend-e2e` job 的 3 个视觉用例会静默 skip。补 Linux 基线必须在
+  > **Linux + chromium** 上用 `VISUAL_UPDATE=1 --update-snapshots` 真实渲染生成
+  > 并人工 review，不能用 Windows PNG 复制改名（字体/抗锯齿差异会制造假回归）。
+  > 该项待 Linux runner 窗口，属增强项、不阻塞发布。
 
   ```bash
   # 校验当前平台（有基线时）
