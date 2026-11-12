@@ -10,7 +10,9 @@
   引擎/传输层日志零改动即可被收纳（不重复造轮子）
 
 级别沿用 logging 标准: DEBUG < INFO < WARNING < ERROR < CRITICAL。
-类别（category）用于业务过滤: connection / protocol / command / data / ui / system。
+类别（category）用于业务过滤: connection / protocol / command / data / ui /
+security / system。``security``（P1-1）专收认证失败、越权拒绝、跨源拒绝等
+安全事件，与命令审计链互补（后者只记录已放行的操作）。
 
 用法:
     mgr = LogManager(source="slave", log_dir="logs")
@@ -30,7 +32,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 LEVEL_ORDER = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40, "CRITICAL": 50}
-DEFAULT_CATEGORIES = ("connection", "protocol", "command", "data", "ui", "system")
+DEFAULT_CATEGORIES = ("connection", "protocol", "command", "data", "ui",
+                      "security", "system")
 
 
 @dataclass
@@ -227,6 +230,8 @@ class _PythonLogBridge(logging.Handler):
         "master": "protocol",
         "slave": "protocol",
         "webui": "ui",
+        # P1-1：iec104.security.* 的认证/越权/跨源事件单列可过滤。
+        "security": "security",
     }
 
     def __init__(self, manager: LogManager) -> None:

@@ -219,10 +219,14 @@ python app.py --mode master --http-host 0.0.0.0
   浏览器首次打开会弹出令牌输入框，也可用
   `http://<host>:<port>/app/?token=<token>` 一次性导入（随后令牌从地址栏移除，
   保存在浏览器 localStorage）。
-- 令牌携带形态：`Authorization: Bearer <token>`、`X-Auth-Token: <token>`、
-  `?token=<token>`（WS 必须用 query）。缺失/错误返回 401。
-- **未设置令牌却监听非回环地址**时，启动日志会打印醒目告警：局域网内任何主机
-  都能调用遥控/点表下发等接口。生产网络请勿如此部署。
+- 令牌携带形态（REST）：`Authorization: Bearer <token>`、`X-Auth-Token: <token>`。
+  **P1-1 起 REST 端点不再接受 `?token=`**；仅 `/ws` 握手（无法自定义头）与
+  `/api/auth` 公开探测仍接受 query。缺失/错误返回 401，跨源（带 Origin）返回 403。
+  认证失败、越权、跨源拒绝会写入 `security` 类别日志。
+- **未设置认证却监听非回环地址时，服务拒绝启动**（退出码 2），不再是仅告警：
+  请加 `--auth-token` / `--auth-config`，或改回 `--http-host 127.0.0.1`。
+  仅在物理隔离的测试网确需无认证暴露时，才显式加 `--allow-insecure`。
+  `?token=` 仅剩 WS 握手这一处残余面，跨主机部署请务必同时启用 HTTPS。
 - **HTTPS（推荐与令牌同时启用）**：`--web-tls-cert certs/server.pem --web-tls-key certs/server.key`
   让 Web UI 走 HTTPS（最低 TLS 1.2），避免令牌与遥控命令在局域网明文传输。
   所有响应同时带 CSP / X-Frame-Options / Referrer-Policy / Permissions-Policy 头。

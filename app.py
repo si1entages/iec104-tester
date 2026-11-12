@@ -123,7 +123,8 @@ def run_web(role: str, http_port: int | None = None, open_browser: bool = True,
             auth_config: str | None = None,
             web_tls_cert: str | None = None,
             web_tls_key: str | None = None,
-            history_dbs: dict | None = None) -> None:
+            history_dbs: dict | None = None,
+            allow_insecure: bool = False) -> None:
     """启动 Web 服务（阻塞）并在就绪后打开浏览器.
 
     Args:
@@ -160,12 +161,13 @@ def run_web(role: str, http_port: int | None = None, open_browser: bool = True,
     url = f"{scheme}://{browse_host}:{port}/"
 
     if http_host not in ("127.0.0.1", "localhost", "::1"):
-        print(
-            f"Web UI 监听 {http_host}:{port}（非本地回环）——"
-            + ("已启用访问令牌认证" if auth_token
-               else "未启用认证！请使用 --auth-token 或改回 127.0.0.1"),
-            flush=True,
-        )
+        if auth_token or auth_config:
+            state = "已启用访问认证"
+        elif allow_insecure:
+            state = "未启用认证（--allow-insecure 已显式放行，仅限隔离测试网）"
+        else:
+            state = "未启用认证，启动将被拒绝（请加 --auth-token/--auth-config）"
+        print(f"Web UI 监听 {http_host}:{port}（非本地回环）——{state}", flush=True)
     if auth_token:
         print(
             f"Web UI 认证已启用：首次打开会提示输入令牌；也可直接访问 "
@@ -185,7 +187,11 @@ def run_web(role: str, http_port: int | None = None, open_browser: bool = True,
                    history_dbs=history_dbs,
                    app_config=engine_config, auth_token=auth_token,
                    auth_config=auth_config,
-                   ssl_context=ssl_context)
+                   ssl_context=ssl_context,
+                   allow_insecure=allow_insecure)
+    except RuntimeError as e:
+        print(f"Web UI 拒绝启动：{e}", file=sys.stderr, flush=True)
+        raise SystemExit(2) from e
     except KeyboardInterrupt:
         pass
 
@@ -554,6 +560,11 @@ def cli(default_role: str | None = None) -> int:
              "未命中时回落 --auth-token"
     )
     parser.add_argument(
+        "--allow-insecure", action="store_true",
+        help="显式允许「非回环监听 + 无认证」启动（默认拒绝，P1-1 安全强制化）。"
+             "仅限隔离测试网；生产/现场局域网必须配 --auth-token 或 --auth-config"
+    )
+    parser.add_argument(
         "--web-tls-cert", type=str, default=None,
         help="Web UI HTTPS 证书 (PEM)；设置后 Web 服务以 HTTPS 监听"
     )
@@ -840,7 +851,8 @@ def cli(default_role: str | None = None) -> int:
                 history_db=history_db, history_dbs=history_dbs, engine_config=config,
                 http_host=args.http_host, auth_token=args.auth_token,
                 auth_config=getattr(args, "auth_config", None),
-                web_tls_cert=args.web_tls_cert, web_tls_key=args.web_tls_key)
+                web_tls_cert=args.web_tls_cert, web_tls_key=args.web_tls_key,
+                allow_insecure=getattr(args, "allow_insecure", False))
         return 0
     finally:
         # 保证异常路径也会关闭历史数据库（合并模式两个角色各一个）

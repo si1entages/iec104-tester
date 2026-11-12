@@ -28,6 +28,17 @@ from .events import SCHEMA_VERSION
 from .frame_translate import translate_hex
 
 logger = logging.getLogger("iec104.webui")
+# P1-1：安全事件专用 logger，经 LogManager 的 _PythonLogBridge 归入 security 类别。
+security_logger = logging.getLogger("iec104.security")
+
+
+def _security_log(event: str, request: web.Request, path: str, **fields) -> None:
+    """记录认证/越权/跨源拒绝（不含令牌本身，避免二次泄漏）."""
+    security_logger.warning(
+        "%s path=%s method=%s remote=%s %s",
+        event, path, request.method, request.remote or "",
+        " ".join(f"{k}={v}" for k, v in fields.items()),
+    )
 STATIC = Path(__file__).parent / "static"
 # 新前端（Vite/React）构建产物目录：webui/static/app/（T10）。
 # 旧原生页（master.html/slave.html/js/css）已于 T19 退役并删除。
@@ -91,6 +102,43 @@ async def security_headers(request: web.Request, handler) -> web.Response:
     return resp
 
 
+def _same_origin(request: web.Request) -> bool:
+    """校验 Origin 与 Host 同源（P1-1 WebSocket 跨站劫持防护）。
+
+    - 无 Origin 头（非浏览器客户端 / aiohttp TestClient / CLI）放行，保持兼容；
+    - 有 Origin 时必须与请求的 scheme://host 完全一致；否则拒绝。
+    浏览器发起的跨站 WebSocket 握手一定带 Origin，因此可挡住 CSWSH；
+    同源的 REST .fetch 不受影响。
+    """
+    origin = request.headers.get("Origin")
+    if not origin or origin == "null":
+        return True
+    from urllib.parse import urlsplit
+
+    o = urlsplit(origin)
+    if not o.hostname:
+        return True
+    # request.host 已含端口；Origin 缺省端口按 scheme 补齐后比较 netloc。
+    default_port = 443 if o.scheme == "https" else 80
+    origin_netloc = f"{o.hostname.lower()}:{o.port or default_port}"
+    host = request.host.lower()
+    if ":" not in host:
+        host = f"{host}:{443 if request.scheme == 'https' else 80}"
+    return o.scheme == request.scheme and origin_netloc == host
+
+
+@web.middleware
+async def origin_check(request: web.Request, handler) -> web.Response:
+    """对所有 /api/* 与 /ws 请求做 Origin 同源校验（有头才校验）."""
+    if (request.path.startswith("/api/") or request.path.endswith("/ws")) \
+            and not _same_origin(request):
+        _security_log("跨源拒绝", request, request.path,
+                      reason="origin-mismatch", origin=request.headers.get("Origin", ""))
+        return web.json_response({"ok": False, "error": "cross-origin request rejected"},
+                                 status=403)
+    return await handler(request)
+
+
 def create_web_ssl_context(certfile: str, keyfile: str | None = None) -> ssl.SSLContext:
     """构造 Web UI 的 TLS 服务端上下文（E4：HTTPS 监听）.
 
@@ -118,15 +166,19 @@ async def no_cache_pages(request: web.Request, handler) -> web.Response:
     return resp
 
 
-def _extract_token(request: web.Request) -> str:
+def _extract_token(request: web.Request, *, allow_query: bool = False) -> str:
     """从请求中提取访问令牌：Bearer 头 > X-Auth-Token 头 > ?token= 查询参数.
 
-    WS 无法自定义请求头，浏览器侧必须用 query 形态；REST 优先用请求头。
+    P1-1：REST 端点 ``allow_query=False``，令牌只能走请求头，避免落进
+    浏览器历史 / 代理日志 / Referer；WS 握手无法自定义请求头，仍允许
+    ``?token=``（该残余风险在 SECURITY.md 明确标注）。
     """
     header = request.headers.get("Authorization", "")
     if header.lower().startswith("bearer "):
         return header[7:].strip()
-    return request.headers.get("X-Auth-Token", "") or request.query.get("token", "")
+    return request.headers.get("X-Auth-Token", "") or (
+        request.query.get("token", "") if allow_query else ""
+    )
 
 
 def _validate_redundancy(cfg: dict) -> str | None:
@@ -224,7 +276,7 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
             return await handler(request)
         if path == "/api/auth":
             return await handler(request)
-        provided = _extract_token(request)
+        provided = _extract_token(request, allow_query=(path == "/ws"))
         identity = None
         if operators is not None:
             identity = operators.authenticate(provided)
@@ -233,9 +285,14 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
             # 兼容模式：单 token = 匿名管理员；X-Operator 头补充操作人姓名
             identity = _make_compat_identity(request)
         if identity is None:
+            _security_log("认证失败", request, path,
+                          reason="missing-or-invalid-token")
             return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
         _set_identity(identity)
         if not _role_allowed(identity.role, request.method, path):
+            _security_log("越权拒绝", request, path,
+                          reason="role-not-allowed", operator=identity.name,
+                          role=identity.role)
             return web.json_response(
                 {"ok": False, "error": f"forbidden: 角色 {identity.role} 无权执行 {request.method} {path}"},
                 status=403)
@@ -246,7 +303,8 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
             _set_intent(None)
             _set_identity(None)
 
-    app = web.Application(middlewares=[security_headers, no_cache_pages, token_auth])
+    app = web.Application(middlewares=[security_headers, no_cache_pages,
+                                       origin_check, token_auth])
 
     async def index(request: web.Request) -> web.Response:
         """旧原生页（master.html/slave.html）已退役（T19）：一律进新前端 /app/."""
@@ -325,7 +383,10 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
         if operators is not None:
             mode = "users"
         if required:
-            provided = _extract_token(request)
+            # /api/auth 是公开探测端点，只回布尔与身份展示，不执行任何操作；
+            # 允许 ?token= 以保留「/app/?token= 首次导入」既有流程。
+            # 其余 REST 端点在 token_auth 中间件里一律只认请求头。
+            provided = _extract_token(request, allow_query=True)
             if operators is not None:
                 ident = operators.authenticate(provided)
                 if ident is None and auth_token and provided \
@@ -2215,19 +2276,43 @@ def create_app(bridge: EngineBridge, auth_token: str | None = None, *,
     return app
 
 
+_LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
+
+
+def _require_auth_on_non_loopback(host: str, auth_token: str | None,
+                                  operators: OperatorRegistry | None,
+                                  allow_insecure: bool) -> None:
+    """非回环监听且未启用认证时拒绝启动（P1-1 安全强制化）。
+
+    v1.10.0 及之前只打 WARNING 照常启动，导致 ``--http-host 0.0.0.0`` 时
+    局域网内任何主机都能调用遥控/置数/点表导入端点，与 SECURITY.md 的
+    「必须设置 --auth-token」措辞不一致。现在改为 fail-fast；确需在隔离
+    测试网无认证暴露时，显式加 ``--allow-insecure`` 才放行（并保留告警）。
+    回环（含 --demo / CI / e2e）行为完全不变。
+    """
+    if auth_token or operators is not None or host in _LOOPBACK_HOSTS:
+        return
+    if allow_insecure:
+        logger.warning(
+            "Web UI 监听 %s 且未启用认证（--allow-insecure 已显式放行）："
+            "局域网内任何主机都可能调用 REST/WS（含遥控、点表下发）。", host)
+        return
+    raise RuntimeError(
+        f"Web UI 监听 {host}（非本地回环）但未启用认证：拒绝启动。"
+        "请设置 --auth-token / --auth-config，或改回 --http-host 127.0.0.1；"
+        "仅在隔离测试网确需无认证暴露时才加 --allow-insecure。"
+    )
+
+
 async def _run(role: str, host: str = "127.0.0.1", port: int = 8765,
                point_table=None, connection: dict | None = None,
                history_db=None, app_config=None,
                auth_token: str | None = None,
                auth_config: str | None = None,
-               ssl_context: ssl.SSLContext | None = None) -> None:
+               ssl_context: ssl.SSLContext | None = None,
+               allow_insecure: bool = False) -> None:
     operators = _load_operators(auth_config)
-    if auth_token is None and operators is None \
-            and host not in ("127.0.0.1", "localhost", "::1"):
-        logger.warning(
-            "Web UI 监听 %s 且未启用访问令牌：局域网内任何主机都可能调用 REST/WS"
-            "（含遥控、点表下发）。请用 --auth-token <token> 或 --auth-config <yaml>"
-            " 启用认证，或改回 --http-host 127.0.0.1。", host)
+    _require_auth_on_non_loopback(host, auth_token, operators, allow_insecure)
     bridge = EngineBridge(role, point_table=point_table, connection=connection,
                           history_db=history_db, app_config=app_config)
     if role != "bridge":
@@ -2250,18 +2335,14 @@ async def _run_dual(host: str = "127.0.0.1", port: int = 8765,
                     history_dbs: dict | None = None, app_config=None,
                     auth_token: str | None = None,
                     auth_config: str | None = None,
-                    ssl_context: ssl.SSLContext | None = None) -> None:
+                    ssl_context: ssl.SSLContext | None = None,
+                    allow_insecure: bool = False) -> None:
     """单进程双角色：同一端口托管主站 + 子站（子站 API/WS 在 /slave 前缀）.
 
     两个角色的引擎、历史库、日志仍相互独立；普通用户只接触一个 HTTP 端口。
     """
     operators = _load_operators(auth_config)
-    if auth_token is None and operators is None \
-            and host not in ("127.0.0.1", "localhost", "::1"):
-        logger.warning(
-            "Web UI 监听 %s 且未启用访问令牌：局域网内任何主机都可能调用 REST/WS"
-            "（含遥控、点表下发）。请用 --auth-token <token> 启用认证，"
-            "或改回 --http-host 127.0.0.1。", host)
+    _require_auth_on_non_loopback(host, auth_token, operators, allow_insecure)
     dbs = history_dbs or {}
     master_bridge = EngineBridge(
         "master",
@@ -2328,7 +2409,8 @@ def run_server(role: str, host: str = "127.0.0.1", port: int = 8765,
                auth_token: str | None = None,
                auth_config: str | None = None,
                ssl_context: ssl.SSLContext | None = None,
-               history_dbs: dict | None = None) -> None:
+               history_dbs: dict | None = None,
+               allow_insecure: bool = False) -> None:
     """启动 Web 服务（阻塞）.
 
     Args:
@@ -2342,9 +2424,12 @@ def run_server(role: str, host: str = "127.0.0.1", port: int = 8765,
             提供 TLS、冗余等配置经 EngineBridge → EngineSession 生效。
             None 时使用默认配置（与改动前行为一致）。
         auth_token: 可选访问令牌；设置后 /api/* 与 /ws 需携带
-            ``Authorization: Bearer <token>`` / ``X-Auth-Token`` / ``?token=``。
+            ``Authorization: Bearer <token>`` / ``X-Auth-Token``（REST 不再接受
+            ``?token=``；WS 握手仍可用 query）。
         auth_config: 多用户三角色表 YAML（WP4a）；优先于 auth_token 匹配，
             未命中再回落单 token。
+        allow_insecure: 显式允许「非回环 + 无认证」启动（P1-1）。默认 False：
+            此时 ``_require_auth_on_non_loopback`` 直接抛 RuntimeError 拒绝启动。
     """
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     try:
@@ -2353,13 +2438,14 @@ def run_server(role: str, host: str = "127.0.0.1", port: int = 8765,
                 host, port, point_table=point_table, connection=connection,
                 history_dbs=history_dbs, app_config=app_config,
                 auth_token=auth_token, auth_config=auth_config,
-                ssl_context=ssl_context,
+                ssl_context=ssl_context, allow_insecure=allow_insecure,
             ))
         else:
             asyncio.run(_run(role, host, port, point_table=point_table,
                              connection=connection, history_db=history_db,
                              app_config=app_config, auth_token=auth_token,
                              auth_config=auth_config,
-                             ssl_context=ssl_context))
+                             ssl_context=ssl_context,
+                             allow_insecure=allow_insecure))
     except KeyboardInterrupt:
         pass

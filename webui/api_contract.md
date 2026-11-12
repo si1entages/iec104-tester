@@ -548,8 +548,13 @@
 
 > 服务端以 `--auth-token`（或环境变量 `IEC104_AUTH_TOKEN`）启动时，**除本端点外**
 > 所有 `/api/*` 与 `/ws` 均需携带令牌，缺失/错误返回 **401** `{ok:false, error:"unauthorized"}`。
-> 三种携带形态：`Authorization: Bearer <token>`、`X-Auth-Token: <token>`、`?token=<token>`
-> （WS 无法自定义头，浏览器必须用 query）。静态页 `/app/*` 不拦截，供前端弹出令牌输入框。
+> 两种请求头形态：`Authorization: Bearer <token>`、`X-Auth-Token: <token>`。
+> **P1-1 起 REST 端点不再接受 `?token=`**（避免令牌落入历史/代理日志/Referer）；
+> 仅 `/ws` 握手（无法自定义头）与本公开探测端点（只回布尔，保留
+> `/app/?token=` 首次导入）仍接受 query。静态页 `/app/*` 不拦截，供前端弹出令牌输入框。
+> 带 `Origin` 头的跨源 `/api/*` 与 `/ws` 请求返回 **403**
+> `{ok:false, error:"cross-origin request rejected"}`；无 Origin 的非浏览器客户端放行。
+> 认证失败/越权/跨源拒绝写 `security` 类别日志（不含令牌本身）。
 > 未配置令牌时本端点返回 `required=false, valid=true`，其余行为与旧版一致。
 
 | 方法 | 路径 | 请求 | 响应 |
