@@ -9,12 +9,12 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.11.0-blue.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.12.0-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/WebUI-aiohttp%20%2B%20React19-41CD52" alt="Web UI">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/IEC--104-72%20TypeIDs-brightgreen.svg" alt="IEC 104">
-  <img src="https://img.shields.io/badge/Tests-2121%20passed-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-2155%20passed-brightgreen.svg" alt="Tests">
 </p>
 
 ---
@@ -26,10 +26,12 @@ import, a transparent bridge with bypass compliance monitoring and chaos injecti
 packet capture/replay, YAML scripted tests, load-test orchestration, test-report export,
 TLS encryption and a history DB.
 
-> Release baseline **v1.11.0** (2026-11-12) — field-ready: commissioning / point-to-point
-> acceptance records (signable exports), configurable ASDU address lengths, operation audit
-> + anti-misoperation interlock, multi-section / upload-direction file transfer, engineering
-> profiles, link-parameter observability, native Excel/PDF reports. Per-version details in
+> Release baseline **v1.12.0** (2026-11-12) — field hardening: auth enforced for
+> non-loopback exposure (fail-fast + `--allow-insecure`), Origin same-origin checks and
+> REST token tightening, dependency SCA gate (8 aiohttp CVEs fixed), i18n / entrypoint
+> gate hardening, sub-second time tags with a configurable century base, and machine-readable
+> 4xx error codes. The field-ready commissioning/audit/interlock scope ships in v1.11.0.
+> Per-version details in
 > [`CHANGELOG.md`](CHANGELOG.md); delivered scope and the next iteration in
 > [`PROJECT.md`](PROJECT.md).
 
@@ -148,8 +150,8 @@ TLS encryption and a history DB.
   points/history stats as a ZIP (status-page button or `GET /api/diagnostics/export`)
 - **One-command loopback demo**: `python app.py --demo`
 - Quality gates: interop corpus replay, Hypothesis fuzz, 20-client concurrency,
-  2-hour loopback soak, combined branch coverage **91.3%** (gate 91%, separate webui gate
-  85%), 12/12 mutation smoke killed
+  2-hour loopback soak, combined branch coverage **91.46%** (gate 91%, separate webui gate
+  85%), 12/12 mutation smoke killed, dependency SCA (pip-audit hard gate), i18n static gate
 - Multi-station (`run_multi_station.py`), network fault injection (status-page card /
   `sim_tool.py`), YAML scripted tests (`run_tests.py`)
 - **Test report export** (self-contained HTML with frame evidence, conclusion banner and
@@ -251,11 +253,11 @@ python tests/e2e/qa_real_device.py
 python tools/mutation_smoke.py
 ```
 
-- Baseline: **2121 passed, 4 deselected** (v1.11.0 released) + frontend unit tests
+- Baseline: **2155 passed, 4 deselected** (v1.12.0 released) + frontend unit tests
   **179 passed** + Playwright e2e **63 passed** (page-level gates — audit / contrast /
   non-text contrast — run on **both Carbon and PatternFly**; the bridge page is swept via
   the dedicated 8769 server; tunable via `E2E_KITS=pf,carbon`); combined branch coverage
-  **91.49%** (CI scope `--cov=core --cov=webui --cov-branch --cov-fail-under=91`;
+  **91.46%** (CI scope `--cov=core --cov=webui --cov-branch --cov-fail-under=91`;
   separate webui gate 85%)
 - 20-client concurrency: about **2.9k frames/s**; 2-hour soak: **7200s / 34,765 GI /
   +0.64 MB memory**

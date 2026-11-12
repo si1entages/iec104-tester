@@ -9,21 +9,22 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.11.0-blue.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.12.0-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/WebUI-aiohttp%20%2B%20React19-41CD52" alt="Web UI">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/IEC--104-72%20TypeIDs-brightgreen.svg" alt="IEC 104">
-  <img src="https://img.shields.io/badge/Tests-2121%20passed-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-2155%20passed-brightgreen.svg" alt="Tests">
 </p>
 
 ---
 
 工业级 IEC 60870-5-104 协议测试工具：主站/子站**单页浏览器工作台**（浏览器为唯一界面，同一进程、同一端口内切换主站/子站），协议引擎完整；附三套可即时切换的 UI、SCD 点表导入、透明桥与旁路合规监视、报文录制回放、YAML 自动化测试、压测编排、测试报告导出、TLS 传输加密与历史库。
 
-> 版本说明：当前发布基线 **v1.11.0**（2026-11-12）——现场工程可用：对点/传动验收闭环（可签字导出）、
-> ASDU 地址长度可配、操作审计 + 防误操作闭锁、文件传输多节/上传方向、工程配置方案、链路参数可观测、
-> 原生 Excel/PDF 报告。逐版特性见
+> 版本说明：当前发布基线 **v1.12.0**（2026-11-12）——现场纵深：非回环无认证拒绝启动、
+> Origin 同源校验与 REST 令牌收口、依赖 SCA 门禁（aiohttp 8 CVE 修复）、i18n/入口层
+> 门禁补真、时标亚秒与世纪基准可配、4xx 错误码可诊断。现场工程可用能力（对点/传动
+> 验收闭环、审计+闭锁、非标地址、文件传输完工等）见 v1.11.0。逐版特性见
 > [`CHANGELOG.md`](CHANGELOG.md)；已交付能力与后续计划见 [`PROJECT.md`](PROJECT.md)。
 
 ### 界面预览
@@ -100,7 +101,7 @@
 - **报文导出**：`.i104` / `.json` / **pcap / pcapng**（Wireshark 可直接打开）
 - **一键诊断包**：状态/配置（私钥脱敏）/日志/报文/事件/点表/历史统计打包下载（状态页按钮或 `GET /api/diagnostics/export`）
 - **一键环回演示**：`python app.py --demo`（本机子站+主站自动监听/连接/总召）
-- 质量门禁：互操作语料库回放、Hypothesis fuzz、20 客户端并发、2h 环回 soak、分支覆盖合并 91.1%（门禁 91%，webui 独立门禁 85%）、协议层变异 12/12、UI 巡检/对比度/非文本对比三门禁覆盖桥接页（PF 伪元素边框 780 处检查）
+- 质量门禁：互操作语料库回放、Hypothesis fuzz、20 客户端并发、2h 环回 soak、分支覆盖合并 91.46%（门禁 91%，webui 独立门禁 85%）、协议层变异 12/12、依赖 SCA（pip-audit 硬门禁）、i18n 静态门禁、UI 巡检/对比度/非文本对比三门禁覆盖桥接页（PF 伪元素边框 780 处检查）
 - 多站并发（`run_multi_station.py`）、网络异常模拟（**Web 状态页卡片** / `sim_tool.py`）、YAML 自动化测试（`run_tests.py`）
 
 ### 打包与发布
@@ -290,7 +291,7 @@ python tests/e2e/qa_full_flow.py        # 全流程验收（12 阶段；CI job e
 python tools/mutation_smoke.py          # 协议层变异冒烟（12/12 必须被杀死）
 ```
 
-- 当前基线：**2121 passed，4 deselected**（v1.11.0 已发布）+ 前端单测 **179 passed** + Playwright e2e **63 passed**（页级门禁：巡检/对比度/非文本对比在 **Carbon 与 PatternFly 上各跑一遍**、桥接页走 8769 专项巡检，`E2E_KITS=pf,carbon` 可裁剪）；CI 口径 `--cov=core --cov=webui --cov-branch --cov-fail-under=91` 合并 **91.49%**（门禁 91%，webui 独立门禁 85%）
+- 当前基线：**2155 passed，4 deselected**（v1.12.0 已发布）+ 前端单测 **179 passed** + Playwright e2e **63 passed**（页级门禁：巡检/对比度/非文本对比在 **Carbon 与 PatternFly 上各跑一遍**、桥接页走 8769 专项巡检，`E2E_KITS=pf,carbon` 可裁剪）；CI 口径 `--cov=core --cov=webui --cov-branch --cov-fail-under=91` 合并 **91.46%**（门禁 91%，webui 独立门禁 85%）
   - **覆盖率口径（P1-3 明确）**：91% 只统计 `core/` + `webui/` 两个包的**分支**覆盖；`app.py` 与 5 个顶层 CLI 不在该口径内（由 `tests/test_entrypoints.py` 单独做 `--help`/编译/import 冒烟），前端 `src/pf/**`、`src/carbon/**`、`src/kit/**` 共 71 个 UI 源文件按设计整目录排除（jsdom 无法验证真实渲染，交给 8 个 Playwright 页级门禁看护），前端单测阈值另设为 55/58/50/53。不要把 91% 读作「全仓行覆盖率」。
 - 20 客户端并发实测约 **2.9k 帧/秒**；2h soak 实测 **7200s / 34,765 次 GI / 内存 +0.64 MB**
 - 互操作语料库：`tests/fixtures/frames/`（合成基线 + `real/` 真机目录），
@@ -367,7 +368,7 @@ iec104-tester/
   各厂商对 104 的**私有映射扩展**需 ≥2 份真实 SCD 样本才能归纳规则，当前按 DOType `cdc` 推断兜底
   （见 [`docs/user_guide.md`](docs/user_guide.md) 第 11 节）。
 
-> 已交付能力（v1.11.0）与后续计划见 [`PROJECT.md`](PROJECT.md)、[`docs/architecture_plan.md`](docs/architecture_plan.md)。
+> 已交付能力（v1.12.0）与后续计划见 [`PROJECT.md`](PROJECT.md)、[`docs/architecture_plan.md`](docs/architecture_plan.md)。
 
 ## 🤝 贡献 / 许可
 

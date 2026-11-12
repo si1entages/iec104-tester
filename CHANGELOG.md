@@ -3,25 +3,63 @@
 本文件记录对外可见的功能/修复；版本号与 `pyproject.toml`、
 `core/version.py`、`webui/frontend/package.json` 保持一致。
 
-<!-- P1 开发中改动（下一版发版时并入正式版本段）：
-- P1-1 安全强制化：非回环无认证拒绝启动（--allow-insecure 显式放行）、
-  /api/* 与 /ws Origin 同源校验、REST 令牌禁用 ?token=、security 日志类别。
-- P1-2 依赖可复现 + SCA：requirements.lock、CI dependency-audit job，
-  发现并修复 aiohttp 3.14.3 的 8 个已知 CVE（升级 3.14.4）。
-- P1-3 门禁补真：i18n 清单升级为失败退出并进 CI、入口层 21 例冒烟、
-  README 覆盖率口径明确、Linux 视觉基线缺口如实标注。
-- P1-4 时标：CP24/CP56 now() 保留亚秒、CP56 century_base 可配（默认 2000）。
-- P1-5：baseline.json 扩面（ci_jobs/覆盖率/e2e/SECURITY 版本表守卫）、
-  4xx 错误响应新增 code/field/request_id。
-- CI 修复：mutation_smoke 适配 WP1 后的 CA 解码锚点（12/12 全杀死）。
-- P1 收口修复（CI run 43203899666 实证的现场缺陷）：e2e-full-flow 起
-  master/slave 两个进程时，`commissioning.db` / `audit.db` 的
-  `PRAGMA journal_mode=WAL` 互锁 → slave 崩 `database is locked`。
-  新增 `core/data/sqlite_open.py`：先 busy_timeout、WAL 竞争时安全降级
-  （WAL 只是性能优化），不改库文件名以免升级后旧数据丢失；
-  补 2 例同路径双连接 + 真实双进程复现测试。
-当前后端 2155 passed / 覆盖率 91.46%、前端 179 passed、ruff/版本守卫全绿。
-docs/baseline.json 仍记录 v1.11.0 发布基线（2121/91.49%），开发期不上移。 -->
+## [1.12.0] — 2026-11-12
+
+> P1 现场纵深五项随本版转正（2026-11-12「工作用调试软件达标评估」结论的执行）。
+> **行为变更**：`--http-host 0.0.0.0` 且未配置认证时**拒绝启动**（退出码 2）——此前仅告警；
+> 隔离测试网确需无认证暴露，请显式加 `--allow-insecure`。
+
+### Added
+
+- **安全强制化（P1-1）**：`--allow-insecure` 显式放行开关；`/api/*` 与 `/ws` 的
+  Origin 同源校验（带 Origin 头的跨源请求 403，阻断跨站 WebSocket 劫持）；
+  `security` 日志类别（认证失败/越权/跨源拒绝独立可过滤，不含令牌本身）。
+- **依赖 SCA 门禁（P1-2）**：CI 新增 `dependency-audit` job——`pip-audit -r
+  requirements.lock` 为硬门禁（任何已知漏洞即失败）+ `npm audit --audit-level=high`
+  报告式（不因镜像未实现 advisory API 误红）；新增 `requirements.lock` 精确锁
+  （可复现构建；跨 Python 版本兼容矩阵仍由宽松下界验证）。
+- **入口层冒烟（P1-3）**：`tests/test_entrypoints.py` 21 例——`app.py` 与 5 个顶层
+  CLI 工具的编译 / `--help` / import 断言（这些脚本约 90KB，本就不在 91% 覆盖率口径内）。
+- **i18n 门禁（P1-3）**：inventory 从「看板不失败退出」升级为失败退出门禁并进 CI；
+  当前清单 0，新增硬编码中文会直接红。
+- **4xx 可诊断性（P1-5）**：错误响应保留 `ok`/`error` 兼容键，纯新增 `code`
+  （missing_field/invalid_field/invalid_json/value_too_long）、`field`、`request_id`；
+  渐进式接入（先 `/api/frames/decode` 与 `/api/master/start`），历史端点按同模式迁移。
+- **数字单一真值源扩面（P1-5）**：`docs/baseline.json` 增 `ci_jobs`；版本守卫新增
+  校验双语 README 覆盖率/e2e 数字、ci.yml 真实 job 数（拆 `jobs:` 块防误配）、
+  SECURITY.md 受支持版本表含当前主版本、覆盖率 ≥ 门禁。
+
+### Changed
+
+- **REST 令牌收口（P1-1）**：`/api/*` 不再接受 `?token=`（只认
+  `Authorization: Bearer` / `X-Auth-Token`），避免令牌落入浏览器历史/代理日志/Referer；
+  `/ws` 握手与公开探测端点 `/api/auth` 保留 query（后者维持 `/app/?token=` 首次导入流程），
+  残余风险在 SECURITY.md 明确标注。
+- **时标亚秒 + 世纪基准可配（P1-4）**：CP24/CP56 `now()` 在 秒×1000 基础上补亚秒余数
+  （原恒为整秒，时钟偏差测量/SOE 排序丢精度）；`CP56Time2a.century_base` 可配
+  （默认 2000，历史行为逐字节不变），`to_epoch()` 与 `to_datetime_str()` 同步跟随。
+  **仍按本机本地时区**：UTC 化会改变线上时标字节，属协议语义变更，待装置互测（user_guide §11）。
+- 覆盖率口径说明（P1-3）：README 明确 91% 只统计 `core/`+`webui/` **分支**覆盖，
+  前端 pf/carbon/kit 71 个源文件按设计排除（由 Playwright 页级门禁看护）；
+  Linux 视觉基线缺口如实标注（tests/e2e/README.md，须 Linux+chromium 真实渲染生成）。
+
+### Fixed
+
+- **aiohttp 8 个已知 CVE（P1-2）**：3.14.3 → **3.14.4**（GHSA-5wr8-gcqf-gqf3 等），
+  pip-audit 复验 0 漏洞；requirements.txt / pyproject.toml 下界同步。
+- **多进程 WAL 竞争（CI run 43203899666 实证的现场缺陷）**：master(8765)/slave(8766)
+  两进程同时打开 `data/commissioning.db` / `data/audit.db` 时
+  `PRAGMA journal_mode=WAL` 互锁 → slave 崩 `database is locked`。新增
+  `core/data/sqlite_open.py`：先 `busy_timeout=5000` 再尝试 WAL、竞争时安全降级
+  保持当前 journal 模式（WAL 只是性能优化）；不改库文件名避免升级丢旧数据。
+  补同路径双连接 2 例 + 真实双进程复现。
+- mutation_smoke 适配 WP1 ASDU 地址长度可配后的 CA 解码锚点（12/12 全杀死）。
+
+- 累计口径：全量后端 **2155 passed / 覆盖率 91.46%**（门禁 91）、前端 typecheck +
+  **179 单测**（V8 门禁 60.72/63.36/54.46/54.33 全过阈）、i18n 门禁 0、
+  Playwright **63 e2e**、ruff 全绿、版本守卫 3 例、mutation 12/12、
+  3 个 workflow YAML 校验通过；CI run `43205150928` **10/10 job 全绿**。
+  `docs/baseline.json` 同步为 v1.12.0 发布基线。
 
 ## [1.11.0] — 2026-11-12
 

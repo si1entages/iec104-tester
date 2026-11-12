@@ -252,6 +252,20 @@ Web UI层: webui/ （静态页 + REST/WebSocket）
   - **拆包**：WP11 不是整体 B=1（9 项里 5 项外部条件本就写「无」）。**11a（B=0 已交付）**：① 统一文档用例数并新增 `docs/baseline.json` 单一真值源 + `tests/test_version_consistency.py` 加用例数断言（实测改错即红、恢复即绿）；② `MasterConfig.auto_clock_sync` 从死配置恢复并在 `master_session` 的 STARTDT_CON 分支真实接线（默认 false 零回归）；`compliance.max_time_skew_s`（原硬编码 300.0）与 `time_tag_format` 提升为配置；③ `tests/test_wp11a_coverage.py` 表驱动 17 例补齐 `master_protocol` 多类型 GI 响应分支；④ `docs/tls.md` 补「按新口径合规结论」（TLS 62351-3 + WP4 审计已验证，**62351-4/-6 应用层认证仍不宣称合规**）+ 冗余双通道切换可观测接入 WP6 面板（活动通道/切换次数/主备连接）。**11b（增强项不设门禁）**：SCD 私有映射/型式试验清单/真机语料以已有开源语料（otfabric cases.tsv、lib60870 golden 帧、离线契约向量）结案，真实样本立增强工单。
   - **验收实测**：全量后端 **2121 passed / 覆盖率 91.49%**、前端 **179 单测**、i18n 0、Playwright **63 e2e**、ruff 全绿；`baseline.json` 守卫能抓用例数漂移。`README.md` / `README_eng.md` 基线统一为 2121 / 91.49% / 179 / 63（发版前补 `wp11Hooks.test.tsx` 15 例，修 v1.11 前端 V8 覆盖率门禁）。**发布阈值维持已达成状态**；11 个 WP 全部按新口径收口。
 
+### v1.12.0（已发布：tag `v1.12.0`，2026-11-12；P1 现场纵深）
+
+> 2026-11-12「作为工作用调试软件是否达标」评估结论的 P1 五项 + 收口修复，随本版全部转正；
+> `docs/baseline.json` 上移为 v1.12.0 发布基线（2155 / 91.46% / 179 / 63 / ci_jobs 9）。
+
+- [x] **P1-1 安全强制化**：非回环（`--http-host 0.0.0.0`）且无 `--auth-token/--auth-config` 时**拒绝启动**（退出码 2，原仅告警）——策略文档与实现对齐；`--allow-insecure` 显式放行（仅限隔离测试网，回环/`--demo`/CI/e2e 零回归）；`origin_check` 中间件对带 Origin 的跨源 `/api/*` 与 `/ws` 回 403（阻断 CSWSH）；REST 禁用 `?token=`（`/ws` 握手与 `/api/auth` 探测保留 query，残余风险 SECURITY.md 标注）；`core/logging_manager.py` 增 `security` 类别，认证失败/越权/跨源拒绝独立留痕（不含令牌）。SECURITY.md 支持版本表更新。新增 4 例（`tests/test_webui_auth.py`）。
+- [x] **P1-2 依赖可复现 + SCA**：新增 `requirements.lock` 精确锁；CI 新增 `dependency-audit` job（`pip-audit` 硬门禁 + `npm audit` 报告式，镜像无 advisory API 不误红）。**首次接入即发现 `aiohttp 3.14.3` 有 8 个已知 CVE（GHSA-5wr8-gcqf-gqf3 等）→ 升级 3.14.4，pip-audit 复验 0 漏洞**；`requirements.txt` / `pyproject.toml` 下界三处同步；SECURITY.md 补依赖安全策略。
+- [x] **P1-3 门禁补真**：`i18n-inventory.mjs` 从看板改为**失败退出**并进 CI（清单当前 0）；新增 `tests/test_entrypoints.py` 21 例（app.py 与 5 个 CLI 的编译/`--help`/import 冒烟——它们本就不在 91% 覆盖率口径内）；README 明确「91% 仅 core+webui 分支覆盖」口径，前端 pf/carbon/kit 71 文件由 Playwright 页级门禁看护；Linux 视觉基线缺口如实标注于 `tests/e2e/README.md`（须 Linux+chromium 真实渲染，不能复制 win32 PNG，属增强项）。
+- [x] **P1-4 时标**：`CP24Time2a.now` / `CP56Time2a.now` 补亚秒余数（原恒为整秒，丢 0-999ms）；`CP56Time2a.century_base` 类级可配（默认 2000 零回归），`to_epoch()` / `to_datetime_str()` 同步跟随；**仍按本机本地时区**——UTC 化会改线上时标字节，属协议语义变更，待装置互测（`docs/user_guide.md` §11「时标与对时」如实标注）。新增 5 例（`tests/test_time_tags_p14.py`）。
+- [x] **P1-5 可诊断性 + 真值源扩面**：`api_error()` 统一 4xx——保留 `ok`/`error` 兼容键，纯新增 `code`（missing_field/invalid_field/invalid_json/value_too_long）/`field`/`request_id`（渐进式，先 `/api/frames/decode` 与 `/api/master/start`）；`baseline.json` 增 `ci_jobs`，版本守卫扩到双语 README 覆盖率/e2e、ci.yml 真实 job 数、SECURITY.md 版本表、覆盖率 ≥ 门禁。新增 1 例。
+- [x] **多进程 WAL 修复（CI 实证的现场缺陷）**：e2e-full-flow 的 master(8765)/slave(8766) 两进程同开 `commissioning.db`/`audit.db`，`PRAGMA journal_mode=WAL` 互锁 → slave 崩 `database is locked`。新增 `core/data/sqlite_open.py`：先 `busy_timeout=5000` 再尝试 WAL、`OperationalError` 时记 WARNING 保持当前 journal 模式（WAL 只是性能优化）；两家 store 复用，**不改库文件名**避免升级丢旧数据；真实双进程复现两进程均 exit 0。新增 2 例。
+- [x] **CI 修复**：mutation_smoke 适配 WP1 后的 CA 解码锚点（`common_addr |= data[pos+i] << (8*i)`，12/12 全杀死）。
+  - **验收实测**：全量后端 **2155 passed / 覆盖率 91.46%**（门禁 91）、前端 **179 单测** + V8 门禁全过阈（60.72/63.36/54.46/54.33）、i18n 门禁 EXIT=0、Playwright **63 e2e**、ruff 全绿、版本守卫 3 例、mutation 12/12、3 个 workflow YAML 校验通过；CI run `43205150928` **10/10 job 全绿**（含新增 dependency-audit 与 i18n gate）。
+
 ### TODO（暂缓，等待外部条件）
 
 - [ ] **C4 真机复测**：真机窗口到位后，按 [`docs/file_transfer_open_items.md`](docs/file_transfer_open_items.md) 的 5 项清单（NOF/SCQ/DEACT/多节/FRQ-SRQ）逐项复测并回填。已完成两轮 lib60870-C v2.4.1 第三方回归（2026-11-07，含 v1.3.0 复测），第三方结论不能替代真机。

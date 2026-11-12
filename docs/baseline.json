@@ -1,7 +1,7 @@
 {
-  "backend_passed": 2121,
+  "backend_passed": 2155,
   "backend_deselected": 4,
-  "coverage_total": 91.49,
+  "coverage_total": 91.46,
   "coverage_gate": 91,
   "frontend_tests": 179,
   "e2e_tests": 63,
@@ -9,5 +9,5 @@
   "i18n_hardcoded": 0,
   "ruff": "clean",
   "reproduce": "python -m pytest tests/ -q --cov=core --cov=webui --cov-branch --cov-report=term-missing --cov-fail-under=91",
-  "note": "单一真值源（WP11a + P1-5 扩面）：由 tests/test_version_consistency.py 校验双语 README 徽章/基线行（后端/前端用例数、覆盖率、e2e）、ci.yml job 数、SECURITY.md 受支持版本表。本文件记录的是 **v1.11.0 已发布基线**；P1 系列为未发版开发改动，用例增量在下一次发版时统一上移，勿在开发期单独改 backend_passed。"
+  "note": "单一真值源（WP11a + P1-5 扩面）：由 tests/test_version_consistency.py 校验双语 README 徽章/基线行（后端/前端用例数、覆盖率、e2e）、ci.yml job 数、SECURITY.md 受支持版本表。本文件记录的是 **v1.12.0 已发布基线**；下一版开发期的用例增量随发版统一上移，勿在开发期单独改 backend_passed。"
 }

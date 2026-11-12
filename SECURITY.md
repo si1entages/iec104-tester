@@ -4,9 +4,9 @@
 
 | Version | Supported |
 |------|-----------|
-| 1.11.x | ✅ |
-| 1.10.x | ✅ (security fixes) |
-| ≤ 1.9 | ❌ |
+| 1.12.x | ✅ |
+| 1.11.x | ✅ (security fixes) |
+| ≤ 1.10 | ❌ |
 
 ## Reporting a vulnerability
 

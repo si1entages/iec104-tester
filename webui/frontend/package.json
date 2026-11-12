@@ -1,7 +1,7 @@
 {
   "name": "iec104-tester-webui",
   "private": true,
-  "version": "1.11.0",
+  "version": "1.12.0",
   "type": "module",
   "description": "IEC104 Tester Web UI (Vite + React 19 + TypeScript 7 + Ant Design 6)",
   "scripts": {
