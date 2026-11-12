@@ -3,6 +3,20 @@
 本文件记录对外可见的功能/修复；版本号与 `pyproject.toml`、
 `core/version.py`、`webui/frontend/package.json` 保持一致。
 
+<!-- P1 开发中改动（下一版发版时并入正式版本段）：
+- P1-1 安全强制化：非回环无认证拒绝启动（--allow-insecure 显式放行）、
+  /api/* 与 /ws Origin 同源校验、REST 令牌禁用 ?token=、security 日志类别。
+- P1-2 依赖可复现 + SCA：requirements.lock、CI dependency-audit job，
+  发现并修复 aiohttp 3.14.3 的 8 个已知 CVE（升级 3.14.4）。
+- P1-3 门禁补真：i18n 清单升级为失败退出并进 CI、入口层 21 例冒烟、
+  README 覆盖率口径明确、Linux 视觉基线缺口如实标注。
+- P1-4 时标：CP24/CP56 now() 保留亚秒、CP56 century_base 可配（默认 2000）。
+- P1-5：baseline.json 扩面（ci_jobs/覆盖率/e2e/SECURITY 版本表守卫）、
+  4xx 错误响应新增 code/field/request_id。
+- CI 修复：mutation_smoke 适配 WP1 后的 CA 解码锚点（12/12 全杀死）。
+当前后端 2153 passed / 覆盖率 91.52%、前端 179 passed、ruff/版本守卫全绿。
+docs/baseline.json 仍记录 v1.11.0 发布基线（2121/91.49%），开发期不上移。 -->
+
 ## [1.11.0] — 2026-11-12
 
 ### Added
