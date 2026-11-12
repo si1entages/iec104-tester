@@ -80,9 +80,12 @@ MUTATIONS = [
              "cot = cot_byte & 0x3F", "cot = cot_byte & 0x7F"),
     Mutation("SQ=1 后续对象 IOA 不递增", "core/protocol/asdu.py",
              "ioa = base_ioa + i if sq else base_ioa", "ioa = base_ioa"),
+    # WP1 起 CA 长度可配，解码改为按 ca_length 逐字节累加（见 asdu.py
+    # ASDU.decode / decode_header 两处）。锚点随之更新；replace(..., 1) 只改
+    # 第一处（decode），等价于改动前「公共地址字节序错误」变异的覆盖面。
     Mutation("公共地址字节序错误", "core/protocol/asdu.py",
-             "common_addr = data[pos] | (data[pos + 1] << 8)",
-             "common_addr = data[pos] | (data[pos + 1] << 7)"),
+             "common_addr |= data[pos + i] << (8 * i)",
+             "common_addr |= data[pos + i] << (7 * i)"),
 ]
 
 
